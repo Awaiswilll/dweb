@@ -1,286 +1,292 @@
-# dWeb Decentralized Browser — Full Business Plan
+# dweb — Full Business Plan
 
-## 1. Concept
+## The Product
 
-A lightweight, privacy-first browser with an embedded decentralized stack (domains, hosting, storage, email, sync) that activates per-service on-demand. Works on the surface web by default; decentralized infra is additive with a one-click toggle to shift any service to major cloud providers (AWS, GCP, Azure, Netlify, Vercel).
+A desktop app that turns any machine into a **full-stack web server accessible worldwide via P2P**, with **free AI agents** that build, deploy, and manage everything.
 
-**Key slogan:** *The browser that hosts itself.*
-
----
-
-## 2. Market Landscape & Competitors
-
-| Browser | Decentralized? | Built-in Hosting? | Domain System? | Lightweight? |
-|---|---|---|---|---|
-| **Brave** | Partial (IPFS node) | No | No | No (~500MB) |
-| **TOR Browser** | Full (onion routing) | No | .onion only | Partial |
-| **Beaker** (abandoned) | Full (Dat/Hypercore) | Yes | No | Yes (dead) |
-| **LibreWolf** | No | No | No | Yes |
-| **Opera** | No (has wallet) | No | No | No |
-| **Freenet/ZeroNet** | Full | Yes | .freenet/.bit | No (separate apps) |
-
-**Key gap identified:** No existing browser bundles domains + hosting + privacy into one lightweight download with surface-web-first UX and user-owned infrastructure.
+**One sentence:** *Your machine is your cloud. AI builds your apps. P2P publishes them to the world.*
 
 ---
 
-## 3. Target Audience
+## 1. What It Does
 
-| Segment | Need | Willing to Pay? |
+### Host Any Web Architecture Locally
+
+| Architecture | Components | Resource Usage |
 |---|---|---|
-| **Privacy-conscious users** | Control over data, no big tech | Donate/subscribe |
-| **Indie developers** | Easy self-hosting, free domains | Yes ($3-10/mo) |
-| **Small orgs/NGOs** | Low-cost hosting, no vendor lock | Yes ($10-50/mo) |
-| **Web3/crypto users** | ENS domains, IPFS hosting | Yes (gas fees) |
-| **Educators/students** | Free site hosting, collaboration | No (free tier) |
+| Static site | Any HTML/CSS/JS | ~10MB RAM |
+| PHP + MySQL | Apache/Nginx + PHP 8 + MySQL | ~150MB RAM |
+| Node.js + MongoDB | Express/Fastify + Mongo | ~200MB RAM |
+| Python + Postgres | FastAPI/Flask + PostgreSQL | ~250MB RAM |
+| Go + Redis | Gin/Fiber + Redis | ~100MB RAM |
+| Ruby on Rails | Rails + SQLite/Postgres | ~300MB RAM |
+| Docker compose | Any containerized stack | Variable |
+| WordPress | PHP + MySQL + WP-CLI | ~200MB RAM |
 
----
+All run **on the user's machine**. All **accessible from anywhere in the world** via the dweb P2P layer.
 
-## 4. Core Architecture
-
-```
-┌──────────────────────────────────────────────┐
-│              dWeb Browser Shell               │
-│         Fork of LibreWolf (Firefox ESR)       │
-│                                               │
-│   ┌──────────┬──────────┬─────────────────┐   │
-│   │ Surface  │  dWeb    │  TOR/Onion      │   │
-│   │ Web      │  (IPFS/  │  (optional      │   │
-│   │ (Engine) │  Hyper)  │   toggle)       │   │
-│   └──────────┴──────────┴─────────────────┘   │
-│                                               │
-│   ┌───────────────────────────────────────┐   │
-│   │  Service Manager (built-in panel)     │   │
-│   │                                       │   │
-│   │  ┌────────┐ ┌────────┐ ┌────────┐    │   │
-│   │  │ dHost  │ │dDomain │ │ dMail  │    │   │
-│   │  │ Host   │ │ .dweb  │ │ Email  │    │   │
-│   │  │ Sites  │ │ Domains│ │ Server │    │   │
-│   │  └───┬────┘ └───┬────┘ └───┬────┘    │   │
-│   │  ┌───┴────┐ ┌───┴────┐ ┌───┴────┐    │   │
-│   │  │ dStore │ │ dSync  │ │ More…  │    │   │
-│   │  │ Files  │ │  Sync  │ │(future)│    │   │
-│   │  └───┬────┘ └───┬────┘ └────────┘    │   │
-│   │      └──────┬───┘                     │   │
-│   │             ▼                          │   │
-│   │  [ Cloud Toggle ] ← drag to switch    │   │
-│   │  Local ──► AWS / GCP / Azure / Vercel │   │
-│   └───────────────────────────────────────┘   │
-└──────────────────────────────────────────────┘
-```
-
-### Key Design Principles
-
-1. **Surface web is default** — not a TOR-only browser, works like Chrome until you need more
-2. **Zero infra by default** — services are ~1MB stubs that download the full component only when activated
-3. **No blockchain required** — `.dweb` domains use DHT (no gas fees, no crypto wallet needed)
-4. **User-owned infra** — services run on user's machine OR their own cloud account; project never manages servers
-
----
-
-## 5. Service Breakdown
-
-### 5.1 dHost — Decentralized Static Hosting
-
-**How it works:**
-- Right-click any folder → "Host with dHost"
-- A local Node.js sidecar serves the folder (HTTP + IPFS)
-- Site is accessible at `http://localhost:PORT` and `dweb://username.dweb`
-- One-click "Publish" pins to IPFS and announces to DHT
-
-**Local requirements:** ~50MB RAM, disk space of hosted content
-**Cloud toggle:** Exports as S3 static site / Netlify deploy / Vercel project
-
-### 5.2 dDomain — Free Decentralized Domains
-
-**How it works:**
-- Register `username.dweb` free — signed via DHT (no blockchain)
-- Domain resolves via embedded DHT resolver in the browser
-- Point to localhost for development, or any URL for production
-- Optional: import `.eth` (ENS) or `.hns` (Handshake) domains
-
-**Revenue model:**
-- `.dweb` — free forever
-- `.eth` / `.hns` registration — small markup over gas costs
-
-### 5.3 dMail — Encrypted Email Server
-
-**How it works:**
-- Built-in SMTP/IMAP server runs locally
-- Encryption via PGP (keys generated on first run)
-- Syncs across devices via DHT (encrypted payloads)
-- No central server — your machine is the mail server
-
-**Local requirements:** ~200MB RAM, 1GB+ storage
-**Cloud toggle:** Forward to SES / ProtonMail Bridge / custom SMTP relay
-
-### 5.4 dStore — File Sharing & Storage
-
-**How it works:**
-- Drag file to dStore → generates shareable link
-- Files served from your machine (P2P)
-- Optional: pin to IPFS/Filecoin for permanent availability
-
-**Cloud toggle:** Direct upload to S3 / Backblaze B2 / Wasabi
-
-### 5.5 dSync — Browser Sync (No Big Tech)
-
-**How it works:**
-- Bookmarks, passwords, settings synced via encrypted P2P (DHT relay)
-- No Google/Firefox/Apple account required
-- Sync across devices using your dweb identity
-
-**Cloud toggle:** Firebase / Supabase as relay backend
-
----
-
-## 6. Cloud Toggle Architecture
-
-Every service has a **gear icon** → "Shift to Cloud":
+### Publish to the World via P2P
 
 ```
-[Running Locally] ─── drag ──► [Cloud Provider Selection]
-                                    ├── Amazon Web Services
-                                    │    ├── S3 (dHost, dStore)
-                                    │    ├── SES (dMail)
-                                    │    └── EC2 (heavy services)
-                                    ├── Google Cloud
-                                    │    ├── Cloud Storage
-                                    │    ├── Cloud Run
-                                    │    └── Firebase (dSync)
-                                    ├── Microsoft Azure
-                                    │    ├── Blob Storage
-                                    │    └── Functions
-                                    ├── Netlify (dHost)
-                                    └── Vercel (dHost)
+User's Machine                     Any dweb User (Global)
+┌──────────────────────┐           ┌──────────────────────┐
+│  Node.js + React     │           │  Opens in dweb app   │
+│  + Postgres          │  P2P/DHT  │                      │
+│                      │◄─────────►│  dweb://myapp.dweb  │
+│  dweb serve ./app    │  direct   │                      │
+│  ↓                   │  connect  │  Full app works:     │
+│  dweb://myapp.dweb   │           │  ├─ UI loads         │
+│  (global DHT)        │           │  ├─ API calls work   │
+│                      │           │  └─ DB queries work  │
+└──────────────────────┘           └──────────────────────┘
 ```
 
-**Implementation:**
-- User pastes their API key / credentials
-- Browser uploads config + content to the cloud provider
-- Service continues working — now from cloud instead of local
-- Local sidecar stops; no user-facing change
-- Templates/scripts for each provider shipped in the browser's `provider-templates/` directory
+### AI Agents Build Everything for You
 
----
+Free, local AI (Ollama + Qwen2.5-Coder) that understands natural language:
 
-## 7. Build Plan (20 Weeks, 3-Person Team)
-
-| Phase | Duration | Tasks | Deliverable |
-|---|---|---|---|
-| **P1: Fork & Foundation** | 2 wk | Fork LibreWolf GitHub repo, rebrand to dweb, set up CI/CD, modify about: pages, add dweb branding | Custom dweb browser build |
-| **P2: Service Manager** | 4 wk | Build service panel UI (HTML/JS overlay), sidecar runner (Node.js), service lifecycle (start/stop/restart), logging UI | Service Manager panel |
-| **P3: dHost** | 3 wk | Local HTTP server, IPFS pinning integration, .dweb URL resolution, right-click → Host | dHost working locally |
-| **P4: Cloud Toggle** | 2 wk | Provider template system, AWS S3 deploy script, Netlify API integration, settings UI for keys | Cloud shift working for dHost |
-| **P5: dDomain + dMail** | 6 wk | DHT-based domain registry, SMTP/IMAP server, PGP encryption, email client UI | dDomain + dMail working |
-| **P6: dStore + dSync** | 2 wk | File sharing UI, P2P sync protocol, cross-device identity | dStore + dSync working |
-| **P7: Polish & Ship** | 1 wk | Installer (Windows/Mac/Linux), auto-updater, bug fixes, documentation | Release v1.0.0 |
-
-**Total effort: ~480 person-days (3 people × 20 weeks)**
-
----
-
-## 8. Revenue Model
-
-| Revenue Stream | Target Customer | Price | Margin |
-|---|---|---|---|
-| **Browser download** | Everyone | Free | — |
-| **`.dweb` domains** | All users | Free | — |
-| **Premium domains (`.eth`, `.hns`)** | Web3 users | $5-20/yr | 10-20% |
-| **Paid storage (Filecoin/Arweave pinning)** | Power users | $2-10/mo | 30-50% |
-| **dMail premium (10GB+)** | Professionals | $3-8/mo | 60-80% |
-| **Cloud template marketplace** | Developers | Free/Commission | 10% |
-| **Enterprise white-label** | Organizations | $500-5000/mo | 80-90% |
-| **Bandwidth marketplace (future)** | All users | P2P relay credits | 5% |
-
-**Estimated break-even:** ~2,000 paying users at $5/mo average ($10k MRR)
-
----
-
-## 9. Competitive Advantages Summary
-
-| Against | dWeb Advantage |
+| Prompt | Result |
 |---|---|
-| **Brave** | 5x lighter, no crypto bloat, real decentralized hosting |
-| **TOR Browser** | Surface web works normally; TOR is optional toggle |
-| **Beaker (dead)** | Alive + maintained + free domains + cloud toggle |
-| **Freenet/ZeroNet** | One app, works with regular internet |
-| **Chrome/Firefox** | User owns their data AND gets free infra |
-| **Any browser** | "Host this page" is a built-in button |
+| "Build a blog with auth" | Full Node.js/React/PG app → running → published |
+| "Create a REST API for tasks" | Express API + MongoDB → running → published |
+| "Set up WordPress" | WP install + DB → running → published |
+| "Make a real-time chat app" | WebSocket server + React → running → published |
+| "Design an e-commerce DB" | Schema + migrations → running |
+| "Deploy to the world" | P2P publish → accessible globally |
+
+**No API keys. No internet required. 100% local.**
 
 ---
 
-## 10. Risk Mitigation
+## 2. Market & Competition
 
-| Risk | Mitigation |
+### Direct Competitors
+
+| Product | Type | Local Hosting? | P2P Global? | AI Builder? | Cost |
+|---|---|---|---|---|---|
+| **LocalWP** | WordPress dev tool | ✅ PHP/MySQL | ❌ | ❌ | Free/$150 |
+| **XAMPP / Laragon** | Local server stack | ✅ Various | ❌ | ❌ | Free |
+| **Docker Desktop** | Containers | ✅ Any | ❌ | ❌ | Free/Paid |
+| **Replit** | Cloud IDE | ❌ (cloud) | ✅ (via URL) | ✅ (limited) | $0-25/mo |
+| **Vercel / Netlify** | Cloud hosting | ❌ | ✅ | ❌ | Free/Paid |
+| **Beaker (dead)** | P2P browser | ✅ Static | ✅ | ❌ | Free |
+| **Headless** | AI dev tool | ✅ (local) | ❌ | ✅ CLI | $20/mo |
+| **dweb** | **All-in-one** | **✅ Full stack** | **✅ P2P** | **✅ Free, local** | **Free** |
+
+### The Gap
+
+No product today combines:
+1. **Full local web stack** (any language, any DB)
+2. **P2P global access** (no cloud bill)
+3. **Free AI agent** that builds + deploys
+
+dweb is the first to bundle all three.
+
+### Target Users
+
+| User | Problem | Why dweb |
+|---|---|---|
+| **Indie developer** | Hosting costs $20-100/mo, DevOps overhead | Free hosting, AI deploys |
+| **Hobbyist** | Wants to share a project but doesn't know DevOps | "Describe → Built → Published" |
+| **Student** | Needs a portfolio site, no money for hosting | Free `.dweb` domain + free hosting |
+| **Agency** | Client demos, staging sites | Local hosting, one-click share |
+| **Privacy user** | Doesn't trust cloud providers | 100% self-hosted |
+| **Non-technical** | Wants a website but can't code | "Build me a site" → AI does it |
+
+---
+
+## 3. Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     dweb Desktop App (Tauri)                 │
+│                                                             │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │  AI Agent Engine (Ollama + Qwen2.5-Coder)            │   │
+│  │  ┌──────────┐ ┌──────────┐ ┌──────────────────┐     │   │
+│  │  │ Scaffold │ │ Generate │ │ Deploy & Publish │     │   │
+│  │  │ Projects │ │ Code/DB  │ │ to P2P           │     │   │
+│  │  └──────────┘ └──────────┘ └──────────────────┘     │   │
+│  └──────────────────────────────────────────────────────┘   │
+│                                                             │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │  Stack Manager (install, run, monitor)               │   │
+│  │  ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐ ┌──────────┐  │   │
+│  │  │Node  │ │Python│ │ PHP  │ │ Go   │ │ Ruby     │  │   │
+│  │  │ +NPM │ │+Pip  │ │+Com- │ │+Mod  │ │+Gem      │  │   │
+│  │  │      │ │      │ │poser │ │      │ │          │  │   │
+│  │  └──────┘ └──────┘ └──────┘ └──────┘ └──────────┘  │   │
+│  │  ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐ ┌──────────┐  │   │
+│  │  │MySQL │ │Post- │ │Mongo │ │Redis │ │ SQLite   │  │   │
+│  │  │      │ │gres  │ │      │ │      │ │          │  │   │
+│  │  └──────┘ └──────┘ └──────┘ └──────┘ └──────────┘  │   │
+│  └──────────────────────────────────────────────────────┘   │
+│                                                             │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │  P2P Publishing Layer (HyperDHT + Hypercore)         │   │
+│  │  ┌──────────┐ ┌──────────┐ ┌──────────────────┐     │   │
+│  │  │ DHT      │ │ P2P      │ │ NAT Traversal    │     │   │
+│  │  │ Registry │ │ Proxy    │ │ (STUN/UPnP/TURN) │     │   │
+│  │  └──────────┘ └──────────┘ └──────────────────┘     │   │
+│  │  ┌──────────────────────────────────────────────┐   │   │
+│  │  │ Global .dweb Domain Resolution               │   │   │
+│  │  └──────────────────────────────────────────────┘   │   │
+│  └──────────────────────────────────────────────────────┘   │
+│                                                             │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │  Cloud Toggle (optional)                             │   │
+│  │  One-click: Local → AWS/GCP/Azure/Netlify/Vercel    │   │
+│  └──────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+
+Access: Only through the dweb app (dweb:// protocol)
+         Regular browsers cannot reach P2P-hosted content
+         Both host and viewer must have dweb installed
+```
+
+---
+
+## 4. User Flow
+
+### Flow A: AI Builds + Publishes (Non-Technical User)
+
+```
+1. Install dweb app (2MB download)
+2. Open AI Agent panel
+3. Type: "Build me a landing page for my coffee shop"
+4. AI:
+   ├── Scaffolds HTML/CSS/JS project
+   ├── Generates responsive design
+   ├── Adds contact form
+   ├── Starts local server
+   └── Publishes to dweb://coffee-shop.dweb (global)
+5. Share URL with anyone → they open in dweb app → site loads from your machine
+```
+
+**Time: ~1 minute. Cost: $0.**
+
+### Flow B: Developer Hosts Full-Stack App
+
+```
+1. Developer builds Node.js + React + Postgres app locally
+2. Runs: dweb serve ./my-app
+3. dweb:
+   ├── Detects Node.js project
+   ├── Starts app on port 3000
+   ├── Proxies through P2P layer
+   ├── Registers my-app.dweb on global DHT
+   └── App is live at dweb://my-app.dweb
+4. Anyone with dweb can now use the full app (UI + API + DB)
+```
+
+### Flow C: One-Click to Cloud
+
+```
+1. App is running locally, accessible via P2P
+2. User clicks "Shift to Cloud"
+3. Selects AWS / Netlify / Vercel
+4. Pastes API key
+5. dweb deploys the app to cloud provider
+6. App now accessible via regular HTTPS (any browser)
+7. Same .dweb domain still works
+```
+
+---
+
+## 5. Business Model
+
+| Tier | Price | What You Get |
+|---|---|---|
+| **Free** | $0 | All architectures, AI agents, `.dweb` domain, P2P hosting |
+| **Relay** | $3/mo | Keep apps online when your machine is off (cloud cache) |
+| **Cloud Shift** | $5-10/mo | Managed deployment to AWS/GCP with template library |
+| **Pro** | $15/mo | Relay + Cloud Shift + Priority AI (larger models) |
+| **Enterprise** | Custom | Private DHT cluster, white-label, on-prem deployment |
+
+### Revenue Streams
+
+| Stream | Details | Projected Margin |
+|---|---|---|
+| Relay subscriptions | 5% of free users convert | 80% |
+| Cloud Shift | 2% of free users convert | 60% |
+| Premium domains (`.eth`, `.hns`) | Small markup on registration | 15% |
+| Enterprise licenses | Custom DHT + white-label | 90% |
+| AI model marketplace | Community templates/themes | 30% |
+
+**Break-even: ~1,500 paying users at $8/mo average ($12k MRR)**
+
+---
+
+## 6. Build Roadmap (6 Months, 2-3 People)
+
+| Phase | Duration | Output |
+|---|---|---|
+| **Stack Manager** | 4 wk | Runtime installer (Node, Python, PHP, Go, Ruby), database manager (MySQL, PG, Mongo, Redis), process lifecycle, port management |
+| **P2P Layer** | 4 wk | Global DHT client, peer discovery, NAT traversal (STUN/UPnP), encrypted P2P proxy from dweb:// to localhost |
+| **AI Agent Engine** | 6 wk | Ollama integration, project scaffolding, code generation, DB schema generation, deployment agent |
+| **Architecture Templates** | 4 wk | Pre-built templates for all stacks (Node+React+PG, PHP+MySQL, Python+FastAPI+PG, Go+Redis, Ruby+Rails, WordPress) |
+| **Desktop App (Tauri)** | 4 wk | System tray, service panel, dweb:// browser view, AI chat panel, settings |
+| **Domain System** | 2 wk | DHT-based `.dweb` registry, name resolution, domain management UI |
+| **Cloud Toggle** | 2 wk | AWS S3/EC2, Netlify, Vercel deployment templates |
+| **Ship + Docs** | 2 wk | Installers (Windows/Mac/Linux), website, tutorials, demo videos |
+
+**Total: ~28 weeks (6.5 months)**
+
+---
+
+## 7. Competitive Moat
+
+| Barrier | How dweb Builds It |
 |---|---|
-| Browser engine maintenance cost | Fork LibreWolf (Firefox ESR) — minimal upstream changes needed |
-| Adoption chicken-and-egg | Bootstrap with IPFS public gateways; seed with demo sites |
-| Free domain abuse / spam | Proof-of-work registration + reputation system for `.dweb` |
-| P2P hosting reliability | User sets uptime preference; cloud toggle for production use |
-| Legal exposure from user content | Clear TOS; cloud toggle shifts liability to cloud provider's TOS |
-| Funding | Bootstrap as open-source; donations + paid premium features after MVP |
+| **Network effects** | More hosts → more content → more viewers install dweb → more hosts |
+| **AI training data** | Thousands of apps built on dweb → better AI scaffolding |
+| **DHT registry** | First-mover in `.dweb` namespace — users own their domains |
+| **Template library** | Community-contributed stack templates → flywheel |
+| **Local-first habit** | "Develop locally, publish globally" becomes default workflow |
 
 ---
 
-## 11. Tech Stack
+## 8. Risks & Mitigations
+
+| Risk | Severity | Mitigation |
+|---|---|---|
+| P2P unreliable for production | High | Cloud Toggle as escape hatch |
+| AI code quality varies | Medium | User reviews + template validation |
+| Adoption chicken-and-egg | High | Seed with developer community (HN, GitHub) |
+| Legal: P2P hosts illegal content | Medium | User responsibility model; clear ToS |
+| NAT traversal fails for some users | Medium | TURN relay (paid tier) |
+| Maintaining all runtimes | Medium | Use system-installed versions; provide install scripts |
+
+---
+
+## 9. Tech Stack
 
 | Layer | Technology |
 |---|---|
-| Browser engine | **Firefox ESR** (via LibreWolf fork) |
-| Sidecar runtime | **Node.js 20+** (bundled) |
-| P2P networking | **Hypercore/HyperDHT** (via Holepunch) |
-| IPFS | **Kubo** (lightweight daemon) |
-| Domain resolution | **DHT** (custom `.dweb` resolver) |
-| Email | **WildDuck** + **OpenPGP.js** |
-| UI | **React** (in-browser overlay) |
-| Cloud SDKs | **AWS SDK, GCP SDK, Azure SDK** (lazy-loaded) |
-| Storage | **LevelDB** (local), **S3-compatible** (cloud) |
-| Build system | **mozilla-central** build scripts (MOZBUILD) |
+| Desktop shell | **Tauri** (Rust backend, web UI frontend) |
+| AI engine | **Ollama** + **Qwen2.5-Coder 7B** (local, free) |
+| P2P networking | **HyperDHT** + **Hypercore** (Holepunch) |
+| NAT traversal | STUN (built-in), UPnP, TURN (optional relay) |
+| Domain system | Custom DHT namespace (`.dweb`) |
+| Local runtimes | Node.js, Python, PHP, Go, Ruby (auto-installed) |
+| Local databases | MySQL, PostgreSQL, MongoDB, Redis, SQLite |
+| Container support | Docker (if present on system) |
+| Frontend | React (in-app panels + dweb:// browser) |
+| Packaging | NSIS (Win), DMG (Mac), AppImage (Linux) |
 
 ---
 
-## 12. Folder Structure
+## 10. Summary
 
-```
-dweb/
-├── browser/                  # LibreWolf fork (Firefox ESR)
-│   ├── browser/              # Firefox browser code
-│   ├── toolkit/              # Firefox toolkit
-│   └── mozconfig             # Build config
-├── services/                 # Service Manager & sidecars
-│   ├── service-manager/      # Core service panel UI + lifecycle
-│   ├── dhost/                # Static hosting sidecar
-│   ├── ddomain/              # Domain registry + DHT resolver
-│   ├── dmail/                # Email server sidecar
-│   ├── dstore/               # File sharing sidecar
-│   └── dsync/                # Sync protocol
-├── cloud-toggle/             # Cloud provider templates
-│   ├── aws/                  # S3, SES, EC2 templates
-│   ├── gcp/                  # Cloud Storage, Cloud Run
-│   ├── azure/                # Blob Storage, Functions
-│   ├── netlify/              # Netlify deploy template
-│   └── vercel/               # Vercel deploy template
-├── pkg/                      # Packaging & installers
-│   ├── windows/              # NSIS installer
-│   ├── macos/                # DMG package
-│   └── linux/                # AppImage / Flatpak
-└── docs/                     # Documentation
-    ├── ARCHITECTURE.md
-    ├── BUILD.md
-    └── USER-GUIDE.md
-```
+| Aspect | Rating | Notes |
+|---|---|---|
+| Innovation | 9/10 | No product bundles local stack + P2P + AI agents |
+| Feasibility | 7/10 | Complex but achievable with 2-3 people in 6 months |
+| Market need | 8/10 | Developers want free hosting; non-devs want AI-built sites |
+| Monetization | 6/10 | Relay/cloud shift are proven models; volumes unknown |
+| Competition | 7/10 | First-mover in this specific combo |
+| **Overall** | **7.5/10** | Viable if execution is focused on P2P + AI as the hook |
 
 ---
 
-## 13. Call to Action
-
-**Next steps:**
-1. Set up the LibreWolf fork build environment
-2. Build the Service Manager MVP (panel UI + process lifecycle)
-3. Ship dHost with `localhost` serving + right-click integration
-4. Add Cloud Toggle for AWS S3
-5. Release alpha to 100 testers
-
----
-
-*Document version: 1.0 — June 2026*
+*Version 2.0 — June 2026*

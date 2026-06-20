@@ -1,142 +1,206 @@
-# dweb — Internet-Scale Peer-to-Peer Hosting App
+# dweb — Decentralized Web Platform
 
-A lightweight desktop app that lets you **host content on your machine** and **anyone in the world running dweb can access it** — no servers, no cloud, no domain registrar. Just P2P over the internet.
+A desktop app that lets you **build, host, and serve any web architecture from your own machine — accessible to the entire world via P2P.** Built-in AI agents help you create everything.
 
 ## Core Concept
 
 ```
-Machine A (host, Tokyo)           Machine B (viewer, London)
-┌─────────────────────┐           ┌─────────────────────┐
-│    dweb app         │           │    dweb app         │
-│                     │  internet │                     │
-│  dweb serve ./site  │◄──────────│  Opens dweb://      │
-│                     │  P2P      │  userA-site.dweb    │
-│  Registers domain   │  direct   │                     │
-│  via DHT (global)   │  connect  │  Resolves domain    │
-│                     │           │  via DHT → peer IP  │
-└─────────────────────┘           └─────────────────────┘
+┌──────────────────────────────────────────────────┐
+│                   dweb App                        │
+│                                                   │
+│  ┌──────────────────────┐  ┌──────────────────┐  │
+│  │  Web Architectures   │  │  AI Build Agents  │  │
+│  │  (deploy locally)    │  │  (free, built-in) │  │
+│  │                      │  │                   │  │
+│  │  • Static site       │  │  • "Build me a   │  │
+│  │  • PHP + MySQL       │  │    blog with auth"│  │
+│  │  • Node.js + MongoDB │  │  • "Create an API│  │
+│  │  • Python + Postgres │  │    for my data"   │  │
+│  │  • Go + Redis        │  │  • "Deploy this  │  │
+│  │  • Ruby on Rails     │  │    to the world" │  │
+│  │  • Rust backend      │  │  • "Add a        │  │
+│  │  • Docker containers │  │    database"     │  │
+│  │  • Custom stack      │  │                   │  │
+│  └──────────┬───────────┘  └────────┬──────────┘  │
+│             │                       │              │
+│             └───────┬───────────────┘              │
+│                     ▼                              │
+│  ┌─────────────────────────────────────────────┐   │
+│  │         P2P Publishing Layer                │   │
+│  │  (Global DHT → dweb://your-site.dweb)       │   │
+│  │  Accessible from ANY dweb user worldwide    │   │
+│  └─────────────────────────────────────────────┘   │
+│                                                   │
+│  ┌─────────────────────────────────────────────┐   │
+│  │         Cloud Toggle (optional)             │   │
+│  │  One-click: Local → AWS/GCP/Azure/VPS       │   │
+│  └─────────────────────────────────────────────┘   │
+└──────────────────────────────────────────────────┘
 
-           │                              │
-           └────── Both need dweb ───────┘
-           No regular browser can reach this content.
+        Your machine = Your server = Your cloud
 ```
-
-**The dweb app IS the internet for hosted content.** No DNS, no cloud, no hosting bill. One app, both server and client.
 
 ---
 
-## How It Works (End to End)
+## What You Can Host (All Locally, Accessible Globally)
 
-1. **User A** installs dweb, runs `dweb serve ./my-site`
-2. dweb starts a P2P server on User A's machine and registers `my-site.dweb` on a global DHT
-3. **User B** installs dweb, types `dweb://my-site.dweb`
-4. dweb queries the global DHT → finds User A's IP → opens direct P2P connection
-5. Site loads from User A's machine directly to User B — **no intermediary**
+| Architecture | Built-in Stack | AI Can Build It? |
+|---|---|---|
+| **Static site** | Any HTML/CSS/JS folder | ✅ "Build a landing page" |
+| **PHP site** | PHP 8 + MySQL / MariaDB | ✅ "Build a CMS" |
+| **Node.js app** | Express / Fastify + MongoDB / SQLite | ✅ "Build a REST API" |
+| **Python web app** | FastAPI / Flask + PostgreSQL | ✅ "Build a dashboard" |
+| **Go backend** | Gin / Fiber + Redis | ✅ "Build a URL shortener" |
+| **Ruby app** | Rails / Sinatra + SQLite | ✅ "Build a blog" |
+| **Full stack** | Any combo above | ✅ "Build a SaaS boilerplate" |
+| **Docker** | Run any containerized app | ✅ "Deploy this compose file" |
+| **WordPress** | PHP + MySQL + WP-CLI | ✅ "Install WordPress" |
+| **Database only** | MySQL / Postgres / MongoDB / Redis | ✅ "Set up a DB for me" |
 
 ---
 
-## Key Architecture
+## Built-in AI Build Agents (Free)
+
+The AI agents understand natural language and can:
+
+| Agent | Capability |
+|---|---|
+| **Site Builder** | "Create a blog with user authentication and an admin panel" → builds full stack locally |
+| **API Builder** | "Build a REST API for a todo app with Postgres" → generates code + deploys |
+| **DB Architect** | "Design a schema for an e-commerce platform" → creates DB + migrations |
+| **Deployment Agent** | "Make my local site accessible to the world" → configures P2P publishing |
+| **Stack Advisor** | "I need a real-time chat app, what stack should I use?" → recommends + scaffolds |
+
+**Example workflow:**
 
 ```
-                    ┌───────────────────────┐
-                    │   Global DHT Network   │
-                    │  (domain → IP lookup)  │
-                    └───────┬───────┬───────┘
-                            │       │
-                    domain lookup  announce
-                            │       │
-                    ┌───────┴──┐ ┌──┴────────┐
-                    │ User B   │ │ User A    │
-                    │ dweb app │ │ dweb app  │
-                    │ Viewer   │ │ Host      │
-                    │          │ │           │
-                    │ dweb://  │ │ dweb serve│
-                    │ site.dweb│ │ ./site    │
-                    └────┬─────┘ └─────┬─────┘
-                         │              │
-                         └──P2P direct──┘
-                         (via HyperDHT/Hypercore)
+User: "Build me a project management app with user login, teams, and task boards."
+
+AI Agent:
+  1. Scaffolds Node.js + React + PostgreSQL project
+  2. Sets up authentication (JWT + bcrypt)
+  3. Creates database schema (users, teams, projects, tasks)
+  4. Generates REST API endpoints
+  5. Builds React frontend with drag-and-drop boards
+  6. Starts local server
+  7. Publishes to dweb://my-pm-app.dweb (accessible worldwide)
+
+Time: ~2 minutes
+Cost: $0 (no API key needed — runs local models via Ollama)
 ```
 
-## Core Features
+---
 
-| Feature | What It Does |
+## How Publishing Works (Global Access)
+
+```
+Your Machine                        Any dweb User (Worldwide)
+┌────────────────────┐              ┌────────────────────┐
+│  dweb serve ./app  │              │  Opens             │
+│  └─ Port 3000      │              │  dweb://my-app    │
+│                    │   P2P/DHT    │  ┌──────────────┐  │
+│  Registers on      │◄────────────►│  │ React UI     │  │
+│  global DHT        │              │  │  ↓ calls     │  │
+│  my-app.dweb → IP  │              │  │ API at       │  │
+│                    │              │  │ /api/tasks   │  │
+│  Local stack:      │              │  └──────────────┘  │
+│  ├─ React (port 80)│              │                    │
+│  ├─ Node (port 3001)              │  All traffic goes  │
+│  ├─ Postgres (5432)│              │  P2P through your  │
+│  └─ Redis (6379)   │              │  machine directly  │
+└────────────────────┘              └────────────────────┘
+```
+
+### P2P Proxy Layer
+
+dweb creates a secure tunnel from the P2P network to your local ports:
+
+| Local Service | P2P Access |
 |---|---|
-| **dweb serve** | Host any folder as a live P2P site on the global DHT |
-| **dweb browse** | Browse any `.dweb` domain from anywhere in the world |
-| **dweb domain** | Register free `.dweb` domains on global DHT — no registrar, no fees |
-| **dweb store** | Share files P2P with anyone running dweb |
-| **Auto NAT traversal** | STUN/TURN/UPnP built in — works behind home routers |
-| **Relay fallback** | Optional relay for when direct P2P can't connect (paid relay nodes) |
+| `localhost:80` | `dweb://my-app.dweb` (web UI) |
+| `localhost:3001` | `dweb://my-app.dweb/api/*` (API) |
+| `localhost:5432` | Not exposed (internal) |
+| `localhost:9090` | `dweb://my-app.dweb/admin` (admin panel) |
 
-## Built-in Services
+---
 
-| Service | Description |
+## What's Included (Out of the Box)
+
+### Runtimes & Databases (Bundled or Auto-Installed)
+
+| Category | Options |
 |---|---|
-| **dHost** | Static site hosting — your machine, your traffic |
-| **dDomain** | `.dweb` domain registry — DHT-based, free, permanent |
-| **dStore** | File sharing — send files P2P to any dweb user |
-| **dSync** | Sync browser data across your own devices via encrypted P2P |
+| **Web servers** | Apache, Nginx, Caddy |
+| **Languages** | Node.js, Python, PHP, Go, Ruby, Rust |
+| **Databases** | MySQL, PostgreSQL, MongoDB, SQLite, Redis |
+| **Containers** | Docker (if installed on host) |
+| **AI** | Ollama + Qwen2.5-Coder (local LLM for AI agents) |
+
+### Default AI Model
+
+- **Ollama + Qwen2.5-Coder 7B** — runs locally, no API key, no internet required
+- All AI agent features work 100% offline
+
+---
 
 ## Business Model
 
-| Stream | Details |
+| Tier | Price | Features |
+|---|---|---|
+| **Free** | $0 | All architectures, AI agents, `.dweb` domain, P2P hosting |
+| **Relay** | $3/mo | Keep site online when your machine is off (cloud cache) |
+| **Cloud Shift** | $5-10/mo | One-click deploy to AWS/GCP with managed infra |
+| **Enterprise** | Custom | Private DHT, white-label, on-prem deployment |
+
+---
+
+## Why This Wins
+
+| Problem Today | dweb Solution |
 |---|---|
-| **App** | Free download |
-| **`.dweb` domains** | Free — DHT registration, no blockchain |
-| **Premium domains (`.eth`, `.hns`)** | Small markup |
-| **Relay nodes** | $3-10/mo for users behind strict NAT who can't direct-connect |
-| **Storage relay** | $2-5/mo keep your content online when your machine is off |
-| **Enterprise license** | Private DHT + white-label for orgs |
+| Hosting costs $5-100/mo | Your machine is free |
+| DevOps is complex | AI builds + deploys for you |
+| Vendor lock-in | P2P = no cloud dependency |
+| Censorship | No central server to take down |
+| Domain registration | Free `.dweb` via DHT |
+| Global reach | Anyone with dweb can access instantly |
+| Learning curve | "Describe what you want" → AI builds it |
 
-## Internet Challenges & Solutions
+---
 
-| Challenge | Solution |
-|---|---|
-| NAT / Firewall | STUN + UPnP for direct connect; TURN relay as paid fallback |
-| Host offline = site down | Optional cloud relay (paid) keeps a cached copy online |
-| DHT lookup speed | Bootstrap from hardcoded nodes; caching |
-| Content takedown | Not possible — that's the point. Host controls their machine |
-| Domain squatting | Proof-of-work + activity-based expiry for `.dweb` |
-
-## Why This Could Win
-
-| Factor | Advantage |
-|---|---|
-| **Zero infra cost** | User's machine is the server |
-| **Global by default** | DHT works worldwide, no regional restrictions |
-| **No registrar** | `.dweb` domains are free and permanent |
-| **Censorship resistant** | No central server to take down |
-| **Network effects** | Hosters attract viewers → viewers become hosters |
-| **Same app** | One binary, both roles — no confusing server/client versions |
-
-## Build Plan (12-14 weeks, 1-2 people)
+## Build Roadmap (6 months, 2-3 people)
 
 | Phase | Duration | Output |
 |---|---|---|
-| Global DHT peer discovery | 3 wk | Connect to DHT, announce/query peers |
-| P2P direct connection | 2 wk | NAT traversal (STUN/UPnP), encrypted channel |
-| `dweb serve` (host) | 2 wk | Serve folder over P2P to any peer |
-| `dweb browse` (viewer) | 2 wk | In-app browser for `dweb://` URLs |
-| `.dweb` domain registry | 2 wk | DHT name registration + resolution |
-| Desktop app shell | 2 wk | Tauri tray app with service panel |
-| Relay fallback | 1 wk | TURN relay for blocked connections |
-| Ship + docs | 1 wk | Installers, website, documentation |
+| Local stack manager | 4 wk | Install/manage runtimes, databases, proxies |
+| P2P publishing layer | 4 wk | Global DHT, NAT traversal, P2P proxy |
+| AI agent framework | 6 wk | Scaffolding, code generation, deployment |
+| Web architectures | 4 wk | Templates for all stacks (Node, PHP, Python, Go, Ruby) |
+| Desktop app (Tauri) | 4 wk | Tray UI, service panel, browse view |
+| Cloud Toggle | 2 wk | One-click to AWS/GCP |
+| Ship + docs | 2 wk | Installers, website, tutorials |
+
+---
 
 ## Tech Stack
 
 | Layer | Technology |
 |---|---|
-| P2P networking | **HyperDHT** + **Hypercore** (Holepunch) |
-| NAT traversal | **STUN** (built-in) + **TURN** (optional relay) |
-| Domain resolution | **Custom DHT namespace** `.dweb` |
-| Desktop shell | **Tauri** (Rust backend, web UI) |
-| UI | **React** or vanilla HTML |
-| Local storage | **LevelDB** |
+| Desktop shell | **Tauri** (Rust + web UI) |
+| AI agents | **Ollama** + **Qwen2.5-Coder 7B** (local) |
+| Code generation | Custom templates + agent orchestration |
+| P2P networking | **HyperDHT** + **Hypercore** |
+| NAT traversal | STUN + UPnP + TURN (optional) |
+| Domain resolution | Custom DHT (`.dweb` namespace) |
+| Local runtimes | **Node.js**, **Python**, **PHP**, **Go**, **Ruby** (bundled installers) |
+| Databases | **MySQL**, **PostgreSQL**, **MongoDB**, **SQLite**, **Redis** |
+| Container support | **Docker** integration (optional) |
+
+---
 
 ## Status
 
-**Phase: Planning** — Architecture and business model finalized. Ready for prototype.
+**Phase: Planning** — Full architecture defined. Ready for prototyping.
 
 ## License
 
