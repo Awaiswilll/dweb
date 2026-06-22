@@ -1,0 +1,230 @@
+name: Build, Release & Publish
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']           # v0.1.0, v0.2.0, etc. → triggers release
+  pull_request:
+    branches: [main]
+  workflow_dispatch:        # manual trigger
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ── Lint & Check ──────────────────────────────────────────────────────────
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Install Linux deps (Tauri)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libappindicator3-dev \
+            librsvg2-dev patchelf libssl-dev
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Check formatting
+        run: cargo fmt --check
+        working-directory: src-tauri
+
+      - name: Clippy
+        run: cargo clippy -- -D warnings
+        working-directory: src-tauri
+
+      - name: TypeScript check
+        run: npx tsc --noEmit
+
+  # ── Build & Release (Windows x86_64) ─────────────────────────────────────
+  build-windows:
+    needs: lint
+    runs-on: windows-latest
+    if: github.event_name != 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build Tauri app (Windows)
+        uses: tauri-apps/tauri-action@v4
+        id: tauri_build_windows
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'dweb v__VERSION__'
+          releaseBody: |
+            ## dweb v__VERSION__
+
+            ### 📥 Downloads
+            - **Windows**: `dweb_x64-setup.exe` (NSIS installer)
+            - **Windows portable**: `dweb_x64-portable.exe`
+            - **macOS**: `dweb_x64.dmg`
+            - **Linux**: `dweb_x64.deb` / `dweb_x64.AppImage`
+
+            ### 🆕 What's New
+            See the [CHANGELOG](./CHANGELOG.md) for details.
+
+            ### 🔧 System Requirements
+            - **Windows**: Windows 10+ (64-bit)
+            - **macOS**: 10.15+
+            - **Linux**: WebKit2GTK 4.1+
+          releaseDraft: true
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Also upload raw binary as artifact (portable, no installer)
+      - name: Upload portable binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: dweb-windows-portable-x64
+          path: src-tauri/target/release/dweb.exe
+          if-no-files-found: warn
+
+  # ── Build & Release (macOS) ──────────────────────────────────────────────
+  build-macos:
+    needs: lint
+    runs-on: macos-latest
+    if: github.event_name != 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build Tauri app (macOS)
+        uses: tauri-apps/tauri-action@v4
+        id: tauri_build_macos
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'dweb v__VERSION__'
+          releaseBody: ''
+          releaseDraft: true
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE || '' }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '' }}
+          APPLE_ID: ${{ secrets.APPLE_ID || '' }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID || '' }}
+
+      - name: Upload raw binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: dweb-macos-x64
+          path: src-tauri/target/release/dweb
+          if-no-files-found: warn
+
+  # ── Build & Release (Linux) ──────────────────────────────────────────────
+  build-linux:
+    needs: lint
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux deps (Tauri)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libappindicator3-dev \
+            librsvg2-dev patchelf libssl-dev
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build Tauri app (Linux)
+        uses: tauri-apps/tauri-action@v4
+        id: tauri_build_linux
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'dweb v__VERSION__'
+          releaseBody: ''
+          releaseDraft: true
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload raw binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: dweb-linux-x64
+          path: src-tauri/target/release/dweb
+          if-no-files-found: warn
+
+  # ── Quick CI-only build (PRs, no release) ────────────────────────────────
+  ci-check:
+    needs: lint
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux deps (Tauri)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libappindicator3-dev \
+            librsvg2-dev patchelf libssl-dev
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Build Rust (debug, quick)
+        run: cargo build --verbose
+        working-directory: src-tauri
+
+      - name: Run Rust tests
+        run: cargo test
+        working-directory: src-tauri

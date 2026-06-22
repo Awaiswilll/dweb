@@ -1,5 +1,31 @@
 # dweb — Decentralized Web Platform
 
+[![Build](https://img.shields.io/github/actions/workflow/status/YOUR_USERNAME/dweb/build.yml?branch=main&label=build)](https://github.com/YOUR_USERNAME/dweb/actions)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)]()
+[![License](https://img.shields.io/badge/license-MIT-green)]()
+
+> **⚠️ Replace `YOUR_USERNAME` with your GitHub username in the badges above after pushing.**
+
+## 📥 Download
+
+Download the latest version from the **[Releases page](https://github.com/YOUR_USERNAME/dweb/releases)** — every published release automatically includes:
+
+| Platform | Installer | Portable Binary |
+|----------|-----------|----------------|
+| **Windows 10+** | `dweb_<version>_x64-setup.exe` (NSIS) | `dweb_<version>_x64-portable.exe` |
+| **macOS 10.15+** | `dweb_<version>_x64.dmg` | — |
+| **Linux** | `dweb_<version>_amd64.deb` | `dweb_<version>_amd64.AppImage` |
+
+### How releases work
+1. Push a tag: `git tag v0.1.0 && git push origin v0.1.0`
+2. GitHub Actions builds for all 3 platforms automatically
+3. Installers and portable binaries are attached to the Release
+4. Users download directly from the Releases page — no third-party store needed
+
+> 💡 **Pro tip:** Run `npx tauri dev` from the repo for the latest development build.
+
+---
+
 A desktop app that lets you **build, host, and serve any web architecture from your own machine — accessible to the entire world via P2P.** Built-in AI agents help you create everything.
 
 ## Core Concept

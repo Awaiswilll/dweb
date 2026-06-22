@@ -1,0 +1,51 @@
+@echo off
+title dweb Connectivity Test Peer
+cd /d "%~dp0"
+
+echo.
+echo  ╔════════════════════════════════════════╗
+echo  ║   dweb Remote Connectivity Test Tool  ║
+echo  ╚════════════════════════════════════════╝
+echo.
+echo  Choose mode:
+echo    1) Start as SERVER (other machines connect to this one)
+echo    2) Connect as CLIENT to another machine
+echo    3) Interactive mode (ask each time)
+echo.
+
+set /p choice="  Enter choice (1-3): "
+
+if "%choice%"=="1" goto server
+if "%choice%"=="2" goto client
+if "%choice%"=="3" goto interactive
+echo Invalid choice. Exiting.
+pause
+exit /b
+
+:server
+echo.
+set /p port="  Enter port (default 49737): "
+if "%port%"=="" set port=49737
+echo.
+echo  Starting server on port %port%...
+echo  Other machines can connect to: http://YOUR_IP:%port%/ping
+echo.
+echo  Press Ctrl+C to stop.
+echo.
+node "%~dp0connectivity-test.js" --server --port=%port%
+pause
+exit /b
+
+:client
+echo.
+set /p target="  Enter server address (IP:port, e.g. 192.168.1.100:49737): "
+if "%target%"=="" goto client
+echo.
+node "%~dp0connectivity-test.js" --client %target%
+pause
+exit /b
+
+:interactive
+node "%~dp0connectivity-test.js"
+pause
+exit /b
