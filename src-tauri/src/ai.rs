@@ -922,8 +922,8 @@ pub async fn ai_build(prompt: String, provider_type: String, model: String) -> R
     );
 
     let stack_result = match provider_type.as_str() {
-        "ollama" => ollama_generate(&config, &model, &stack_prompt, false).await,
-        "openai" | "together" | "groq" | "openrouter" => openai_chat_generate(&config, &model, &stack_prompt).await,
+        "ollama" => ollama_generate(&config, &model, &stack_prompt, false, None).await,
+        "openai" | "together" | "groq" | "openrouter" => openai_chat_generate(&config, &model, &stack_prompt, None).await,
         "anthropic" => anthropic_generate(&config, &model, &stack_prompt).await,
         "google" => google_generate(&config, &model, &stack_prompt).await,
         _ => return Err("Unknown provider".into()),
@@ -944,8 +944,8 @@ pub async fn ai_build(prompt: String, provider_type: String, model: String) -> R
     );
 
     let code_result = match provider_type.as_str() {
-        "ollama" => ollama_generate(&config, &model, &code_prompt, false).await,
-        "openai" | "together" | "groq" | "openrouter" => openai_chat_generate(&config, &model, &code_prompt).await,
+        "ollama" => ollama_generate(&config, &model, &code_prompt, false, None).await,
+        "openai" | "together" | "groq" | "openrouter" => openai_chat_generate(&config, &model, &code_prompt, None).await,
         "anthropic" => anthropic_generate(&config, &model, &code_prompt).await,
         "google" => google_generate(&config, &model, &code_prompt).await,
         _ => return Err("Unknown provider".into()),

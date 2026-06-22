@@ -594,7 +594,8 @@ pub fn switch_branch(path: &Path, name: &str) -> Result<GitOperationResult, Stri
     let repo = open_repo(path)?;
 
     // Check if branch exists locally
-    match repo.find_branch(name, git2::BranchType::Local) {
+    let branch = repo.find_branch(name, git2::BranchType::Local);
+    match branch {
         Ok(branch) => {
             let refname = branch.get().name().ok_or("Invalid branch ref")?.to_string();
             repo.set_head(&refname).map_err(git_err)?;
