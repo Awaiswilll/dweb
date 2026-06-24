@@ -5,6 +5,7 @@ import {
   Plus, RefreshCw, CheckCircle2, XCircle, FolderGit2,
   ExternalLink, Wrench, Activity, Zap, Wifi, WifiOff,
   Link2, Unlink, Shield, Monitor, Radio, Users,
+  ChevronDown, ChevronRight,
 } from "lucide-react";
 import type { Service } from "../types";
 import {
@@ -197,6 +198,8 @@ export default function Dashboard() {
   const [loadingServices, setLoadingServices] = useState(true);
   const [loadingRuntimes, setLoadingRuntimes] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [runtimesExpanded, setRuntimesExpanded] = useState(false);
+  const [servicesExpanded, setServicesExpanded] = useState(true);
 
   const loadServices = async () => {
     setLoadingServices(true);
@@ -716,25 +719,40 @@ export default function Dashboard() {
 
   /* ─── Runtime Detection Section ──────────────────────────── */
   const runtimeSection = (
-    <div style={{ marginBottom: 20 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-        <h3 style={{ fontSize: 15, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
-          <Wrench size={16} /> Runtime Detection
-        </h3>
-        <button className="btn btn-secondary btn-sm" onClick={loadRuntimes}>
-          <RefreshCw size={12} /> Refresh
+    <div className="provider-config-card" style={{ marginBottom: 24 }}>
+      <div
+        className="provider-config-header"
+        onClick={() => setRuntimesExpanded(!runtimesExpanded)}
+        style={{ cursor: "pointer" }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {runtimesExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+          <Wrench size={16} />
+          <span style={{ fontWeight: 600, fontSize: 14 }}>Runtime Detection</span>
+          {!runtimesExpanded && runtimes.length > 0 && (
+            <span className="text-muted-sm" style={{ fontSize: 12, marginLeft: 4 }}>
+              ({runtimes.length} detected)
+            </span>
+          )}
+        </div>
+        <button className="btn btn-icon btn-sm" onClick={e => { e.stopPropagation(); loadRuntimes(); }} title="Refresh">
+          <RefreshCw size={12} />
         </button>
       </div>
-      {loadingRuntimes ? (
-        <div className="loading-pulse"><span /></div>
-      ) : runtimes.length === 0 ? (
-        <div className="empty-state-inline glass" style={{ borderRadius: "var(--radius)" }}>
-          <h4>No runtimes detected</h4>
-          <p className="text-muted-sm">Run the dweb desktop app to detect system runtimes.</p>
-        </div>
-      ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
-          {runtimes.map(r => <RuntimeCard key={r.name} runtime={r} />)}
+      {runtimesExpanded && (
+        <div className="provider-config-body" style={{ overflow: "visible" }}>
+          {loadingRuntimes ? (
+            <div className="loading-pulse"><span /></div>
+          ) : runtimes.length === 0 ? (
+            <div className="empty-state-inline glass" style={{ borderRadius: "var(--radius)" }}>
+              <h4>No runtimes detected</h4>
+              <p className="text-muted-sm">Run the dweb desktop app to detect system runtimes.</p>
+            </div>
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
+              {runtimes.map(r => <RuntimeCard key={r.name} runtime={r} />)}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -743,15 +761,6 @@ export default function Dashboard() {
   /* ─── Services Tab ───────────────────────────────────────── */
   const servicesTab = (
     <div>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-        <h4 style={{ fontSize: 15, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
-          <Server size={16} /> Your Services
-        </h4>
-        <button className="btn btn-primary btn-sm" onClick={() => setShowAddModal(true)}>
-          <Plus size={14} /> Add Service
-        </button>
-      </div>
-
       {loadingServices ? (
         <div className="loading-pulse"><span /></div>
       ) : services.length === 0 ? (
@@ -844,14 +853,31 @@ export default function Dashboard() {
 
       {runtimeSection}
 
-      <div className="panel-tabs">
-        <button className="panel-tab active">
-          <Server size={16} /> Services
-        </button>
-      </div>
-
-      <div className="panel-content glass">
-        {servicesTab}
+      <div className="provider-config-card" style={{ marginBottom: 0 }}>
+        <div
+          className="provider-config-header"
+          onClick={() => setServicesExpanded(!servicesExpanded)}
+          style={{ cursor: "pointer" }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {servicesExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+            <Server size={16} />
+            <span style={{ fontWeight: 600, fontSize: 14 }}>Services</span>
+            {!servicesExpanded && services.length > 0 && (
+              <span className="text-muted-sm" style={{ fontSize: 12, marginLeft: 4 }}>
+                ({services.length} running)
+              </span>
+            )}
+          </div>
+          <button className="btn btn-primary btn-sm" onClick={e => { e.stopPropagation(); setShowAddModal(true); }}>
+            <Plus size={14} /> Add Service
+          </button>
+        </div>
+        {servicesExpanded && (
+          <div className="provider-config-body" style={{ padding: "12px 16px 16px", overflow: "visible" }}>
+            {servicesTab}
+          </div>
+        )}
       </div>
 
       {showAddModal && (
