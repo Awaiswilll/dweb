@@ -1,8 +1,9 @@
 use crate::ServiceStatus;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::LazyLock;
-use tokio::process::Command;
+use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -34,12 +35,25 @@ pub enum ServiceState {
     Error(String),
 }
 
-// ─── Static Service Registry ─────────────────────────────────────────────────
+struct SpawnedProcess {
+    pid: u32,
+    child: Child,
+}
+
+struct ManagedProcess {
+    health_task: tokio::task::JoinHandle<()>,
+}
+
+// ─── Static State ────────────────────────────────────────────────────────────
+
+static PROCESS_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+static PROCESSES: LazyLock<Mutex<HashMap<String, ManagedProcess>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 static SERVICES: LazyLock<Mutex<HashMap<String, ManagedService>>> =
     LazyLock::new(|| {
         let mut m = HashMap::new();
-        // Pre-register known common services
         let known: Vec<(&str, ServiceType, u16)> = vec![
             ("Node.js", ServiceType::Runtime, 3000),
             ("Python", ServiceType::Runtime, 8000),
@@ -94,9 +108,19 @@ pub async fn add_service(
 }
 
 pub async fn list_services() -> Result<Vec<ServiceStatus>, Box<dyn std::error::Error>> {
-    let services = SERVICES.lock().await;
+    let mut services = SERVICES.lock().await;
     let mut statuses = Vec::new();
-    for (_name, svc) in services.iter() {
+    let mut to_cleanup = Vec::new();
+
+    for (name, svc) in services.iter() {
+        if matches!(svc.status, ServiceState::Running) {
+            if let Some(pid) = svc.pid {
+                if !is_pid_alive(pid) {
+                    to_cleanup.push(name.clone());
+                    continue;
+                }
+            }
+        }
         statuses.push(ServiceStatus {
             name: svc.name.clone(),
             running: matches!(svc.status, ServiceState::Running),
@@ -105,109 +129,219 @@ pub async fn list_services() -> Result<Vec<ServiceStatus>, Box<dyn std::error::E
             memory: svc.memory,
         });
     }
+
+    for name in &to_cleanup {
+        if let Some(svc) = services.get_mut(name) {
+            svc.status = ServiceState::Stopped;
+            svc.pid = None;
+            svc.cpu = 0.0;
+            svc.memory = 0;
+            svc.started_at = None;
+            PROCESS_COUNT.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+
+    drop(services);
+
+    for name in &to_cleanup {
+        let mut processes = PROCESSES.lock().await;
+        if let Some(mp) = processes.remove(name) {
+            mp.health_task.abort();
+        }
+    }
+
     Ok(statuses)
 }
 
 pub async fn start_service(name: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let mut services = SERVICES.lock().await;
-    if let Some(svc) = services.get_mut(name) {
-        // Attempt to actually start the process based on service type
-        let result = try_start_process(svc).await;
-        match result {
-            Ok(pid) => {
+    let svc_name = name.to_string();
+
+    let spawned = {
+        let mut services = SERVICES.lock().await;
+        let svc = services.get_mut(name).ok_or("Service not found")?;
+
+        match try_start_process(svc).await {
+            Ok(sp) => {
+                let now = chrono::Utc::now().to_rfc3339();
                 svc.status = ServiceState::Running;
-                svc.pid = Some(pid);
-                svc.started_at = Some(chrono::Utc::now().to_rfc3339());
+                svc.pid = Some(sp.pid);
+                svc.started_at = Some(now);
                 svc.cpu = 0.5;
-                svc.memory = 50 * 1024 * 1024; // 50MB estimate
+                svc.memory = 50 * 1024 * 1024;
+                PROCESS_COUNT.fetch_add(1, Ordering::SeqCst);
 
-                // Assign process to sandbox Job Object for containment
-                let _ = crate::sandbox::contain_process(pid);
+                let _ = crate::sandbox::contain_process(sp.pid);
 
-                Ok(())
+                Ok((sp.pid, sp.child))
             }
             Err(e) => {
                 svc.status = ServiceState::Error(e.to_string());
                 Err(e)
             }
         }
-    } else {
-        Err("Service not found".into())
+    };
+
+    let (pid, child) = spawned?;
+
+    let service_name = svc_name.clone();
+    let health_task = tokio::spawn(async move {
+        let _ = child.wait().await;
+
+        let mut services = SERVICES.lock().await;
+        if let Some(svc) = services.get_mut(&service_name) {
+            if matches!(svc.status, ServiceState::Running) {
+                svc.status = ServiceState::Stopped;
+                svc.pid = None;
+                svc.cpu = 0.0;
+                svc.memory = 0;
+                svc.started_at = None;
+                PROCESS_COUNT.fetch_sub(1, Ordering::SeqCst);
+            }
+        }
+    });
+
+    let mut processes = PROCESSES.lock().await;
+    if let Some(old) = processes.remove(&svc_name) {
+        old.health_task.abort();
     }
+    processes.insert(svc_name, ManagedProcess { health_task });
+
+    Ok(())
 }
 
 pub async fn stop_service(name: &str) -> Result<(), Box<dyn std::error::Error>> {
     let mut services = SERVICES.lock().await;
-    if let Some(svc) = services.get_mut(name) {
-        if let Some(pid) = svc.pid {
-            // Kill the process
-            if cfg!(target_os = "windows") {
-                let _ = Command::new("taskkill")
-                    .args(["/PID", &pid.to_string(), "/F"])
-                    .output().await;
-            } else {
-                let _ = Command::new("kill")
-                    .args(["-9", &pid.to_string()])
-                    .output().await;
-            }
+    let svc = services.get_mut(name).ok_or("Service not found")?;
+
+    if let Some(pid) = svc.pid {
+        if cfg!(target_os = "windows") {
+            let _ = Command::new("taskkill")
+                .args(["/PID", &pid.to_string(), "/F"])
+                .output().await;
+        } else {
+            let _ = Command::new("kill")
+                .args(["-9", &pid.to_string()])
+                .output().await;
         }
-        svc.status = ServiceState::Stopped;
-        svc.pid = None;
-        svc.cpu = 0.0;
-        svc.memory = 0;
-        svc.started_at = None;
-        Ok(())
-    } else {
-        Err("Service not found".into())
     }
+
+    let was_running = matches!(svc.status, ServiceState::Running);
+    svc.status = ServiceState::Stopped;
+    svc.pid = None;
+    svc.cpu = 0.0;
+    svc.memory = 0;
+    svc.started_at = None;
+    if was_running {
+        PROCESS_COUNT.fetch_sub(1, Ordering::SeqCst);
+    }
+
+    drop(services);
+
+    let mut processes = PROCESSES.lock().await;
+    if let Some(mp) = processes.remove(name) {
+        mp.health_task.abort();
+    }
+
+    Ok(())
+}
+
+pub fn get_process_count() -> usize {
+    PROCESS_COUNT.load(Ordering::SeqCst)
 }
 
 // ─── Process Management ──────────────────────────────────────────────────────
 
-async fn try_start_process(svc: &ManagedService) -> Result<u32, Box<dyn std::error::Error>> {
+async fn try_start_process(svc: &ManagedService) -> Result<SpawnedProcess, Box<dyn std::error::Error>> {
     match svc.name.as_str() {
         "Node.js" => {
-            // Check if node exists
             let check = Command::new("node").arg("--version").output().await;
             if check.is_err() {
                 return Err("Node.js not found on PATH. Install from https://nodejs.org".into());
             }
-            // Try common dev servers
-            if let Ok(_output) = Command::new("node")
-                .args(["-e", "require('http').createServer((q,r)=>{r.end('OK')}).listen(3000)", "&", "console.log('Node.js started')"])
-                .output().await
-            {
-                // In real impl, we'd parse PID from output
-                // For now, return a mock PID
-                Ok(10001)
-            } else {
-                Err("Failed to start Node.js server".into())
-            }
+            let port = svc.port;
+            let mut child = Command::new("node")
+                .args([
+                    "-e",
+                    &format!(
+                        "const http = require('http'); \
+                         http.createServer((q, r) => {{ r.end('OK'); }}).listen({}, () => {{ \
+                           console.log('Node.js started on port {}'); \
+                         }});",
+                        port, port
+                    ),
+                ])
+                .spawn()
+                .map_err(|e| format!("Failed to spawn Node.js: {}", e))?;
+            let pid = child.id();
+            Ok(SpawnedProcess { pid, child })
         }
         "Python" => {
-            let check = Command::new("python").arg("--version").output().await;
-            let check = if check.is_err() {
-                Command::new("python3").arg("--version").output().await
+            let python_cmd = if Command::new("python3").arg("--version").output().await.is_ok() {
+                "python3"
+            } else if Command::new("python").arg("--version").output().await.is_ok() {
+                "python"
             } else {
-                check
-            };
-            if check.is_err() {
                 return Err("Python not found on PATH".into());
-            }
-            Ok(10002)
+            };
+            let port = svc.port;
+            let mut child = Command::new(python_cmd)
+                .args(["-m", "http.server", &port.to_string()])
+                .spawn()
+                .map_err(|e| format!("Failed to spawn Python: {}", e))?;
+            let pid = child.id();
+            Ok(SpawnedProcess { pid, child })
         }
         "PHP" => {
             let check = Command::new("php").arg("--version").output().await;
             if check.is_err() {
                 return Err("PHP not found on PATH".into());
             }
-            Ok(10003)
+            let port = svc.port;
+            let mut child = Command::new("php")
+                .args(["-S", &format!("0.0.0.0:{}", port)])
+                .spawn()
+                .map_err(|e| format!("Failed to spawn PHP: {}", e))?;
+            let pid = child.id();
+            Ok(SpawnedProcess { pid, child })
+        }
+        "Ruby" => {
+            let check = Command::new("ruby").arg("--version").output().await;
+            if check.is_err() {
+                return Err("Ruby not found on PATH".into());
+            }
+            let port = svc.port;
+            let mut child = Command::new("ruby")
+                .args(["-run", "-e", "httpd", "--", "-p", &port.to_string()])
+                .spawn()
+                .map_err(|e| format!("Failed to spawn Ruby: {}", e))?;
+            let pid = child.id();
+            Ok(SpawnedProcess { pid, child })
         }
         _ => {
-            // For databases and other services, just mark as running
-            // Real implementation would spawn the actual process
-            Ok(20000)
+            Err(format!("Cannot auto-start '{}': no spawn handler defined", svc.name).into())
         }
+    }
+}
+
+fn is_pid_alive(pid: u32) -> bool {
+    #[cfg(unix)]
+    {
+        std::process::Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+    #[cfg(windows)]
+    {
+        std::process::Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {}", pid), "/NH"])
+            .output()
+            .map(|o| {
+                let out = String::from_utf8_lossy(&o.stdout);
+                out.contains(&pid.to_string())
+            })
+            .unwrap_or(false)
     }
 }
 

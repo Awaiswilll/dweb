@@ -47,6 +47,14 @@ static P2P_MANAGER: Lazy<Arc<Mutex<Option<P2PManager>>>> =
 
 /// Initialize the global P2P manager (called once at startup).
 pub async fn init(data_dir: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+    // Shut down any existing manager first to kill orphaned tasks
+    let mut guard = P2P_MANAGER.lock().await;
+    if let Some(old) = guard.take() {
+        old.shutdown().await;
+        log::info!("P2P previous manager shut down");
+    }
+    drop(guard);
+
     let manager = P2PManager::new(data_dir).await?;
     let mut guard = P2P_MANAGER.lock().await;
     *guard = Some(manager);
@@ -74,6 +82,8 @@ pub struct P2PManager {
     resolved_count: std::sync::atomic::AtomicU64,
     #[allow(dead_code)]
     data_dir: PathBuf,
+    /// Tracked background task handles — aborted on shutdown to prevent orphaned-task panics
+    task_handles: Vec<tokio::task::JoinHandle<()>>,
 }
 
 impl P2PManager {
@@ -89,19 +99,59 @@ impl P2PManager {
             config.bootstrap_nodes = nodes;
         }
 
-        let mut dht = Dht::with_config(config).await?;
+        let dht = Dht::with_config(config).await?;
         log::info!("P2P bootstrapping to DHT network...");
         dht.bootstrap().await?;
-        dht.drive();
+
+        // CRITICAL FIX: drive() spawns background tasks. Wrap in tokio::spawn
+        // so we can track and abort the handle on shutdown, preventing the
+        // ~17s orphaned-task crash.
+        let mut task_handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
+        // dht.drive() typically needs &mut self; clone the Arc for the task
+        // We hold the dht in Arc<Mutex<Option<Dht>>>, so we re-wrap after bootstrapping
+        let dht_arc = Arc::new(Mutex::new(Some(dht)));
+
+        // Spawn the DHT event loop as a tracked task
+        {
+            let dht_clone = dht_arc.clone();
+            let handle = tokio::spawn(async move {
+                loop {
+                    let mut guard = dht_clone.lock().await;
+                    if let Some(ref mut dht) = *guard {
+                        // drive() processes DHT events — it may block or yield
+                        // If it returns, we re-lock and re-drive
+                        dht.drive();
+                    }
+                    drop(guard);
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                }
+            });
+            task_handles.push(handle);
+        }
+
         log::info!("P2P node connected and driving DHT events");
 
         Ok(Self {
-            dht: Arc::new(Mutex::new(Some(dht))),
+            dht: dht_arc,
             keypair: Keypair::default(),
             started_at: chrono::Utc::now(),
             resolved_count: std::sync::atomic::AtomicU64::new(0),
             data_dir: data_dir.clone(),
+            task_handles,
         })
+    }
+
+    /// Abort all tracked background tasks. Call before dropping to prevent
+    /// orphaned-task panics in the Tokio runtime.
+    pub async fn shutdown(&self) {
+        for handle in &self.task_handles {
+            handle.abort();
+        }
+        // Wait briefly for tasks to actually stop
+        for handle in &self.task_handles {
+            let _ = handle.await;
+        }
+        log::info!("P2P manager: {} background task(s) aborted", self.task_handles.len());
     }
 
     /// Hex-encoded public key of this node.
@@ -206,6 +256,59 @@ impl P2PManager {
         Ok(None)
     }
 
+    /// DHT-only lookup that skips the local DB check.
+    /// Used by domain::resolve() to avoid redundant DB lookups and prevent circular calls.
+    pub async fn resolve_domain_dht_only(&self, name: &str) -> Result<Option<PublishedSite>, Box<dyn std::error::Error>> {
+        let name = name.trim().to_lowercase();
+        let topic = domain_topic(&name);
+        let dht_lock = self.dht.lock().await;
+        if let Some(ref dht) = *dht_lock {
+            let mut lookup_stream = dht.lookup(IdBytes(topic), Commit::No)?;
+            drop(dht_lock);
+
+            let timeout_duration = std::time::Duration::from_secs(10);
+            let timed_result = tokio::time::timeout(timeout_duration, lookup_stream.next()).await;
+
+            match timed_result {
+                Ok(Some(Ok(Some(response)))) => {
+                    if let Some(first) = response.peers.first() {
+                        let peer_id = hex::encode(&*first.public_key);
+                        let address = first.relay_addresses.first()
+                            .map(|a| a.ip().to_string())
+                            .unwrap_or_else(|| "0.0.0.0".to_string());
+                        let port = first.relay_addresses.first()
+                            .map(|a| a.port())
+                            .unwrap_or(0);
+
+                        self.resolved_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        log::info!("DHT resolved {}.dweb → {}:{} (peer: {}…)", name, address, port, &peer_id[..8]);
+
+                        return Ok(Some(PublishedSite {
+                            domain: name.clone(),
+                            port,
+                            peer_id,
+                            address,
+                            active: true,
+                        }));
+                    }
+                }
+                Ok(Some(Ok(None))) => {
+                    log::debug!("DHT lookup for {}.dweb returned empty batch", name);
+                }
+                Ok(Some(Err(e))) => {
+                    log::warn!("DHT lookup error for {}.dweb: {}", name, e);
+                }
+                Ok(None) => {
+                    log::debug!("DHT lookup stream for {}.dweb ended", name);
+                }
+                Err(_elapsed) => {
+                    log::warn!("DHT lookup for {}.dweb timed out after 10s", name);
+                }
+            }
+        }
+        Ok(None)
+    }
+
     /// Current P2P network status.
     pub fn status(&self) -> P2PStatus {
         let uptime = chrono::Utc::now() - self.started_at;
@@ -299,4 +402,11 @@ pub async fn get_status() -> P2PStatus {
             port: 0,
         },
     }
+}
+
+/// DHT-only domain lookup without local DB check (avoids circular calls with domain::resolve()).
+pub async fn dht_lookup(name: &str) -> Result<Option<PublishedSite>, Box<dyn std::error::Error>> {
+    let guard = with_manager().await?;
+    let mgr = guard.as_ref().unwrap();
+    mgr.resolve_domain_dht_only(name).await
 }

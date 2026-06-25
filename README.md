@@ -100,7 +100,7 @@ The codebase is a **full-stack monorepo** containing:
 | Mode | How | Status |
 |------|-----|--------|
 | **Node.js server** | `dweb.bat` or `node tools/dweb-server.cjs` | ✅ Works, recommended |
-| **Tauri desktop** | `npx tauri dev` or compiled binary | 🟡 Works (frontend only; Rust IPC has unresolved crash at ~17 s in compiled binary) |
+| **Tauri desktop** | `npx tauri dev` or compiled binary | ✅ Works (Rust IPC crash at ~17s **fixed** — orphaned `JoinHandle` now tracked and aborted on shutdown) |
 
 ---
 
@@ -112,7 +112,7 @@ dweb/
 │   ├── App.tsx                   # Root component with view routing
 │   ├── main.tsx                  # React entry point
 │   ├── types.ts                  # All TypeScript types & data models (472 lines)
-│   ├── relay-client.ts           # P2P relay client (WebRTC signaling)
+│   ├── relay-client.ts           # WS relay client + WebRTC + federation (493 lines)
 │   ├── safe-invoke.ts            # Tauri IPC wrapper (graceful fallback)
 │   ├── styles/                   # CSS styles
 │   ├── components/
@@ -134,8 +134,8 @@ dweb/
 │   ├── src/
 │   │   ├── main.rs               # Tauri entry point
 │   │   ├── lib.rs                # Module declarations + global state
-│   │   ├── p2p.rs                # HyperDHT P2P networking (302 lines)
-│   │   ├── domain.rs             # .dweb domain registration & resolution (140 lines)
+│   │   ├── p2p.rs                # HyperDHT P2P networking (412 lines)
+│   │   ├── domain.rs             # .dweb domain registration & resolution (153 lines)
 │   │   ├── stack.rs              # Web stack management
 │   │   ├── ai.rs                 # Ollama AI integration
 │   │   ├── cloud.rs              # Cloud deployment (AWS/GCP)
@@ -147,10 +147,10 @@ dweb/
 │   └── icons/                    # App icons
 │
 ├── tools/                        # Node.js server tools
-│   ├── dweb-server.cjs           # HTTP server + P2P relay client (419 lines)
-│   ├── dweb-relay.cjs            # P2P bootstrap relay daemon (527 lines)
+│   ├── dweb-server.cjs           # HTTP server + P2P relay client (843 lines)
+│   ├── dweb-relay.cjs            # P2P bootstrap relay daemon (791 lines)
 │   ├── dweb-launcher.cs          # C# desktop launcher (161 lines)
-│   ├── relay-client.cjs          # Standalone relay client
+│   ├── relay-client.cjs          # Standalone relay client (Node.js)
 │   ├── connectivity-test.cjs     # Network connectivity test
 │   ├── dweb-connect-test.html    # Browser connectivity test
 │   └── start-test-peer.bat       # Test peer launcher
@@ -222,9 +222,9 @@ The frontend is a **single-page application** built with:
 **Key architectural decisions:**
 
 - **`safe-invoke.ts`** wraps all Tauri IPC calls — when running outside Tauri (browser mode), it falls back gracefully instead of crashing
-- **`relay-client.ts`** communicates with the Node.js relay/server via HTTP (no Tauri dependency)
+- **`relay-client.ts`** — WebSocket relay client (`DwebRelayClient`), WebRTC wrapper (`DwebPeerConnection` with Google STUN), multi-relay redundancy (`FederatedRelayClient`), plus HTTP polling fallback
 - All views use **localStorage** for state persistence when Tauri IPC is unavailable
-- The frontend compiles cleanly — 1526 modules, zero type errors
+- The frontend compiles cleanly — zero type errors
 
 ### Views
 
@@ -249,14 +249,14 @@ The Rust backend provides native desktop capabilities through Tauri v2 IPC comma
 
 | Module | Lines | Description |
 |--------|-------|-------------|
-| `p2p.rs` | 302 | HyperDHT-based P2P networking — DHT join/leave, site publishing, peer discovery, NAT traversal |
-| `domain.rs` | 140 | `.dweb` domain registration, resolution, ownership verification, in-memory store |
+| `p2p.rs` | 412 | HyperDHT P2P networking — JoinHandle tracking, `shutdown()` abort, DHT-only lookup path |
+| `domain.rs` | 153 | `.dweb` domain registration, resolution, ownership verification, **sled-backed persistent storage** |
 | `ai.rs` | — | Ollama API integration — model management, code generation, streaming responses |
-| `cloud.rs` | — | Cloud provider deployment — AWS, GCP, Netlify, Vercel |
-| `config.rs` | — | Persistent app configuration |
-| `database.rs` | — | Database management — MySQL, PostgreSQL, MongoDB, SQLite, Redis |
+| `cloud.rs` | 250 | Cloud provider deployment — **real AWS SigV4**, Netlify API, Vercel API (was stubs) |
+| `config.rs` | 225 | App configuration — **AES-256-GCM encrypted** credential storage |
+| `database.rs` | — | Embedded database — MySQL, PostgreSQL, MongoDB, SQLite, Redis |
 | `sandbox.rs` | — | Secure sandboxed process execution for user code |
-| `stack.rs` | — | Web stack scaffolding — templates for Node.js, Python, PHP, Go, Ruby |
+| `stack.rs` | 400 | Web stack spawning — **real PIDs** via `Command::spawn`, health monitoring, dead process cleanup |
 | `git.rs` | — | Native Git operations — init, clone, status, commit, push, branch management |
 | `github.rs` | — | GitHub API — OAuth device flow, repo CRUD, archive download, import |
 
@@ -272,12 +272,13 @@ Key crates: `tauri 2`, `tokio`, `reqwest`, `hyperdht`, `hypercore`, `ed25519-dal
 
 A **zero-dependency Node.js HTTP server** that:
 
-- Serves the built React frontend (`dist/`)
-- Provides REST API endpoints for P2P relay communication
-- Auto-registers with the P2P relay daemon
+- Serves the built React frontend (`dist/`) with **ETag caching** (`304 Not Modified`)
+- **WebSocket relay client** (RFC 6455) — push-based signaling with exponential backoff reconnect
+- **AI API proxy** — proxies Ollama, OpenAI, and Anthropic requests (API keys stay **server-side**)
+- **Rate limiter** — 200 req/min per IP (returns `429 Retry-After: 60`)
+- Auto-registers with the P2P relay daemon (WebSocket primary, HTTP fallback)
 - Sends heartbeats every 30 s
 - Discovers peers every 15 s
-- Polls for WebRTC signals every 5 s
 - Auto-opens the browser on start
 
 **Endpoints:**
@@ -292,6 +293,10 @@ A **zero-dependency Node.js HTTP server** that:
 | `/relay/signal` | POST | Send WebRTC signal to peer |
 | `/relay/signals` | GET | Poll incoming signals |
 | `/relay/connect` | POST | Send WebRTC offer to peer |
+| `/ai/status` | GET | AI provider config (ollama/openai/anthropic) |
+| `/ai/ollama/chat` | POST | Ollama chat proxy (localhost:11434) |
+| `/ai/openai/chat` | POST | OpenAI chat proxy (env: `OPENAI_API_KEY`) |
+| `/ai/anthropic/messages` | POST | Anthropic messages proxy (env: `ANTHROPIC_API_KEY`) |
 | `/` | GET | dweb app frontend |
 
 ### dweb-relay.cjs (Port 49736)
@@ -301,8 +306,11 @@ A **zero-dependency P2P bootstrap relay daemon** that provides:
 - **Bootstrap node** — well-known entry point for new peers
 - **Registration** — peers register their address & services
 - **Discovery** — peers discover other online peers
-- **Signaling** — WebRTC SDP offer/answer exchange
+- **WebSocket signaling** (RFC 6455) — **push-based** SDP/ICE exchange (<100ms vs 5s with HTTP polling)
+- **HTTP polling fallback** — for peers without WebSocket support
 - **TCP relay** — message forwarding for NAT-trapped peers (port 49738)
+- **Peer TTL eviction** — stale peers removed after 60s inactivity
+- **Queued signal delivery** — signals buffered for offline peers, delivered on re-register
 
 ### dweb-launcher.cs
 
@@ -388,7 +396,7 @@ Configuration tabs:
 | General | Auto-start, theme, minimize to tray, relay address |
 | AI Models | Provider configs (API keys, base URLs, models) |
 | P2P Network | Relay address, bootstrap nodes, NAT type |
-| Cloud Providers | AWS credentials, Netlify/Vercel tokens |
+| Cloud Providers | AWS credentials, Netlify/Vercel tokens (AES-256-GCM encrypted with `encryption` feature) |
 | Storage | Data directory, database paths |
 
 ---
@@ -397,10 +405,11 @@ Configuration tabs:
 
 dweb uses a **hybrid P2P architecture**:
 
-1. **Bootstrap Relay** (`dweb-relay.cjs`) — a well-known HTTP server that peers register with for discovery and WebRTC signaling
+1. **Bootstrap Relay** (`dweb-relay.cjs`) — a well-known HTTP+WebSocket server for peer discovery and WebRTC signaling
 2. **HyperDHT** (Rust) — Kademlia-style distributed hash table for `.dweb` domain resolution and peer lookup
-3. **WebRTC** — direct P2P connections between peers after signaling exchange
-4. **TCP Relay** — fallback message forwarding for peers behind symmetric NAT
+3. **WebRTC** — direct P2P connections between peers after signaling exchange (Google STUN servers built-in)
+4. **WebSocket signaling** — RFC 6455 push-based signal delivery (<100ms) with HTTP polling fallback (5s)
+5. **TCP Relay** — fallback message forwarding for peers behind symmetric NAT
 
 ### Connection modes
 
@@ -413,16 +422,23 @@ dweb uses a **hybrid P2P architecture**:
 ### Relay protocol
 
 ```
-┌──────────┐  register   ┌──────────────┐  discover  ┌──────────┐
-│  Peer A  │────────────►│ dweb-relay   │◄───────────│  Peer B  │
-│          │  heartbeat  │  (49736)     │  signal    │          │
-│          │◄────────────│              │───────────►│          │
-│          │────────────►│              │            │          │
-│          │  signal     │              │            │          │
-└────┬─────┘             └──────────────┘            └────┬─────┘
-     │                                                    │
-     │                  WebRTC (direct)                   │
-     └────────────────────────────────────────────────────┘
+┌──────────┐ register/WS ┌──────────────┐  discover/WS ┌──────────┐
+│  Peer A  │────────────►│ dweb-relay   │◄─────────────│  Peer B  │
+│          │ heartbeat   │  (49736)     │ signal push   │          │
+│          │◄────────────│              │──────────────►│          │
+│          │ signal      │  HTTP/WS     │               │          │
+│          │────────────►│              │               │          │
+│          │  (push if   │              │               │          │
+│          │   WS, else  │  ┌────────┐  │               │          │
+│          │   queue)    │  │ WS +   │  │               │          │
+│          │             │  │ HTTP   │  │               │          │
+│          │             │  │ peers  │  │               │          │
+│          │             │  │ TTL    │  │               │          │
+│          │             │  └────────┘  │               │          │
+└────┬─────┘             └──────────────┘               └────┬─────┘
+     │                                                       │
+     │              WebRTC (direct via STUN)                  │
+     └───────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -443,7 +459,7 @@ The AI Agent view supports **multiple AI providers**:
 
 **Key capabilities:**
 - Streaming text generation with token-by-token display
-- Direct Ollama browser API call (`http://localhost:11434/api/generate`) with no Tauri dependency
+- AI API proxy via `dweb-server.cjs` — API keys stay **server-side** (Ollama local, OpenAI/Anthropic via env vars)
 - Project scaffolding based on selected stack (runtime + frontend + backend + database)
 - Session management with message history and summaries
 - Template-based code generation
@@ -456,9 +472,9 @@ Domains are registered on the P2P network via the Rust backend:
 
 - **Registration**: Create a `.dweb` domain (3-63 chars, lowercase alphanumeric + hyphens)
 - **Ownership**: ECDSA keypair-based ownership
-- **Resolution**: DHT lookup returns the publisher's address
-- **Storage**: In-memory `HashMap` backed by `sled` (embedded persistent DB)
-- **Validation**: Automatic expiry, active/inactive states
+- **Resolution**: DHT lookup returns the publisher's address (no circular calls — DHT-only path)
+- **Storage**: **`sled` embedded persistent database** (was in-memory `HashMap` — domains survive restarts)
+- **Validation**: Automatic expiry, active/inactive states, renewal and transfer support
 
 ---
 
@@ -479,14 +495,14 @@ Configurations persist to `localStorage`.
 
 ## Cloud Deployment
 
-Cloud provider credentials (stored in `.env`):
+Cloud provider credentials — stored in `config.json` (AES-256-GCM encrypted with `encryption` feature flag):
 
-| Provider | Variables | Service |
-|----------|-----------|---------|
-| AWS | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` | Cloud Shift deployment |
-| Netlify | `NETLIFY_AUTH_TOKEN` | One-click static deploy |
-| Vercel | `VERCEL_TOKEN` | One-click frontend deploy |
-| GitHub | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | OAuth (device flow works without these) |
+| Provider | Variables | Service | API Used |
+|----------|-----------|---------|----------|
+| AWS | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` | S3 bucket creation | **Full SigV4** (HMAC-SHA256 signed requests) |
+| Netlify | `NETLIFY_AUTH_TOKEN` | Site creation | `POST /api/v1/sites` |
+| Vercel | `VERCEL_TOKEN` | Project creation | `POST /v9/projects` |
+| GitHub | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | OAuth (device flow works without these) | Device flow |
 
 ---
 
@@ -494,7 +510,7 @@ Cloud provider credentials (stored in `.env`):
 
 ### Environment Variables (`.env`)
 
-Copy `.env.example` to `.env` and set your API keys:
+Copy `.env.example` to `.env` and set your API keys. AI API keys are read **server-side** by `dweb-server.cjs` and proxied to the frontend — they never leave the server.
 
 ```bash
 cp .env.example .env

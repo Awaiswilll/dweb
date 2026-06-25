@@ -36,6 +36,9 @@ Thumbs.db
 *.dll
 *.so
 *.dylib
+dweb-server
+tools/dweb-launcher
+tools/dweb-launcher.exe
 
 # Test output
 coverage/

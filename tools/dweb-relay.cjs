@@ -10,6 +10,7 @@
 //    3. Discovery — peers discover other online peers
 //    4. Signaling relay — exchange SDP offers/answers for WebRTC
 //    5. Relay proxy — forward messages for NAT-trapped peers
+//    6. WebSocket transport — push-based signaling for ICE candidates
 //
 //  Design: pure Node.js stdlib — no npm install needed
 // ═══════════════════════════════════════════════════════════════
@@ -31,9 +32,16 @@ const START_TIME    = Date.now();
 const SERVER_ID     = crypto.randomUUID().split("-")[0];
 const HOSTNAME      = os.hostname();
 
+// RFC 6455 WebSocket GUID for handshake key derivation
+const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+
 // ─── In-memory peer store ─────────────────────────────────────
 const peers = new Map();      // peerId → PeerRecord
-const signals = new Map();    // peerId → pending signal (for polling)
+const signals = new Map();    // peerId → pending signal (for http polling)
+
+// WebSocket peer tracking
+const wsPeers = new Map();         // peerId → WebSocket socket
+const wsSocketStates = new Map();  // socket → { peerId, buffer }
 
 class PeerRecord {
   constructor(id, info) {
@@ -124,14 +132,180 @@ function popSignals(targetPeerId) {
   return list;
 }
 
+// ─── WebSocket Frame Helpers (RFC 6455) ────────────────────────
+
+// Create a WebSocket frame (server → client, never masked)
+function createWSFrame(payload, opcode = 0x1) {
+  const payloadBuf = Buffer.isBuffer(payload) ? payload : Buffer.from(payload, "utf8");
+  const len = payloadBuf.length;
+  let header;
+
+  if (len < 126) {
+    header = Buffer.alloc(2);
+    header[0] = 0x80 | opcode;
+    header[1] = len;
+  } else if (len < 65536) {
+    header = Buffer.alloc(4);
+    header[0] = 0x80 | opcode;
+    header[1] = 126;
+    header.writeUInt16BE(len, 2);
+  } else {
+    header = Buffer.alloc(10);
+    header[0] = 0x80 | opcode;
+    header[1] = 127;
+    header.writeBigUInt64BE(BigInt(len), 2);
+  }
+
+  return Buffer.concat([header, payloadBuf]);
+}
+
+// Parse and handle all frames currently buffered for a socket
+function processWSFrames(socket, state) {
+  while (state.buffer.length >= 2) {
+    const firstByte = state.buffer[0];
+    const secondByte = state.buffer[1];
+    const opcode = firstByte & 0x0F;
+    const fin = (firstByte & 0x80) !== 0;
+    let payloadLen = secondByte & 0x7F;
+    let headerLen = 2;
+
+    if (payloadLen === 126) {
+      if (state.buffer.length < 4) return;
+      payloadLen = state.buffer.readUInt16BE(2);
+      headerLen = 4;
+    } else if (payloadLen === 127) {
+      if (state.buffer.length < 10) return;
+      payloadLen = Number(state.buffer.readBigUInt64BE(2));
+      headerLen = 10;
+    }
+
+    const masked = (secondByte & 0x80) !== 0;
+    if (masked) headerLen += 4;
+
+    const frameLen = headerLen + payloadLen;
+    if (state.buffer.length < frameLen) return;
+
+    const frameData = state.buffer.slice(0, frameLen);
+    state.buffer = state.buffer.slice(frameLen);
+
+    // Extract payload and unmask if needed (client frames must be masked)
+    const payloadStart = headerLen - (masked ? 4 : 0);
+    const mask = masked ? frameData.slice(headerLen - 4, headerLen) : null;
+    const payload = Buffer.from(frameData.slice(payloadStart, payloadStart + payloadLen));
+
+    if (masked) {
+      for (let i = 0; i < payload.length; i++) {
+        payload[i] ^= mask[i % 4];
+      }
+    }
+
+    if (opcode === 0x8) {
+      // Close frame — respond with close and tear down
+      const closePayload = Buffer.alloc(2);
+      closePayload.writeUInt16BE(1000, 0);
+      try { socket.write(createWSFrame(closePayload, 0x8)); } catch (e) { /* ignore */ }
+      socket.end();
+      return;
+    }
+
+    if (opcode === 0x9) {
+      // Ping — respond with empty pong
+      try { socket.write(createWSFrame(Buffer.alloc(0), 0xA)); } catch (e) { /* ignore */ }
+      continue;
+    }
+
+    if (opcode === 0x1 && fin) {
+      // Complete text frame — parse as JSON and route
+      const message = payload.toString("utf8");
+      handleWSMessage(socket, state, message);
+    }
+    // Continuation frames (0x0) and binary (0x2) are silently ignored
+  }
+}
+
+// Handle a decoded JSON message received over WebSocket
+function handleWSMessage(socket, state, message) {
+  let msg;
+  try { msg = JSON.parse(message); }
+  catch (e) { return; }
+
+  // ─── WS Register ───────────────────────────────────────────
+  if (msg.type === "register" && msg.peerId) {
+    state.peerId = msg.peerId;
+    wsPeers.set(msg.peerId, socket);
+
+    // Also register in the main peer store for discoverability
+    if (!peers.has(msg.peerId)) {
+      peers.set(msg.peerId, new PeerRecord(msg.peerId, {
+        address: msg.address || "0.0.0.0",
+        port: msg.port || 0,
+        mode: msg.mode || "p2p-visible",
+        services: msg.services || [],
+        platform: msg.platform || process.platform,
+        version: msg.version || "0.1.0",
+      }));
+      console.log(`  [ws] Registered: ${msg.peerId.slice(0, 12)}…`);
+    } else {
+      peers.get(msg.peerId).touch();
+      console.log(`  [ws] Re-registered: ${msg.peerId.slice(0, 12)}…`);
+    }
+
+    // Deliver any queued signals that arrived via HTTP while this peer had no WS
+    const queued = popSignals(msg.peerId);
+    if (queued.length > 0) {
+      for (const sig of queued) {
+        try {
+          socket.write(createWSFrame(JSON.stringify({ type: "signal", ...sig })));
+        } catch (e) { /* ignore */ }
+      }
+      console.log(`  [ws] Delivered ${queued.length} queued signal(s) to ${msg.peerId.slice(0, 12)}…`);
+    }
+    return;
+  }
+
+  // ─── WS Signal Forwarding ──────────────────────────────────
+  // The client sends the signal type (offer/answer/ice-candidate) in `signalType`
+  // to avoid conflicting with the outer message type routing envelope.
+  if (msg.type === "signal" && msg.targetPeerId) {
+    const signal = {
+      fromPeerId: state.peerId || msg.fromPeerId || "anonymous",
+      signalType: msg.signalType || "unknown",
+      sdp: msg.sdp || null,
+      candidate: msg.candidate || null,
+      timestamp: new Date().toISOString(),
+    };
+
+    // Try immediate push if target is connected via WebSocket
+    const targetSocket = wsPeers.get(msg.targetPeerId);
+    if (targetSocket) {
+      const frame = createWSFrame(JSON.stringify({ type: "signal", ...signal }));
+      try { targetSocket.write(frame); } catch (e) { /* ignore */ }
+      console.log(`  [ws-signal] ${(signal.fromPeerId || "?").slice(0, 12)}… → ${msg.targetPeerId.slice(0, 12)}… signalType=${signal.signalType} via WS`);
+      return;
+    }
+
+    // Fall back to HTTP polling store
+    storeSignal(msg.targetPeerId, signal);
+    console.log(`  [ws-signal] ${(signal.fromPeerId || "?").slice(0, 12)}… → ${msg.targetPeerId.slice(0, 12)}… signalType=${signal.signalType} queued for HTTP`);
+    return;
+  }
+
+  // ─── WS Heartbeat ──────────────────────────────────────────
+  if (msg.type === "heartbeat" && state.peerId) {
+    const peer = peers.get(state.peerId);
+    if (peer) peer.touch();
+    return;
+  }
+}
+
 // ─── Cleanup stale peers ──────────────────────────────────────
 function cleanup() {
-  const now = Date.now();
   let removed = 0;
   for (const [id, peer] of peers) {
     if (peer.isStale) {
       peers.delete(id);
       signals.delete(id);
+      wsPeers.delete(id);
       removed++;
     }
   }
@@ -239,7 +413,7 @@ async function handleRequest(req, res) {
 
   // ─── DISCOVER ─────────────────────────────────────────────
   if (pathname === "/discover" && method === "GET") {
-    const modeFilter = url.searchParams.get("mode");       // optional filter
+    const modeFilter = url.searchParams.get("mode");
     const minPort = parseInt(url.searchParams.get("port"), 10) || 0;
 
     const list = [];
@@ -257,7 +431,6 @@ async function handleRequest(req, res) {
   }
 
   // ─── PEER INFO ────────────────────────────────────────────
-  // GET /peer/:id
   const peerMatch = pathname.match(/^\/peer\/([a-zA-Z0-9-_]+)$/);
   if (peerMatch && method === "GET") {
     const peer = peers.get(peerMatch[1]);
@@ -266,7 +439,6 @@ async function handleRequest(req, res) {
   }
 
   // ─── UNREGISTER ───────────────────────────────────────────
-  // DELETE /peer/:id
   if (peerMatch && method === "DELETE") {
     const removed = peers.delete(peerMatch[1]);
     signals.delete(peerMatch[1]);
@@ -277,8 +449,6 @@ async function handleRequest(req, res) {
   }
 
   // ─── SIGNAL (WebRTC signaling exchange) ───────────────────
-  // POST /signal — send signal to a peer
-  // GET /signal?peerId=xxx — poll for incoming signals
   if (pathname === "/signal") {
     if (method === "POST") {
       try {
@@ -287,10 +457,26 @@ async function handleRequest(req, res) {
 
         if (!targetPeerId) return json(res, 400, { status: "error", message: "Missing targetPeerId" });
 
-        // Check target exists or allow anonymous signaling
+        // Check if target is connected via WebSocket — push immediately
+        const targetSocket = wsPeers.get(targetPeerId);
+        if (targetSocket) {
+          const signal = {
+            type: "signal",
+            fromPeerId: fromPeerId || "anonymous",
+            signalType: type || "unknown",
+            sdp: sdp || null,
+            candidate: candidate || null,
+            timestamp: new Date().toISOString(),
+          };
+          const frame = createWSFrame(JSON.stringify(signal));
+          try { targetSocket.write(frame); } catch (e) { /* ignore */ }
+          console.log(`  [signal] ${(fromPeerId || "?").slice(0, 12)}… → ${targetPeerId.slice(0, 12)}… type=${type} via WS`);
+          return json(res, 200, { status: "ok", queued: true, via: "websocket" });
+        }
+
+        // Target not on WS — store for HTTP polling
         const targetExists = peers.has(targetPeerId);
         if (!targetExists) {
-          // Still store — the target might connect soon
           console.log(`  [signal] ${(fromPeerId || "?").slice(0, 12)}… → ${targetPeerId.slice(0, 12)}… (target offline, queued)`);
         } else {
           console.log(`  [signal] ${(fromPeerId || "?").slice(0, 12)}… → ${targetPeerId.slice(0, 12)}… type=${type}`);
@@ -304,7 +490,7 @@ async function handleRequest(req, res) {
           timestamp: new Date().toISOString(),
         });
 
-        return json(res, 200, { status: "ok", queued: true });
+        return json(res, 200, { status: "ok", queued: true, via: "http-poll" });
       } catch (e) {
         return json(res, 400, { status: "error", message: e.message });
       }
@@ -314,7 +500,6 @@ async function handleRequest(req, res) {
       const peerId = url.searchParams.get("peerId");
       if (!peerId) return json(res, 400, { status: "error", message: "Missing peerId" });
 
-      // Long-poll: wait up to 30s for signals
       const signals_list = popSignals(peerId);
       return json(res, 200, {
         status: "ok",
@@ -322,6 +507,16 @@ async function handleRequest(req, res) {
         signals: signals_list,
       });
     }
+  }
+
+  // ─── WS-INFO ──────────────────────────────────────────────
+  if (pathname === "/ws-info" && method === "GET") {
+    return json(res, 200, {
+      status: "ok",
+      ws_connected: wsPeers.size,
+      http_peers: peers.size,
+      ws_connections_total: wsSocketStates.size,
+    });
   }
 
   // ─── STATUS ───────────────────────────────────────────────
@@ -340,6 +535,7 @@ async function handleRequest(req, res) {
       peersOnline: peers.size,
       peersMax: MAX_PEERS,
       tcpRelayPort: RELAY_TCP_PORT,
+      wsConnected: wsPeers.size,
       modes: modeCounts,
       localIPs: getLocalIPs(),
       memory: {
@@ -354,8 +550,9 @@ async function handleRequest(req, res) {
         { path: "/discover", method: "GET", desc: "Discover online peers" },
         { path: "/peer/:id", method: "GET", desc: "Get peer info" },
         { path: "/peer/:id", method: "DELETE", desc: "Unregister peer" },
-        { path: "/signal", method: "GET", desc: "Poll for signals" },
+        { path: "/signal", method: "GET", desc: "Poll for signals (HTTP fallback)" },
         { path: "/signal", method: "POST", desc: "Send signal to peer" },
+        { path: "/ws-info", method: "GET", desc: "WebSocket connection info" },
       ],
       bootstrapNodes: getLocalIPs().map(ip => `${ip}:${PORT}`),
     });
@@ -478,6 +675,7 @@ function printBanner() {
   ╚══════════════════════════════════════════════════╝
   ╔══════════════════════════════════════════════════╗
   ║  HTTP API:  http://0.0.0.0:${String(PORT).padEnd(5)}                    ║
+  ║  WS API :   ws://0.0.0.0:${String(PORT).padEnd(5)}                      ║
   ║  dweb peers connect via: RELAY_ADDR=localhost:${String(PORT).padEnd(5)}║
   ║  TCP Relay: tcp://0.0.0.0:${String(RELAY_TCP_PORT).padEnd(5)}                    ║
   ║                                                    ║
@@ -489,20 +687,73 @@ function printBanner() {
   console.log(`  ║  Endpoints (${PORT}):                                    ║`);
   console.log(`  ║    GET  /ping       — Health check                   ║`);
   console.log(`  ║    GET  /status     — Relay status                  ║`);
+  console.log(`  ║    GET  /ws-info    — WS connection info            ║`);
   console.log(`  ║    POST /register   — Register a peer               ║`);
   console.log(`  ║    POST /heartbeat  — Peer heartbeat                ║`);
   console.log(`  ║    GET  /discover   — List online peers             ║`);
   console.log(`  ║    GET  /peer/:id   — Get peer info                 ║`);
   console.log(`  ║    DELETE /peer/:id — Unregister peer               ║`);
-  console.log(`  ║    GET  /signal     — Poll for signals              ║`);
+  console.log(`  ║    GET  /signal     — Poll for signals (HTTP)       ║`);
   console.log(`  ║    POST /signal     — Send signal to peer           ║`);
   console.log(`  ╚══════════════════════════════════════════════════╝`);
   console.log(`  Active peers: 0`);
   console.log(`  Press Ctrl+C to stop.\n`);
 }
 
+// ─── WebSocket Upgrade Handler ──────────────────────────────────
+function setupWebSocket(server) {
+  server.on("upgrade", (req, socket, head) => {
+    // Only handle valid WebSocket upgrade requests
+    const key = req.headers["sec-websocket-key"];
+    if (!key) { socket.destroy(); return; }
+
+    // Compute RFC 6455 accept value
+    const accept = crypto
+      .createHash("sha1")
+      .update(key + WS_GUID)
+      .digest("base64");
+
+    socket.write(
+      "HTTP/1.1 101 Switching Protocols\r\n" +
+      "Upgrade: websocket\r\n" +
+      "Connection: Upgrade\r\n" +
+      `Sec-WebSocket-Accept: ${accept}\r\n` +
+      "\r\n"
+    );
+
+    const state = { peerId: null, buffer: head || Buffer.alloc(0) };
+    wsSocketStates.set(socket, state);
+
+    socket.on("data", (data) => {
+      state.buffer = Buffer.concat([state.buffer, data]);
+      processWSFrames(socket, state);
+    });
+
+    socket.on("close", () => {
+      if (state.peerId) {
+        wsPeers.delete(state.peerId);
+      }
+      wsSocketStates.delete(socket);
+    });
+
+    socket.on("error", () => {
+      if (state.peerId) {
+        wsPeers.delete(state.peerId);
+      }
+      wsSocketStates.delete(socket);
+    });
+
+    // Process any data that was bundled with the upgrade request
+    if (state.buffer.length > 0) {
+      processWSFrames(socket, state);
+    }
+  });
+}
+
 // ─── Main ──────────────────────────────────────────────────────
 const server = http.createServer(handleRequest);
+
+setupWebSocket(server);
 
 server.listen(PORT, "0.0.0.0", () => {
   printBanner();
@@ -515,13 +766,26 @@ server.listen(PORT, "0.0.0.0", () => {
 
   // Show active count on interval
   setInterval(() => {
-    process.stdout.write(`\x1b[1A\x1b[K  Active peers: ${peers.size}\n`);
+    process.stdout.write(`\x1b[1A\x1b[K  Active peers: ${peers.size} | WS connected: ${wsPeers.size}\n`);
   }, 2000);
 });
 
 process.on("SIGINT", () => {
   console.log("\n  Shutting down relay daemon...");
   console.log(`  Final peer count: ${peers.size}`);
+
+  // Gracefully close all WebSocket connections with close frame
+  const closePayload = Buffer.alloc(2);
+  closePayload.writeUInt16BE(1000, 0);
+  const closeFrame = createWSFrame(closePayload, 0x8);
+
+  for (const [socket] of wsSocketStates) {
+    try {
+      socket.write(closeFrame);
+      socket.end();
+    } catch (e) { /* ignore */ }
+  }
+
   console.log("  Goodbye!\n");
   process.exit(0);
 });
