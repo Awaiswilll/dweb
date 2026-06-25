@@ -8,6 +8,22 @@
 
 ---
 
+## Screenshots
+
+| Dashboard | AI Agent | Domains |
+|:---:|:---:|:---:|
+| ![Dashboard](screenshots/dashboard.png) | ![AI Agent](screenshots/ai-agent.png) | ![Domains](screenshots/domains.png) |
+
+| Browser | Repositories | Integrations |
+|:---:|:---:|:---:|
+| ![Browser](screenshots/browser.png) | ![Repositories](screenshots/repositories.png) | ![Integrations](screenshots/integrations.png) |
+
+| Settings | Docs |
+|:---:|:---:|
+| ![Settings](screenshots/settings.png) | ![Docs](screenshots/docs.png) |
+
+---
+
 ## Table of Contents
 
 - [Project Scope](#project-scope)
