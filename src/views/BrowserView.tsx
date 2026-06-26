@@ -204,7 +204,12 @@ function createNewTab(): BrowserTab {
   };
 }
 
-export default function BrowserView() {
+interface BrowserViewProps {
+  initialUrl?: string;
+  navId?: number;
+}
+
+export default function BrowserView({ initialUrl, navId }: BrowserViewProps) {
   const [tabs, setTabs] = useState<BrowserTab[]>(() => {
     const initial = createNewTab();
     return [initial];
@@ -426,6 +431,13 @@ export default function BrowserView() {
       }));
     }
   }, [activeTabId, tabs, patchTab]);
+
+  // Navigate to initialUrl when triggered from Dashboard/Domains
+  useEffect(() => {
+    if (!initialUrl) return;
+    const timer = setTimeout(() => navigate(initialUrl), 50);
+    return () => clearTimeout(timer);
+  }, [initialUrl, navId, navigate]);
 
   const addBookmark = () => {
     if (!activeTab.url) return;

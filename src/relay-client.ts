@@ -320,11 +320,7 @@ export class DwebPeerConnection {
   /** Watch connection state changes */
   onConnectionStateChange: ((state: RTCPeerConnectionState) => void) | null = null;
 
-  private setupStateHandler(): void {
-    this.pc.onconnectionstatechange = () => {
-      this.onConnectionStateChange?.(this.pc.connectionState);
-    };
-  }
+  // setupStateHandler removed - onconnectionstatechange not currently used
 
   /** Create a WebRTC offer */
   async createOffer(): Promise<RTCSessionDescriptionInit> {
@@ -376,13 +372,11 @@ export class DwebPeerConnection {
  */
 export class FederatedRelayClient {
   private clients: DwebRelayClient[] = [];
-  private peerId: string = '';
 
   constructor(private relayUrls: string[]) {}
 
   /** Connect to all configured relays */
   connect(peerId: string): void {
-    this.peerId = peerId;
     for (const url of this.relayUrls) {
       const client = new DwebRelayClient(url);
       client.connect(peerId);

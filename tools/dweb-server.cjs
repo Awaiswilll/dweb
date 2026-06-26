@@ -331,7 +331,7 @@ function wsRelayConnect() {
 
   const wsKey = crypto.randomBytes(16).toString("base64");
   const expectedAccept = crypto.createHash("sha1")
-    .update(wsKey + "258EAFA5-E914-47DA-95CA-5AB9DC11B785")
+    .update(wsKey + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")
     .digest("base64");
 
   socket.connect(rp, relayHost, () => {

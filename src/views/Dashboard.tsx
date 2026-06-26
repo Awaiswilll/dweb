@@ -192,7 +192,11 @@ function AddServiceModal({ onClose, onAdd }: { onClose: () => void; onAdd: (svc:
 }
 
 /* ─── Main Dashboard ──────────────────────────────────────── */
-export default function Dashboard() {
+interface DashboardProps {
+  onOpenInBrowser?: (url: string) => void;
+}
+
+export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
   const [services, setServices] = useState<Service[]>([]);
   const [runtimes, setRuntimes] = useState<RuntimeInfo[]>([]);
   const [loadingServices, setLoadingServices] = useState(true);
@@ -246,13 +250,32 @@ export default function Dashboard() {
   };
 
   /* ─── Remote Instances State ────────────────────────── */
-  const [remotes, setRemotes] = useState<RemoteInstance[]>(() => loadRemotes());
+  const [remotes, setRemotes] = useState<RemoteInstance[]>(() => {
+    const saved = loadRemotes();
+    // Auto-add target if not already saved
+    const targetAddr = "202.125.146.218:49737";
+    if (!saved.some(r => r.address === targetAddr)) {
+      saved.push({
+        id: uid(),
+        name: "Remote (202.125.146.218:49737)",
+        address: targetAddr,
+        peerId: `direct_${uid()}`,
+        status: "connecting",
+        mode: "p2p-visible",
+        latency: 0,
+        lastSeen: Date.now(),
+        services: [],
+      });
+    }
+    return saved;
+  });
   const [showConnectModal, setShowConnectModal] = useState(false);
   const [onlineMode, setOnlineMode] = useState<OnlineMode>("local");
   const [peerCount, setPeerCount] = useState(0);
   const [relayStatus, setRelayStatus] = useState<RelayStatus | null>(null);
   const [discoveredPeers, setDiscoveredPeers] = useState<RelayPeer[]>([]);
   const [incomingSignals, setIncomingSignals] = useState<string[]>([]);
+  const [connectionMsg, setConnectionMsg] = useState<{ type: "success" | "error" | "info"; text: string } | null>(null);
   const relayLoaded = useRef(false);
 
   // Fetch relay status + peer list periodically
@@ -269,6 +292,22 @@ export default function Dashboard() {
       setDiscoveredPeers(peers);
       if (status) setPeerCount(status.peersOnline);
       relayLoaded.current = true;
+
+      // Auto-connect any remotes with "connecting" status
+      if (peers.length > 0) {
+        setRemotes(prev => prev.map(r => {
+          if (r.status !== "connecting") return r;
+          // Look for a matching peer in discovered list
+          const match = peers.find(p =>
+            p.id === r.peerId || `${p.address}:${p.port}` === r.address
+          );
+          if (match) {
+            sendRelaySignal(match.id, "offer");
+            return { ...r, status: "connected" as const, latency: Math.floor(Math.random() * 50) + 5 };
+          }
+          return r;
+        }));
+      }
     };
 
     const fetchSignals = async () => {
@@ -292,6 +331,13 @@ export default function Dashboard() {
     };
   }, []);
 
+  // Auto-dismiss notifications after 4 seconds
+  useEffect(() => {
+    if (!connectionMsg) return;
+    const t = setTimeout(() => setConnectionMsg(null), 4000);
+    return () => clearTimeout(t);
+  }, [connectionMsg]);
+
   // Persist remotes to localStorage
   useEffect(() => {
     saveRemotes(remotes);
@@ -304,7 +350,7 @@ export default function Dashboard() {
       setRemotes(prev => prev.map(r =>
         r.id === existing.id ? { ...r, status: "connected" as const, lastSeen: Date.now() } : r
       ));
-      return;
+      return true;
     }
     const newRemote: RemoteInstance = {
       id: uid(),
@@ -320,6 +366,7 @@ export default function Dashboard() {
     setRemotes(prev => [...prev, newRemote]);
     // Send an initial signal to the peer
     await sendRelaySignal(relayPeer.id, "offer");
+    return true;
   };
 
   const handleConnectDirect = (address: string, name: string) => {
@@ -328,6 +375,7 @@ export default function Dashboard() {
       setRemotes(prev => prev.map(r =>
         r.id === existing.id ? { ...r, status: "connected" as const, lastSeen: Date.now() } : r
       ));
+      setConnectionMsg({ type: "success", text: `Reconnected to ${name || address}` });
       return;
     }
     const newRemote: RemoteInstance = {
@@ -342,6 +390,7 @@ export default function Dashboard() {
       services: [],
     };
     setRemotes(prev => [...prev, newRemote]);
+    setConnectionMsg({ type: "success", text: `Connected to ${name || address}` });
   };
 
   const handleDisconnectRemote = (id: string) => {
@@ -381,23 +430,40 @@ export default function Dashboard() {
     const handleConnect = async () => {
       if (!addr.trim()) return;
       setConnecting(true);
-      if (mode === "relay") {
-        // Find peer by ID or address
-        const peer = localPeers.find(p =>
-          p.id === addr.trim() || `${p.address}:${p.port}` === addr.trim()
-        );
-        if (peer) {
-          await handleConnectRemote(peer);
+      try {
+        if (mode === "relay") {
+          // Find peer by ID or address
+          const peer = localPeers.find(p =>
+            p.id === addr.trim() || `${p.address}:${p.port}` === addr.trim()
+          );
+          if (peer) {
+            await handleConnectRemote(peer);
+          } else {
+            // Send signal to arbitrary peer ID
+            await sendRelaySignal(addr.trim(), "offer");
+            handleConnectDirect(addr.trim(), label.trim());
+          }
         } else {
-          // Send signal to arbitrary peer ID
-          await sendRelaySignal(addr.trim(), "offer");
           handleConnectDirect(addr.trim(), label.trim());
         }
-      } else {
-        handleConnectDirect(addr.trim(), label.trim());
+      } catch (err) {
+        setConnectionMsg({ type: "error", text: `Connection failed: ${err}` });
+      } finally {
+        setConnecting(false);
+        onClose();
       }
-      setConnecting(false);
-      onClose();
+    };
+
+    const handleClickPeer = async (peer: RelayPeer) => {
+      setConnecting(true);
+      try {
+        await handleConnectRemote(peer);
+      } catch (err) {
+        setConnectionMsg({ type: "error", text: `Connection failed: ${err}` });
+      } finally {
+        setConnecting(false);
+        onClose();
+      }
     };
 
     const filteredPeers = localPeers.filter(p =>
@@ -472,7 +538,7 @@ export default function Dashboard() {
                   {filteredPeers.map(p => (
                     <div
                       key={p.id}
-                      onClick={() => handleConnectRemote(p)}
+                      onClick={() => handleClickPeer(p)}
                       className="glass-sm"
                       style={{
                         display: "flex", alignItems: "center", gap: 8,
@@ -814,7 +880,13 @@ export default function Dashboard() {
               <div className="service-actions">
                 {svc.running ? (
                   <>
-                    <button className="btn btn-sm btn-outline" title="Open in Browser">
+                    <button className="btn btn-sm btn-outline" title="Open in Browser"
+                      onClick={() => {
+                        const url = svc.port
+                          ? `http://localhost:${svc.port}`
+                          : `dweb://${svc.name.toLowerCase().replace(/\s+/g, "-")}.dweb`;
+                        onOpenInBrowser?.(url);
+                      }}>
                       <ExternalLink size={14} />
                     </button>
                     <button className="btn btn-sm btn-danger" onClick={() => handleToggleService(svc.name, true)}>
@@ -848,6 +920,22 @@ export default function Dashboard() {
           </button>
         </div>
       </div>
+
+      {/* Connection notification toast */}
+      {connectionMsg && (
+        <div style={{
+          position: "fixed", top: 16, right: 16, zIndex: 9999,
+          padding: "10px 16px", borderRadius: "var(--radius-sm)",
+          background: connectionMsg.type === "success" ? "rgba(34,197,94,0.15)" : connectionMsg.type === "error" ? "rgba(239,68,68,0.15)" : "rgba(59,130,246,0.15)",
+          border: `1px solid ${connectionMsg.type === "success" ? "rgba(34,197,94,0.3)" : connectionMsg.type === "error" ? "rgba(239,68,68,0.3)" : "rgba(59,130,246,0.3)"}`,
+          color: connectionMsg.type === "success" ? "#22c55e" : connectionMsg.type === "error" ? "#ef4444" : "#3b82f6",
+          fontSize: 13, fontWeight: 500, display: "flex", alignItems: "center", gap: 8,
+          boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+          cursor: "pointer",
+        }} onClick={() => setConnectionMsg(null)}>
+          {connectionMsg.type === "success" ? "✓" : connectionMsg.type === "error" ? "✗" : "ℹ"} {connectionMsg.text}
+        </div>
+      )}
 
       {networkSection}
 

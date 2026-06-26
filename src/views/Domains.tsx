@@ -14,7 +14,11 @@ const PUBLIC_DOMAINS = [
   { name: "api-docs", owner: "345...678", registered: "2026-05-22", tld: ".dweb" },
 ];
 
-export default function Domains() {
+interface DomainsProps {
+  onOpenInBrowser?: (url: string) => void;
+}
+
+export default function Domains({ onOpenInBrowser }: DomainsProps) {
   const [domains, setDomains] = useState<DomainRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [registerName, setRegisterName] = useState("");
@@ -157,7 +161,8 @@ export default function Domains() {
                         onClick={() => navigator.clipboard.writeText(`dweb://${d.name}.dweb`)}>
                         <Copy size={14} />
                       </button>
-                      <button className="btn btn-sm btn-outline" title="Open in Browser">
+                      <button className="btn btn-sm btn-outline" title="Open in Browser"
+                        onClick={() => onOpenInBrowser?.(`dweb://${d.name}.dweb`)}>
                         <ExternalLink size={14} />
                       </button>
                     </div>
@@ -191,7 +196,7 @@ export default function Domains() {
                     <span className="discover-owner">Owner: {d.owner}</span>
                     <span className="discover-date">Since {d.registered}</span>
                   </div>
-                  <button className="btn btn-sm btn-primary" onClick={() => window.open(`dweb://${d.name}${d.tld}`, "_blank")}>
+                  <button className="btn btn-sm btn-primary" onClick={() => onOpenInBrowser?.(`dweb://${d.name}${d.tld}`)}>
                     <ExternalLink size={14} /> Visit
                   </button>
                 </div>
