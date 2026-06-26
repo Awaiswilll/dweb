@@ -322,8 +322,12 @@ export default function BrowserView({ initialUrl, navId }: BrowserViewProps) {
         patchTab(activeTabId, { title: `Search ${resolvedUrl.trim()} — ${engine.name}` });
       }
     }
+    // Only upgrade to HTTPS for external URLs, not localhost/private IPs
     if (normalizedUrl.startsWith("http://")) {
-      normalizedUrl = "https://" + normalizedUrl.slice(7);
+      const isLocal = /^https?:\/\/(localhost|127\.\d+\.\d+\.\d+|0\.0\.0\.0|::1|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+)(:\d+)?(\/|$)/.test(normalizedUrl);
+      if (!isLocal) {
+        normalizedUrl = "https://" + normalizedUrl.slice(7);
+      }
     }
 
     patchTab(activeTabId, {

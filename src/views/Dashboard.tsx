@@ -72,7 +72,56 @@ const MOCK_SERVICES: Service[] = [
   { name: "API Server", type: "Node.js API", port: 3001, running: false, cpu: 0, memory: 0 },
 ];
 
-const SERVICE_TYPES = ["Static Site", "Node.js API", "Python Web App", "PHP Site", "Custom Command"];
+/* ─── Service Catalog ───────────────────────────────────────── */
+interface CatalogEntry {
+  type: string;
+  icon: string;
+  description: string;
+  defaultPort: number;
+  category: "Web" | "Dev Tools" | "Media" | "Infra" | "Custom";
+  needsDir: boolean;
+  dirHint: string;
+  recommended: boolean;
+}
+
+const SERVICE_CATALOG: CatalogEntry[] = [
+  // ── Web ──
+  { type: "Static Site",        icon: "🌐", description: "Serve HTML, CSS, JS from a folder",              defaultPort: 8080, category: "Web",     needsDir: true,  dirHint: "C:\\projects\\my-site\\dist",              recommended: true },
+  { type: "Node.js API",        icon: "🟢", description: "REST API backend (Express, Fastify, etc.)",       defaultPort: 3001, category: "Web",     needsDir: false, dirHint: "Point to your API project folder",        recommended: true },
+  { type: "Python Web App",     icon: "🐍", description: "Flask, FastAPI, or Django web app",               defaultPort: 5000, category: "Web",     needsDir: true,  dirHint: "C:\\projects\\my-flask-app",               recommended: true },
+  { type: "PHP Site",           icon: "🐘", description: "WordPress, Laravel, or plain PHP site",           defaultPort: 8080, category: "Web",     needsDir: true,  dirHint: "C:\\xampp\\htdocs\\my-project",             recommended: false },
+  { type: "Single Page App",    icon: "⚛️", description: "React / Vue / Svelte built SPA (dist folder)",   defaultPort: 8081, category: "Web",     needsDir: true,  dirHint: "C:\\projects\\my-app\\dist",                recommended: true },
+  { type: "Documentation Site", icon: "📚", description: "Serve generated docs (Docusaurus, MkDocs, etc.)", defaultPort: 8082, category: "Web",     needsDir: true,  dirHint: "C:\\projects\\docs\\build",                 recommended: false },
+
+  // ── Dev Tools ──
+  { type: "File Browser",       icon: "📁", description: "Browse, upload & download files",                 defaultPort: 8083, category: "Dev Tools", needsDir: true,  dirHint: "C:\\shared\\files",                          recommended: true },
+  { type: "API Proxy",          icon: "🔁", description: "CORS proxy for external APIs",                    defaultPort: 8084, category: "Dev Tools", needsDir: false, dirHint: "",                                           recommended: false },
+  { type: "Webhook Tester",     icon: "🔔", description: "Receive & inspect incoming webhooks",             defaultPort: 8085, category: "Dev Tools", needsDir: false, dirHint: "",                                           recommended: false },
+  { type: "Log Viewer",         icon: "📋", description: "Tail & search log files in a directory",          defaultPort: 8086, category: "Dev Tools", needsDir: true,  dirHint: "C:\\logs\\app",                               recommended: false },
+  { type: "Pastebin",           icon: "📝", description: "Share text & code snippets",                      defaultPort: 8087, category: "Dev Tools", needsDir: false, dirHint: "",                                           recommended: false },
+  { type: "Git Web UI",         icon: "🔀", description: "Browse git repositories via web",                 defaultPort: 8088, category: "Dev Tools", needsDir: true,  dirHint: "C:\\repositories",                            recommended: false },
+
+  // ── Media ──
+  { type: "Image Gallery",      icon: "🖼️", description: "View & browse photos from a directory",           defaultPort: 8090, category: "Media",    needsDir: true,  dirHint: "C:\\Photos\\vacation",                       recommended: true },
+  { type: "Media Stream",       icon: "🎵", description: "Stream audio & video files",                      defaultPort: 8091, category: "Media",    needsDir: true,  dirHint: "C:\\Music\\playlist",                        recommended: false },
+  { type: "Podcast Host",       icon: "🎙️", description: "Host & serve podcast audio files",                defaultPort: 8092, category: "Media",    needsDir: true,  dirHint: "C:\\Podcasts\\episodes",                      recommended: false },
+
+  // ── Infra ──
+  { type: "Dashboard",          icon: "📊", description: "Custom metrics or status dashboard",               defaultPort: 8093, category: "Infra",    needsDir: true,  dirHint: "C:\\projects\\dashboard\\build",              recommended: false },
+  { type: "Health Check",       icon: "💚", description: "Simple uptime & health endpoint",                  defaultPort: 8094, category: "Infra",    needsDir: false, dirHint: "",                                           recommended: false },
+
+  // ── Custom ──
+  { type: "Custom Command",     icon: "⚙️", description: "Run any binary or script as a service",           defaultPort: 8099, category: "Custom",   needsDir: false, dirHint: "Working directory for the command",           recommended: false },
+];
+
+const RECOMMENDED_SERVICES: { name: string; type: string; port: number; description: string }[] = [
+  { name: "File Browser",    type: "File Browser",    port: 8083, description: "Browse & share files from a directory" },
+  { name: "Image Gallery",   type: "Image Gallery",   port: 8090, description: "View photos from a folder" },
+  { name: "React SPA",       type: "Single Page App", port: 8081, description: "Serve a built React/Vue/Svelte app" },
+  { name: "Log Viewer",      type: "Log Viewer",      port: 8086, description: "Tail & search application logs" },
+  { name: "Shared Pastebin", type: "Pastebin",        port: 8087, description: "Share text and code snippets" },
+  { name: "API Proxy",       type: "API Proxy",       port: 8084, description: "CORS proxy for external APIs" },
+];
 
 /* ─── Runtime Icon ────────────────────────────────────────── */
 function RuntimeIcon({ name }: { name: string }): React.ReactNode {
@@ -126,13 +175,26 @@ function RuntimeCard({ runtime }: { runtime: RuntimeInfo }) {
 
 /* ─── Add Service Modal ───────────────────────────────────── */
 function AddServiceModal({ onClose, onAdd }: { onClose: () => void; onAdd: (svc: Service) => void }) {
+  const [tab, setTab] = useState<"custom" | "quick">("quick");
   const [name, setName] = useState("");
-  const [type, setType] = useState(SERVICE_TYPES[0]);
-  const [port, setPort] = useState("8080");
+  const [type, setType] = useState(SERVICE_CATALOG[0].type);
+  const [port, setPort] = useState(String(SERVICE_CATALOG[0].defaultPort));
   const [dir, setDir] = useState("");
+
+  const currentEntry = SERVICE_CATALOG.find(e => e.type === type) || SERVICE_CATALOG[0];
+
+  const handleTypeChange = (newType: string) => {
+    setType(newType);
+    const entry = SERVICE_CATALOG.find(e => e.type === newType);
+    if (entry) {
+      setPort(String(entry.defaultPort));
+      if (!entry.needsDir) setDir("");
+    }
+  };
 
   const handleSubmit = () => {
     if (!name.trim() || !port.trim()) return;
+    if (currentEntry.needsDir && !dir.trim()) return;
     onAdd({
       name: name.trim(),
       type,
@@ -140,9 +202,29 @@ function AddServiceModal({ onClose, onAdd }: { onClose: () => void; onAdd: (svc:
       running: false,
       cpu: 0,
       memory: 0,
-    });
+      dir: dir.trim() || undefined,
+    } as Service & { dir?: string });
     onClose();
   };
+
+  const handleQuickAdd = (svc: typeof RECOMMENDED_SERVICES[0]) => {
+    onAdd({
+      name: svc.name,
+      type: svc.type,
+      port: svc.port,
+      running: false,
+      cpu: 0,
+      memory: 0,
+    } as Service);
+    onClose();
+  };
+
+  // Group catalog by category for the type selector
+  const catalogByCategory = SERVICE_CATALOG.reduce((acc, entry) => {
+    if (!acc[entry.category]) acc[entry.category] = [];
+    acc[entry.category].push(entry);
+    return acc;
+  }, {} as Record<string, CatalogEntry[]>);
 
   return (
     <div
@@ -152,40 +234,140 @@ function AddServiceModal({ onClose, onAdd }: { onClose: () => void; onAdd: (svc:
       }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="glass" style={{ width: 420, maxWidth: "100%", padding: 24, borderRadius: "var(--radius-lg)" }}>
-        <h3 style={{ marginBottom: 20, fontSize: 18, fontWeight: 600 }}>Add Service</h3>
-
-        <div className="provider-field">
-          <label>Service Name</label>
-          <input className="text-input wide" value={name} onChange={e => setName(e.target.value)} placeholder="My App" />
-        </div>
-
-        <div className="provider-field">
-          <label>Service Type</label>
-          <select className="select-input wide" value={type} onChange={e => setType(e.target.value)}>
-            {SERVICE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-          </select>
-        </div>
-
-        <div className="provider-field">
-          <label>Port Number</label>
-          <input className="text-input" value={port} onChange={e => setPort(e.target.value)} placeholder="8080" style={{ width: 120 }} type="number" />
-        </div>
-
-        <div className="provider-field">
-          <label>Directory Path</label>
-          <div className="input-with-action">
-            <input className="text-input wide" value={dir} onChange={e => setDir(e.target.value)} placeholder="C:\\projects\\my-app" />
-            <button className="btn btn-secondary btn-sm" title="Browse"><FolderGit2 size={14} /></button>
-          </div>
-        </div>
-
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 24 }}>
-          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" onClick={handleSubmit} disabled={!name.trim() || !port.trim()}>
-            <Plus size={14} /> Create Service
+      <div className="glass" style={{ width: 520, maxWidth: "100%", padding: 0, borderRadius: "var(--radius-lg)", overflow: "hidden" }}>
+        {/* Tab bar */}
+        <div style={{ display: "flex", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+          <button
+            onClick={() => setTab("quick")}
+            style={{
+              flex: 1, padding: "12px 16px", border: "none", cursor: "pointer",
+              background: tab === "quick" ? "rgba(59,130,246,0.1)" : "transparent",
+              color: tab === "quick" ? "var(--accent-blue)" : "var(--text-muted)",
+              fontWeight: tab === "quick" ? 600 : 400, fontSize: 13,
+              borderBottom: tab === "quick" ? "2px solid var(--accent-blue)" : "2px solid transparent",
+              transition: "all 0.15s",
+            }}
+          >
+            ⚡ Quick Add
+          </button>
+          <button
+            onClick={() => setTab("custom")}
+            style={{
+              flex: 1, padding: "12px 16px", border: "none", cursor: "pointer",
+              background: tab === "custom" ? "rgba(59,130,246,0.1)" : "transparent",
+              color: tab === "custom" ? "var(--accent-blue)" : "var(--text-muted)",
+              fontWeight: tab === "custom" ? 600 : 400, fontSize: 13,
+              borderBottom: tab === "custom" ? "2px solid var(--accent-blue)" : "2px solid transparent",
+              transition: "all 0.15s",
+            }}
+          >
+            ⚙️ Custom Service
           </button>
         </div>
+
+        {tab === "quick" ? (
+          /* ── Quick Add Tab ── */
+          <div style={{ padding: 20 }}>
+            <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>Recommended Services</h4>
+            <p className="text-muted-sm" style={{ fontSize: 12, marginBottom: 14 }}>
+              One-click add common services. You can configure the directory path later.
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {RECOMMENDED_SERVICES.map(svc => {
+                const entry = SERVICE_CATALOG.find(e => e.type === svc.type);
+                return (
+                  <div
+                    key={svc.name}
+                    onClick={() => handleQuickAdd(svc)}
+                    className="glass-sm"
+                    style={{
+                      display: "flex", alignItems: "center", gap: 10,
+                      padding: "10px 14px", borderRadius: "var(--radius-sm)",
+                      cursor: "pointer", transition: "background 0.1s",
+                    }}
+                    onMouseOver={e => (e.currentTarget.style.background = "rgba(59,130,246,0.08)")}
+                    onMouseOut={e => (e.currentTarget.style.background = "")}
+                  >
+                    <span style={{ fontSize: 20 }}>{entry?.icon || "📦"}</span>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>{svc.name}</div>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                        {svc.description} — Port {svc.port}
+                      </div>
+                    </div>
+                    <span style={{
+                      fontSize: 11, padding: "2px 8px", borderRadius: 8,
+                      background: "rgba(59,130,246,0.1)", color: "var(--accent-blue)",
+                    }}>
+                      {svc.type}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          /* ── Custom Service Tab ── */
+          <div style={{ padding: 20 }}>
+            <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 14 }}>Configure Service</h4>
+
+            <div className="provider-field">
+              <label>Service Name</label>
+              <input className="text-input wide" value={name} onChange={e => setName(e.target.value)} placeholder="My App" />
+            </div>
+
+            <div className="provider-field">
+              <label>Service Type</label>
+              <select className="select-input wide" value={type} onChange={e => handleTypeChange(e.target.value)}>
+                {Object.entries(catalogByCategory).map(([category, entries]) => (
+                  <optgroup key={category} label={category}>
+                    {entries.map(e => (
+                      <option key={e.type} value={e.type}>
+                        {e.icon} {e.type}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+              {/* Type description */}
+              <div style={{
+                marginTop: 6, fontSize: 11, color: "var(--text-muted)",
+                padding: "6px 10px", background: "rgba(255,255,255,0.03)", borderRadius: "var(--radius-sm)",
+                display: "flex", alignItems: "center", gap: 6,
+              }}>
+                <span style={{ fontSize: 16 }}>{currentEntry.icon}</span>
+                <span>{currentEntry.description}</span>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", gap: 12 }}>
+              <div className="provider-field" style={{ flex: "0 0 120px" }}>
+                <label>Port Number</label>
+                <input className="text-input" value={port} onChange={e => setPort(e.target.value)}
+                  placeholder={String(currentEntry.defaultPort)} style={{ width: "100%" }} type="number" />
+              </div>
+
+              {currentEntry.needsDir && (
+                <div className="provider-field" style={{ flex: 1 }}>
+                  <label>Directory Path</label>
+                  <div className="input-with-action">
+                    <input className="text-input wide" value={dir}
+                      onChange={e => setDir(e.target.value)} placeholder={currentEntry.dirHint} />
+                    <button className="btn btn-secondary btn-sm" title="Browse"><FolderGit2 size={14} /></button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 20 }}>
+              <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+              <button className="btn btn-primary" onClick={handleSubmit}
+                disabled={!name.trim() || !port.trim() || (currentEntry.needsDir && !dir.trim())}>
+                <Plus size={14} /> Create Service
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -220,7 +402,7 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
           const merged = [...MOCK_SERVICES];
           for (const ms of data.services) {
             const idx = merged.findIndex(m => m.name === ms.name);
-            if (idx >= 0) merged[idx] = { ...merged[idx], ...ms };
+            if (idx >= 0) merged[idx] = { ...merged[idx], ...ms, dir: ms.dir || (merged[idx] as any).dir };
             else merged.push(ms);
           }
           setServices(merged);
@@ -286,7 +468,7 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
           try {
             await fetch(`${apiBase}/api/service/start`, {
               method: "POST", headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ name: svc.name, port: svc.port, type: svc.type }),
+              body: JSON.stringify({ name: svc.name, port: svc.port, type: svc.type, dir: (svc as any).dir }),
             });
           } catch {}
         }
@@ -905,6 +1087,9 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
                 </div>
                 <div className="service-meta-row">
                   <span className="meta-item"><Server size={12} /> Port {svc.port}</span>
+                  {(svc as any).dir && (
+                    <span className="meta-item" title={(svc as any).dir}><FolderGit2 size={12} /> {(svc as any).dir.split(/[\\/]/).pop()}</span>
+                  )}
                   {svc.running && (
                     <>
                       <span className="meta-item"><Activity size={12} /> CPU: {svc.cpu.toFixed(1)}%</span>

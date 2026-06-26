@@ -51,7 +51,7 @@ let wsFrameBuffer      = Buffer.alloc(0);
 const rateLimitMap     = new Map();
 
 // ── Managed services (started via /api/service/start) ──────────
-const runningServices  = new Map(); // name -> { server, port, type }
+const runningServices  = new Map(); // name -> { server, port, type, dir }
 
 // ── MIME types ─────────────────────────────────────────────────
 const MIME = {
@@ -720,7 +720,7 @@ function handleRequest(req, res) {
   if (pathname === "/api/services" && req.method === "GET") {
     const list = [];
     for (const [name, svc] of runningServices) {
-      list.push({ name, port: svc.port, type: svc.type, running: true, cpu: 0.5, memory: 8_000_000 });
+      list.push({ name, port: svc.port, type: svc.type, dir: svc.dir || null, running: true, cpu: 0.5, memory: 8_000_000 });
     }
     return jsonResponse(res, 200, { status: "ok", services: list });
   }
@@ -740,69 +740,464 @@ function handleRequest(req, res) {
           return jsonResponse(res, 200, { status: "ok", message: `Service "${name}" already running` });
         }
 
-        // Check port in use
-        const testServer = net.createServer();
-        testServer.once("error", () => {
-          return jsonResponse(res, 409, { status: "error", message: `Port ${port} is already in use` });
-        });
-        testServer.listen(port, () => {
-          testServer.close();
+        // Create an HTTP server for this service
+        const svr = http.createServer((svcReq, svcRes) => {
+          // CORS headers for all responses
+          const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS", "Access-Control-Allow-Headers": "Content-Type" };
+          if (svcReq.method === "OPTIONS") {
+            svcRes.writeHead(204, cors); return svcRes.end();
+          }
 
-          // Create a simple HTTP server for this service
-          const svr = http.createServer((svcReq, svcRes) => {
-            // If it's a static site and a dir is specified, try serving files
-            if (dir && fs.existsSync(dir)) {
-              const svcFilePath = path.join(dir, svcReq.url === "/" ? "index.html" : svcReq.url);
-              if (fs.existsSync(svcFilePath) && fs.statSync(svcFilePath).isFile()) {
-                const ext = path.extname(svcFilePath).toLowerCase();
-                svcRes.writeHead(200, {
-                  "Content-Type": MIME[ext] || "application/octet-stream",
-                  "Access-Control-Allow-Origin": "*",
-                });
-                return fs.createReadStream(svcFilePath).pipe(svcRes);
-              }
+          // ── File Browser mode (when dir is provided) ──────────────
+          if (dir && fs.existsSync(dir)) {
+            const url = new URL(svcReq.url, "http://localhost");
+            let reqPath = decodeURIComponent(url.pathname);
+
+            // Security: prevent path traversal
+            const resolved = path.resolve(dir, "." + reqPath);
+            if (!resolved.startsWith(path.resolve(dir))) {
+              svcRes.writeHead(403, { ...cors, "Content-Type": "text/plain" });
+              return svcRes.end("Forbidden: path traversal detected");
             }
 
-            // Default: respond with service info
-            const info = runningServices.get(name);
+            // ── HANDLE DELETE ──
+            if (svcReq.method === "DELETE" || (svcReq.method === "POST" && url.searchParams.has("delete"))) {
+              const delPath = svcReq.method === "DELETE" ? resolved : path.resolve(dir, "." + url.searchParams.get("delete"));
+              if (!delPath.startsWith(path.resolve(dir))) {
+                svcRes.writeHead(403, { ...cors, "Content-Type": "application/json" });
+                return svcRes.end(JSON.stringify({ error: "Forbidden" }));
+              }
+              fs.stat(delPath, (err, stat) => {
+                if (err) {
+                  svcRes.writeHead(404, { ...cors, "Content-Type": "application/json" });
+                  return svcRes.end(JSON.stringify({ error: "Not found" }));
+                }
+                const rmCmd = fs.rm;
+                rmCmd(delPath, { recursive: true, force: true }, (rmErr) => {
+                  if (rmErr) {
+                    svcRes.writeHead(500, { ...cors, "Content-Type": "application/json" });
+                    return svcRes.end(JSON.stringify({ error: rmErr.message }));
+                  }
+                  svcRes.writeHead(200, { ...cors, "Content-Type": "application/json" });
+                  svcRes.end(JSON.stringify({ ok: true, deleted: reqPath }));
+                });
+              });
+              return;
+            }
+
+            // ── HANDLE UPLOAD ──
+            if (svcReq.method === "POST" && !url.searchParams.has("delete")) {
+              const contentType = svcReq.headers["content-type"] || "";
+              if (contentType.includes("multipart/form-data")) {
+                // Simple multipart parser for single file upload
+                const boundary = "--" + contentType.split("boundary=")[1];
+                const bufs = [];
+                svcReq.on("data", c => bufs.push(c));
+                svcReq.on("end", () => {
+                  const raw = Buffer.concat(bufs);
+                  const parts = splitMultiPart(raw, boundary);
+                  let fileName = "upload.bin";
+                  let fileData = null;
+                  let uploadDir = resolved;
+
+                  for (const part of parts) {
+                    const headerEnd = part.indexOf("\r\n\r\n");
+                    if (headerEnd === -1) continue;
+                    const headers = part.slice(0, headerEnd).toString("utf8");
+                    const body = part.slice(headerEnd + 4);
+
+                    if (headers.includes('name="dir"')) {
+                      const sub = body.toString("utf8").trim();
+                      if (sub) uploadDir = path.resolve(dir, sub);
+                    } else if (headers.includes('name="file"') || headers.includes('name="files"')) {
+                      const nameMatch = headers.match(/filename="([^"]*)"/);
+                      if (nameMatch) fileName = nameMatch[1];
+                      fileData = body;
+                    }
+                  }
+
+                  if (!fileData) {
+                    svcRes.writeHead(400, { ...cors, "Content-Type": "application/json" });
+                    return svcRes.end(JSON.stringify({ error: "No file in upload" }));
+                  }
+
+                  const targetPath = path.join(uploadDir, fileName);
+                  if (!targetPath.startsWith(path.resolve(dir))) {
+                    svcRes.writeHead(403, { ...cors, "Content-Type": "application/json" });
+                    return svcRes.end(JSON.stringify({ error: "Forbidden" }));
+                  }
+
+                  // Strip trailing \r\n from multipart body (fileData is a Buffer)
+                  const cleanData = fileData.length >= 2 && fileData[fileData.length - 1] === 0x0a && fileData[fileData.length - 2] === 0x0d
+                    ? fileData.slice(0, -2) : fileData;
+
+                  fs.mkdir(path.dirname(targetPath), { recursive: true }, () => {
+                    fs.writeFile(targetPath, cleanData, (writeErr) => {
+                      if (writeErr) {
+                        svcRes.writeHead(500, { ...cors, "Content-Type": "application/json" });
+                        return svcRes.end(JSON.stringify({ error: writeErr.message }));
+                      }
+                      svcRes.writeHead(200, { ...cors, "Content-Type": "application/json" });
+                      svcRes.end(JSON.stringify({ ok: true, file: fileName, path: targetPath }));
+                    });
+                  });
+                });
+                return;
+              }
+
+              // JSON body upload (file creation + folder creation)
+              let body = "";
+              svcReq.on("data", c => body += c);
+              svcReq.on("end", () => {
+                try {
+                  const data = JSON.parse(body);
+                  const { file, content, name: fname, mkdir, dir: subDir } = data;
+
+                  if (mkdir || (fname && !file && content === undefined)) {
+                    // Create folder
+                    const folderName = fname || "new-folder";
+                    const targetDir = subDir ? path.resolve(dir, subDir, folderName) : path.join(resolved, folderName);
+                    if (!targetDir.startsWith(path.resolve(dir))) {
+                      svcRes.writeHead(403, { ...cors, "Content-Type": "application/json" });
+                      return svcRes.end(JSON.stringify({ error: "Forbidden" }));
+                    }
+                    fs.mkdir(targetDir, { recursive: true }, (mkErr) => {
+                      if (mkErr) {
+                        svcRes.writeHead(500, { ...cors, "Content-Type": "application/json" });
+                        return svcRes.end(JSON.stringify({ error: mkErr.message }));
+                      }
+                      svcRes.writeHead(200, { ...cors, "Content-Type": "application/json" });
+                      svcRes.end(JSON.stringify({ ok: true, folder: folderName }));
+                    });
+                    return;
+                  }
+
+                  // Write file
+                  const targetFile = fname || file || "untitled.txt";
+                  const targetPath = subDir ? path.resolve(dir, subDir, targetFile) : path.join(resolved, targetFile);
+                  if (!targetPath.startsWith(path.resolve(dir))) {
+                    svcRes.writeHead(403, { ...cors, "Content-Type": "application/json" });
+                    return svcRes.end(JSON.stringify({ error: "Forbidden" }));
+                  }
+                  fs.writeFile(targetPath, content || "", (writeErr) => {
+                    if (writeErr) {
+                      svcRes.writeHead(500, { ...cors, "Content-Type": "application/json" });
+                      return svcRes.end(JSON.stringify({ error: writeErr.message }));
+                    }
+                    svcRes.writeHead(200, { ...cors, "Content-Type": "application/json" });
+                    svcRes.end(JSON.stringify({ ok: true, file: targetFile }));
+                  });
+                } catch {
+                  svcRes.writeHead(400, { ...cors, "Content-Type": "application/json" });
+                  svcRes.end(JSON.stringify({ error: "Invalid JSON" }));
+                }
+              });
+              return;
+            }
+
+            // ── HANDLE DIRECTORY LISTING ──
+            fs.stat(resolved, (err, stat) => {
+              if (err) {
+                if (reqPath === "/" || reqPath === "") {
+                  return sendStatusPage(svcRes, name, type, port, dir, cors);
+                }
+                svcRes.writeHead(404, { ...cors, "Content-Type": "text/plain" });
+                return svcRes.end("Not found");
+              }
+
+              if (stat.isDirectory()) {
+                // Check for index.html
+                const indexPath = path.join(resolved, "index.html");
+                if (fs.existsSync(indexPath)) {
+                  const ext = path.extname(indexPath).toLowerCase();
+                  svcRes.writeHead(200, { ...cors, "Content-Type": MIME[ext] || "text/html; charset=utf-8" });
+                  return fs.createReadStream(indexPath).pipe(svcRes);
+                }
+                // Show directory listing
+                return sendDirListing(svcRes, resolved, reqPath, dir, cors);
+              }
+
+              // Serve file
+              const ext = path.extname(resolved).toLowerCase();
+              svcRes.writeHead(200, { ...cors, "Content-Type": MIME[ext] || "application/octet-stream" });
+              fs.createReadStream(resolved).pipe(svcRes);
+            });
+            return;
+          }
+
+          // ── Default: status page (no dir provided) ────────────────
+          sendStatusPage(svcRes, name, type, port, dir, cors);
+        });
+
+        // ── Multipart parser helper ──
+        function splitMultiPart(buf, boundary) {
+          const parts = [];
+          const bLen = Buffer.byteLength(boundary);
+          let start = 0;
+          while (start < buf.length) {
+            const idx = buf.indexOf(boundary, start);
+            if (idx === -1) break;
+            // Check for closing boundary (--boundary--) → stop
+            const after = idx + bLen;
+            if (after < buf.length && buf[after] === 0x2d) break;
+            // Skip \r\n after the boundary line
+            let contentStart = after;
+            if (contentStart + 1 < buf.length && buf[contentStart] === 0x0d && buf[contentStart + 1] === 0x0a) contentStart += 2;
+            // Find next boundary (regular or closing)
+            const nextIdx = buf.indexOf(boundary, contentStart);
+            if (nextIdx === -1) break;
+            // Strip \r\n before the next boundary
+            let contentEnd = nextIdx;
+            if (contentEnd >= 2 && buf[contentEnd - 2] === 0x0d && buf[contentEnd - 1] === 0x0a) contentEnd -= 2;
+            const part = buf.slice(contentStart, contentEnd);
+            if (part.length > 0) parts.push(part);
+            start = nextIdx;
+          }
+          return parts;
+        }
+
+        // ── Directory listing HTML ──
+        function sendDirListing(resp, absPath, relPath, baseDir, cors) {
+          fs.readdir(absPath, { withFileTypes: true }, (readErr, entries) => {
+            if (readErr) {
+              resp.writeHead(500, { ...cors, "Content-Type": "text/plain" });
+              return resp.end("Error reading directory");
+            }
+
+            // Sort: directories first, then files, alphabetical
+            entries.sort((a, b) => {
+              if (a.isDirectory() !== b.isDirectory()) return a.isDirectory() ? -1 : 1;
+              return a.name.localeCompare(b.name);
+            });
+
+            // Build breadcrumb path
+            const crumbs = relPath.replaceAll("\\", "/").split("/").filter(Boolean);
+            const breadcrumbHTML = crumbs.length === 0
+              ? `<span style="font-weight:700">/</span>`
+              : `<a href="/" style="color:#3b82f6;text-decoration:none">/</a>`
+                + crumbs.map((c, i) => {
+                    const p = "/" + crumbs.slice(0, i + 1).join("/");
+                    return i === crumbs.length - 1
+                      ? `<span style="font-weight:600">${escHtml(c)}</span>`
+                      : `<a href="${p}" style="color:#3b82f6;text-decoration:none">${escHtml(c)}</a> /`;
+                  }).join(" ");
+
+            const rows = entries.map(e => {
+              const isDir = e.isDirectory();
+              const fullPath = path.join(absPath, e.name);
+              let size = "", mtime = "";
+              try {
+                const s = fs.statSync(fullPath);
+                size = isDir ? "" : formatBytes(s.size);
+                mtime = s.mtime.toLocaleString();
+              } catch {}
+              const icon = isDir ? "📁" : getFileIcon(e.name);
+              const href = (relPath === "/" ? "" : relPath) + "/" + encodeURIComponent(e.name);
+              return `<tr>
+                <td class="icon">${icon}</td>
+                <td class="name"><a href="${href}">${escHtml(e.name)}</a></td>
+                <td class="size">${size}</td>
+                <td class="date">${mtime}</td>
+                <td class="actions">
+                  ${isDir ? "" : `<button class="dl-btn" onclick="fetch('${href}',{method:'DELETE'}).then(()=>location.reload())" title="Delete">🗑</button>`}
+                  <button class="dl-btn" onclick="if(prompt('Delete ${isDir ? "folder: " : "file: "}${escHtml(e.name)}?'))fetch('${href}',{method:'DELETE'}).then(()=>location.reload())" title="Delete">🗑</button>
+                </td>
+              </tr>`;
+            }).join("\n");
+
             const html = `<!DOCTYPE html>
 <html lang="en">
-<head><meta charset="utf-8"><title>${name}</title>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${escHtml(path.basename(absPath) || "File Browser")}</title>
 <style>
-  body { font-family: system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; }
-  h1 { color: #22c55e; } .badge { display:inline-block; background:#22c55e22; color:#22c55e; border-radius:4px; padding:2px 8px; font-size:12px; }
-  pre { background:#1e1e2e; color:#cdd6f4; padding:12px; border-radius:6px; overflow:auto; }
-  .meta { color:#888; font-size:13px; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:system-ui,sans-serif; background:#0f0f13; color:#e2e8f0; min-height:100vh; }
+  .header { background:#1a1a2e; border-bottom:1px solid rgba(255,255,255,0.06); padding:12px 20px; display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  .header h1 { font-size:16px; font-weight:600; color:#22c55e; }
+  .header .info { font-size:11px; color:#6b7280; }
+  .breadcrumb { padding:10px 20px; font-size:13px; background:rgba(255,255,255,0.02); border-bottom:1px solid rgba(255,255,255,0.04); }
+  .toolbar { padding:10px 20px; display:flex; gap:8px; align-items:center; }
+  .toolbar button, .toolbar label { padding:6px 14px; border-radius:6px; border:1px solid rgba(255,255,255,0.1); background:rgba(255,255,255,0.04); color:#e2e8f0; font-size:12px; cursor:pointer; transition:all 0.15s; }
+  .toolbar button:hover, .toolbar label:hover { background:rgba(59,130,246,0.15); border-color:rgba(59,130,246,0.3); }
+  .toolbar .new-folder input { padding:5px 8px; border-radius:4px; border:1px solid rgba(255,255,255,0.1); background:rgba(0,0,0,0.3); color:#e2e8f0; font-size:12px; width:140px; }
+  table { width:100%; border-collapse:collapse; }
+  th { text-align:left; padding:8px 12px; font-size:11px; font-weight:600; color:#6b7280; text-transform:uppercase; letter-spacing:0.5px; border-bottom:1px solid rgba(255,255,255,0.06); }
+  td { padding:8px 12px; font-size:13px; border-bottom:1px solid rgba(255,255,255,0.03); }
+  tr:hover td { background:rgba(59,130,246,0.04); }
+  .icon { width:28px; font-size:16px; text-align:center; }
+  .name a { color:#e2e8f0; text-decoration:none; font-weight:500; }
+  .name a:hover { color:#3b82f6; }
+  .size { width:80px; color:#6b7280; font-size:12px; font-family:monospace; }
+  .date { width:160px; color:#6b7280; font-size:11px; }
+  .actions { width:60px; text-align:right; }
+  .dl-btn { background:none; border:none; cursor:pointer; font-size:14px; padding:2px 4px; border-radius:4px; opacity:0.4; transition:opacity 0.15s; }
+  .dl-btn:hover { opacity:1; background:rgba(239,68,68,0.15); }
+  .empty-state { padding:40px; text-align:center; color:#6b7280; font-size:14px; }
+  .upload-progress { font-size:11px; color:#22c55e; padding:4px 0; display:none; }
+  #file-input { display:none; }
+  .toast { position:fixed; bottom:20px; right:20px; padding:8px 16px; border-radius:6px; font-size:13px; z-index:999; transition:all 0.3s; }
+  .toast.success { background:rgba(34,197,94,0.15); border:1px solid rgba(34,197,94,0.3); color:#22c55e; }
+  .toast.error { background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.3); color:#ef4444; }
+  @media(max-width:600px) { .header, .breadcrumb, .toolbar { padding:8px 12px; } td,th { padding:6px 8px; } .date { display:none; } }
 </style></head>
 <body>
-  <h1>${name} <span class="badge">&#9679; Running</span></h1>
-  <p class="meta">Served via dweb on port ${port}</p>
-  ${type ? `<p>Type: <strong>${type}</strong></p>` : ""}
-  ${dir ? `<p>Directory: <code>${dir}</code></p>` : ""}
-  <hr>
-  <pre>dweb service running since ${new Date().toISOString()}
+  <div class="header">
+    <h1>📁 ${escHtml(name)}</h1>
+    <span class="info">${escHtml(baseDir)} · ${entries.length} item(s)</span>
+  </div>
+  <div class="breadcrumb">📂 ${breadcrumbHTML}</div>
+  <div class="toolbar">
+    <label for="file-input">📤 Upload Files</label>
+    <input type="file" id="file-input" multiple onchange="uploadFiles(this.files)">
+    <button onclick="newFolder()">📁 New Folder</button>
+    <span class="new-folder" id="new-folder-input" style="display:none">
+      <input type="text" id="folder-name" placeholder="folder name" onkeydown="if(event.key==='Enter')createFolder()">
+      <button class="dl-btn" onclick="createFolder()" style="opacity:1">✓</button>
+      <button class="dl-btn" onclick="cancelNewFolder()" style="opacity:1;color:#ef4444">✕</button>
+    </span>
+    <span class="upload-progress" id="upload-progress"></span>
+  </div>
+  <div id="dropzone" style="min-height:200px">
+    ${entries.length === 0 ? '<div class="empty-state">📭 This folder is empty<br><span style="font-size:12px">Upload files using the button above</span></div>' : `
+    <table>
+      <thead><tr><th></th><th>Name</th><th>Size</th><th>Modified</th><th></th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`}
+  </div>
+<script>
+const currentPath = ${JSON.stringify(relPath === "/" ? "" : relPath)};
+function uploadFiles(files) {
+  if (!files.length) return;
+  const prog = document.getElementById("upload-progress");
+  let done = 0;
+  for (const f of files) {
+    const fd = new FormData();
+    fd.append("dir", currentPath);
+    fd.append("file", f);
+    prog.style.display = "inline";
+    prog.textContent = "Uploading " + f.name + "...";
+    fetch("", { method: "POST", body: fd })
+      .then(r => r.json())
+      .then(() => { done++; if (done === files.length) location.reload(); })
+      .catch(e => { prog.textContent = "Error: " + e.message; });
+  }
+}
+function newFolder() {
+  document.getElementById("new-folder-input").style.display = "inline";
+  document.getElementById("folder-name").focus();
+}
+function cancelNewFolder() {
+  document.getElementById("new-folder-input").style.display = "none";
+  document.getElementById("folder-name").value = "";
+}
+function createFolder() {
+  const name = document.getElementById("folder-name").value.trim();
+  if (!name) return;
+  fetch("", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, dir: currentPath })
+  }).then(r => r.json()).then(() => location.reload()).catch(e => alert(e.message));
+}
+// Drag and drop
+const dz = document.getElementById("dropzone");
+dz.addEventListener("dragover", e => { e.preventDefault(); dz.style.outline = "2px dashed #3b82f6"; });
+dz.addEventListener("dragleave", () => { dz.style.outline = ""; });
+dz.addEventListener("drop", e => {
+  e.preventDefault(); dz.style.outline = "";
+  uploadFiles(e.dataTransfer.files);
+});
+// Auto-refresh if uploaded via status page
+if (window.name !== "dweb-browser") setTimeout(() => location.reload(), 30000);
+</script>
+</body></html>`;
 
-  Local:    http://localhost:${port}
-  Network:  http://${getLocalIPs()[0] || "127.0.0.1"}:${port}
-  dweb:     dweb://${name.toLowerCase().replace(/\\s+/g, "-")}.dweb</pre>
-  <p class="meta">This service is managed by dweb-server. Stop it from the Dashboard.</p>
-</body>
-</html>`;
-            svcRes.writeHead(200, {
-              "Content-Type": "text/html; charset=utf-8",
-              "Access-Control-Allow-Origin": "*",
-            });
-            svcRes.end(html);
+            resp.writeHead(200, { ...cors, "Content-Type": "text/html; charset=utf-8" });
+            resp.end(html);
           });
+        }
 
-          svr.listen(port, "0.0.0.0", () => {
-            runningServices.set(name, { server: svr, port, type: type || "Custom" });
-            console.log(`  [service] Started "${name}" on port ${port}`);
-            return jsonResponse(res, 200, {
-              status: "ok",
-              message: `Service "${name}" started on port ${port}`,
-              service: { name, port, type: type || "Custom", running: true },
-            });
+        // ── Status page (when no dir provided or no index.html) ──
+        function sendStatusPage(resp, svcName, svcType, svcPort, svcDir, cors) {
+          const svcInfo = runningServices.get(svcName);
+          const html = `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>${svcName}</title>
+<style>
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:system-ui,sans-serif; background:#0f0f13; color:#e2e8f0; min-height:100vh; display:flex; align-items:center; justify-content:center; }
+  .card { background:#1a1a2e; border:1px solid rgba(255,255,255,0.06); border-radius:12px; padding:32px; max-width:520px; width:90%; }
+  h1 { font-size:20px; font-weight:700; display:flex; align-items:center; gap:10px; }
+  .badge { display:inline-block; background:#22c55e22; color:#22c55e; border-radius:6px; padding:2px 10px; font-size:12px; font-weight:600; }
+  .label { color:#6b7280; font-size:11px; text-transform:uppercase; letter-spacing:0.5px; margin-top:16px; margin-bottom:4px; }
+  .value { color:#e2e8f0; font-size:14px; }
+  pre { background:#0f0f13; color:#cdd6f4; padding:14px; border-radius:8px; overflow:auto; font-size:12px; margin-top:16px; border:1px solid rgba(255,255,255,0.04); }
+  .meta { color:#6b7280; font-size:12px; margin-top:16px; }
+  a { color:#3b82f6; text-decoration:none; }
+  .actions { display:flex; gap:8px; margin-top:16px; }
+  .actions a { display:inline-flex; align-items:center; gap:6px; padding:8px 16px; border-radius:6px; font-size:13px; font-weight:500; transition:all 0.15s; }
+  .actions a.primary { background:#3b82f6; color:#fff; }
+  .actions a.secondary { background:rgba(255,255,255,0.06); color:#e2e8f0; border:1px solid rgba(255,255,255,0.1); }
+  .actions a:hover { transform:translateY(-1px); }
+</style></head>
+<body>
+  <div class="card">
+    <h1>${escHtml(svcName)} <span class="badge">● Running</span></h1>
+    ${svcType ? `<div class="label">Type</div><div class="value">${escHtml(svcType)}</div>` : ""}
+    ${svcDir ? `<div class="label">Directory</div><div class="value"><code>${escHtml(svcDir)}</code></div>` : ""}
+    <pre>dweb service since ${new Date().toISOString()}
+
+  Local:    http://localhost:${svcPort}
+  Network:  http://${getLocalIPs()[0] || "127.0.0.1"}:${svcPort}
+  dweb:     dweb://${svcName.toLowerCase().replace(/\\s+/g, "-")}.dweb</pre>
+    ${svcDir ? `<div class="actions">
+      <a class="primary" href="/">📂 Browse Files</a>
+      <a class="secondary" href="#" onclick="document.getElementById('fu').click();return false">📤 Upload</a>
+      <input type="file" id="fu" multiple style="display:none" onchange="(f=>{for(const x of f){const d=new FormData();d.append('file',x);fetch('',{method:'POST',body:d})}setTimeout(()=>location.href='/',500)})(this.files)">
+    </div>` : ""}
+    <div class="meta">This service is managed by dweb-server. Stop it from the Dashboard.</div>
+  </div>
+</body></html>`;
+          resp.writeHead(200, { ...cors, "Content-Type": "text/html; charset=utf-8" });
+          resp.end(html);
+        }
+
+        // ── Helpers ──
+        function escHtml(s) { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+        function formatBytes(b) {
+          if (!b || b === 0) return "";
+          const u = ["B","KB","MB","GB"]; let i = 0; let s = b;
+          while (s >= 1024 && i < u.length - 1) { s /= 1024; i++; }
+          return s.toFixed(i === 0 ? 0 : 1) + " " + u[i];
+        }
+        function getFileIcon(n) {
+          const e = n.split(".").pop().toLowerCase();
+          if (["jpg","jpeg","png","gif","svg","webp","ico","bmp"].includes(e)) return "🖼";
+          if (["mp4","webm","avi","mkv","mov"].includes(e)) return "🎬";
+          if (["mp3","wav","ogg","flac","m4a"].includes(e)) return "🎵";
+          if (["zip","tar","gz","rar","7z"].includes(e)) return "🗜";
+          if (["pdf"].includes(e)) return "📄";
+          if (["doc","docx"].includes(e)) return "📝";
+          if (["xls","xlsx","csv"].includes(e)) return "📊";
+          if (["js","ts","jsx","tsx","json","html","css","scss","py","rb","go","rs","java","c","cpp","h","sh","bash","yml","yaml","toml","ini","cfg","md","txt"].includes(e)) return "📄";
+          return "📄";
+        }
+
+        // Handle EADDRINUSE gracefully
+        svr.once("error", (err) => {
+          if (err.code === "EADDRINUSE") {
+            return jsonResponse(res, 409, { status: "error", message: `Port ${port} is already in use` });
+          }
+          return jsonResponse(res, 500, { status: "error", message: err.message });
+        });
+
+        svr.listen(port, "0.0.0.0", () => {
+          runningServices.set(name, { server: svr, port, type: type || "Custom", dir: dir || null });
+          console.log(`  [service] Started "${name}" on port ${port}${dir ? ` dir="${dir}"` : ""}`);
+          return jsonResponse(res, 200, {
+            status: "ok",
+            message: `Service "${name}" started on port ${port}`,
+            service: { name, port, type: type || "Custom", dir: dir || null, running: true },
           });
         });
       } catch (e) {
