@@ -29,6 +29,7 @@ interface RemoteInstance {
 type OnlineMode = "local" | "p2p-visible" | "p2p-anonymous";
 
 const REMOTE_STORAGE_KEY = "dweb-remote-instances";
+const ONLINE_MODE_KEY = "dweb-online-mode";
 
 function loadRemotes(): RemoteInstance[] {
   try {
@@ -498,7 +499,13 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
     return saved;
   });
   const [showConnectModal, setShowConnectModal] = useState(false);
-  const [onlineMode, setOnlineMode] = useState<OnlineMode>("local");
+  const [onlineMode, setOnlineMode] = useState<OnlineMode>(() => {
+    try {
+      const saved = localStorage.getItem(ONLINE_MODE_KEY);
+      if (saved === "local" || saved === "p2p-visible" || saved === "p2p-anonymous") return saved;
+    } catch {}
+    return "local";
+  });
   const [peerCount, setPeerCount] = useState(0);
   const [relayStatus, setRelayStatus] = useState<RelayStatus | null>(null);
   const [discoveredPeers, setDiscoveredPeers] = useState<RelayPeer[]>([]);
@@ -570,6 +577,11 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
   useEffect(() => {
     saveRemotes(remotes);
   }, [remotes]);
+
+  // Persist online mode to localStorage so it survives tab switches
+  useEffect(() => {
+    try { localStorage.setItem(ONLINE_MODE_KEY, onlineMode); } catch {}
+  }, [onlineMode]);
 
   const handleConnectRemote = async (relayPeer: RelayPeer) => {
     // Check if already added

@@ -1,7 +1,6 @@
 import { Globe, Gauge, Bot, Settings, Menu, Network, Zap, FolderGit2, MessageCircle, BookOpen } from "lucide-react";
 import { useState } from "react";
 import type { View } from "../types";
-import OnlineToggle from "./OnlineToggle";
 
 interface SidebarProps {
   currentView: View;
@@ -33,12 +32,6 @@ export default function Sidebar({ currentView, onNavigate }: SidebarProps) {
           <Menu size={16} />
         </button>
       </div>
-
-      {!collapsed && (
-        <div className="sidebar-status">
-          <OnlineToggle variant="badge" />
-        </div>
-      )}
 
       <nav className="sidebar-nav">
         {navItems.map((item) => (
