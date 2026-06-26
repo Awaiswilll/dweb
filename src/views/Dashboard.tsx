@@ -211,7 +211,25 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
       const result = await invoke<Service[]>("get_services");
       setServices(result.length > 0 ? result : MOCK_SERVICES);
     } catch {
-      setServices(MOCK_SERVICES);
+      // Try dweb-server managed services
+      try {
+        const resp = await fetch(`${window.location.origin}/api/services`);
+        const data = await resp.json();
+        if (data?.services?.length > 0) {
+          // Merge mock + managed, managed override mock
+          const merged = [...MOCK_SERVICES];
+          for (const ms of data.services) {
+            const idx = merged.findIndex(m => m.name === ms.name);
+            if (idx >= 0) merged[idx] = { ...merged[idx], ...ms };
+            else merged.push(ms);
+          }
+          setServices(merged);
+        } else {
+          setServices(MOCK_SERVICES);
+        }
+      } catch {
+        setServices(MOCK_SERVICES);
+      }
     } finally {
       setLoadingServices(false);
     }
@@ -236,16 +254,44 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
 
   const handleAddService = (svc: Service) => {
     setServices(prev => [...prev, svc]);
+    // Auto-start via dweb-server
+    fetch(`${window.location.origin}/api/service/start`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: svc.name, port: svc.port, type: svc.type, dir: (svc as any).dir }),
+    }).catch(() => {});
   };
 
   const handleToggleService = async (name: string, running: boolean) => {
-    try {
-      if (running) {
+    const svc = services.find(s => s.name === name);
+    const apiBase = window.location.origin; // e.g. http://localhost:49737
+
+    if (running) {
+      // Stop: try Tauri, fallback to dweb-server API
+      try {
         await invoke("stop_service", { name });
-      } else {
-        await invoke("start_service", { name });
+      } catch {
+        try {
+          await fetch(`${apiBase}/api/service/stop`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name }),
+          });
+        } catch {}
       }
-    } catch { /* ignore in browser mode */ }
+    } else {
+      // Start: try Tauri, fallback to dweb-server API
+      try {
+        await invoke("start_service", { name });
+      } catch {
+        if (svc) {
+          try {
+            await fetch(`${apiBase}/api/service/start`, {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ name: svc.name, port: svc.port, type: svc.type }),
+            });
+          } catch {}
+        }
+      }
+    }
     setServices(prev => prev.map(s => s.name === name ? { ...s, running: !s.running } : s));
   };
 

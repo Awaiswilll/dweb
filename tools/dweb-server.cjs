@@ -50,6 +50,9 @@ let wsFrameBuffer      = Buffer.alloc(0);
 
 const rateLimitMap     = new Map();
 
+// ── Managed services (started via /api/service/start) ──────────
+const runningServices  = new Map(); // name -> { server, port, type }
+
 // ── MIME types ─────────────────────────────────────────────────
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -713,6 +716,123 @@ function handleRequest(req, res) {
     return;
   }
 
+  // ── SERVICE MANAGEMENT ──────────────────────────────────────
+  if (pathname === "/api/services" && req.method === "GET") {
+    const list = [];
+    for (const [name, svc] of runningServices) {
+      list.push({ name, port: svc.port, type: svc.type, running: true, cpu: 0.5, memory: 8_000_000 });
+    }
+    return jsonResponse(res, 200, { status: "ok", services: list });
+  }
+
+  if (pathname === "/api/service/start" && req.method === "POST") {
+    let body = "";
+    req.on("data", c => body += c);
+    req.on("end", () => {
+      try {
+        const { name, port, type, dir } = JSON.parse(body);
+        if (!name || !port) {
+          return jsonResponse(res, 400, { status: "error", message: "name and port required" });
+        }
+
+        // Check if already running
+        if (runningServices.has(name)) {
+          return jsonResponse(res, 200, { status: "ok", message: `Service "${name}" already running` });
+        }
+
+        // Check port in use
+        const testServer = net.createServer();
+        testServer.once("error", () => {
+          return jsonResponse(res, 409, { status: "error", message: `Port ${port} is already in use` });
+        });
+        testServer.listen(port, () => {
+          testServer.close();
+
+          // Create a simple HTTP server for this service
+          const svr = http.createServer((svcReq, svcRes) => {
+            // If it's a static site and a dir is specified, try serving files
+            if (dir && fs.existsSync(dir)) {
+              const svcFilePath = path.join(dir, svcReq.url === "/" ? "index.html" : svcReq.url);
+              if (fs.existsSync(svcFilePath) && fs.statSync(svcFilePath).isFile()) {
+                const ext = path.extname(svcFilePath).toLowerCase();
+                svcRes.writeHead(200, {
+                  "Content-Type": MIME[ext] || "application/octet-stream",
+                  "Access-Control-Allow-Origin": "*",
+                });
+                return fs.createReadStream(svcFilePath).pipe(svcRes);
+              }
+            }
+
+            // Default: respond with service info
+            const info = runningServices.get(name);
+            const html = `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>${name}</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; }
+  h1 { color: #22c55e; } .badge { display:inline-block; background:#22c55e22; color:#22c55e; border-radius:4px; padding:2px 8px; font-size:12px; }
+  pre { background:#1e1e2e; color:#cdd6f4; padding:12px; border-radius:6px; overflow:auto; }
+  .meta { color:#888; font-size:13px; }
+</style></head>
+<body>
+  <h1>${name} <span class="badge">&#9679; Running</span></h1>
+  <p class="meta">Served via dweb on port ${port}</p>
+  ${type ? `<p>Type: <strong>${type}</strong></p>` : ""}
+  ${dir ? `<p>Directory: <code>${dir}</code></p>` : ""}
+  <hr>
+  <pre>dweb service running since ${new Date().toISOString()}
+
+  Local:    http://localhost:${port}
+  Network:  http://${getLocalIPs()[0] || "127.0.0.1"}:${port}
+  dweb:     dweb://${name.toLowerCase().replace(/\\s+/g, "-")}.dweb</pre>
+  <p class="meta">This service is managed by dweb-server. Stop it from the Dashboard.</p>
+</body>
+</html>`;
+            svcRes.writeHead(200, {
+              "Content-Type": "text/html; charset=utf-8",
+              "Access-Control-Allow-Origin": "*",
+            });
+            svcRes.end(html);
+          });
+
+          svr.listen(port, "0.0.0.0", () => {
+            runningServices.set(name, { server: svr, port, type: type || "Custom" });
+            console.log(`  [service] Started "${name}" on port ${port}`);
+            return jsonResponse(res, 200, {
+              status: "ok",
+              message: `Service "${name}" started on port ${port}`,
+              service: { name, port, type: type || "Custom", running: true },
+            });
+          });
+        });
+      } catch (e) {
+        return jsonResponse(res, 400, { status: "error", message: e.message });
+      }
+    });
+    return;
+  }
+
+  if (pathname === "/api/service/stop" && req.method === "POST") {
+    let body = "";
+    req.on("data", c => body += c);
+    req.on("end", () => {
+      try {
+        const { name } = JSON.parse(body);
+        const svc = runningServices.get(name);
+        if (!svc) {
+          return jsonResponse(res, 404, { status: "error", message: `Service "${name}" not found` });
+        }
+        svc.server.close();
+        runningServices.delete(name);
+        console.log(`  [service] Stopped "${name}" on port ${svc.port}`);
+        return jsonResponse(res, 200, { status: "ok", message: `Service "${name}" stopped` });
+      } catch (e) {
+        return jsonResponse(res, 400, { status: "error", message: e.message });
+      }
+    });
+    return;
+  }
+
   // ── AI OLLAMA CHAT ─────────────────────────────────────────
   if (pathname === "/ai/ollama/chat" && req.method === "POST") {
     return proxyUpstream(req, res, "http://localhost:11434/api/chat", {
@@ -794,6 +914,9 @@ server.listen(PORT, "0.0.0.0", () => {
   lines.push(`  \u2551    /relay/peers   - List peers from relay         \u2551`);
   lines.push(`  \u2551    /relay/signal  - Send signal to peer           \u2551`);
   lines.push(`  \u2551    /relay/signals - Poll incoming signals         \u2551`);
+  lines.push(`  \u2551    /api/service/start - Start a managed service    \u2551`);
+  lines.push(`  \u2551    /api/service/stop  - Stop a managed service     \u2551`);
+  lines.push(`  \u2551    /api/services      - List managed services      \u2551`);
   lines.push(`  \u2551    /ai/status     - AI provider config status     \u2551`);
   lines.push(`  \u2551    /ai/ollama/chat - Ollama chat proxy            \u2551`);
   lines.push(`  \u2551    /ai/openai/chat - OpenAI chat proxy            \u2551`);
