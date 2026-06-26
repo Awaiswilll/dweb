@@ -2,10 +2,10 @@ import { useState, useEffect, useRef } from "react";
 import { safeInvoke as invoke } from "../safe-invoke";
 import {
   Terminal, Code, GitBranch, Globe, Server, Play, Square,
-  Plus, RefreshCw, CheckCircle2, XCircle, FolderGit2,
-  ExternalLink, Wrench, Activity, Zap, Wifi, WifiOff,
+  Plus, RefreshCw, CheckCircle2, FolderGit2,
+  ExternalLink, Wrench, Wifi, WifiOff,
   Link2, Unlink, Shield, Monitor, Radio, Users,
-  ChevronDown, ChevronRight,
+  ChevronDown, ChevronRight, List,
 } from "lucide-react";
 import type { Service } from "../types";
 import {
@@ -140,36 +140,21 @@ function RuntimeIcon({ name }: { name: string }): React.ReactNode {
   }
 }
 
-/* ─── Runtime Card ────────────────────────────────────────── */
+/* ─── Runtime Card (compact) ──────────────────────────────── */
 function RuntimeCard({ runtime }: { runtime: RuntimeInfo }) {
   return (
-    <div
-      className="stat-card"
-      style={{ flexDirection: "column", alignItems: "stretch", gap: 8, padding: 14 }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <div
-          className="stat-icon"
-          style={{ width: 36, height: 36, fontSize: 18, background: "rgba(59,130,246,0.1)", color: "var(--accent-blue)" }}
-        >
-          <RuntimeIcon name={runtime.name} />
-        </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 14, fontWeight: 600 }}>{runtime.name}</div>
-          <span className="text-muted-sm">{runtime.version || "—"}</span>
-        </div>
-        {runtime.available ? (
-          <CheckCircle2 size={16} color="var(--success)" />
-        ) : (
-          <XCircle size={16} color="var(--text-muted)" />
-        )}
+    <div className="runtime-chip">
+      <RuntimeIcon name={runtime.name} />
+      <div className="runtime-chip-info">
+        <span className="runtime-chip-name">{runtime.name}</span>
+        <span className="runtime-chip-ver">{runtime.version || "—"}</span>
       </div>
       {runtime.path && (
-        <div className="text-muted-sm" style={{ fontSize: 11, wordBreak: "break-all", display: "flex", alignItems: "center", gap: 4 }}>
-          <FolderGit2 size={11} />
-          {runtime.path}
-        </div>
+        <span className="runtime-chip-path" title={runtime.path}>
+          <FolderGit2 size={10} />
+        </span>
       )}
+      <CheckCircle2 size={14} className="runtime-chip-ok" />
     </div>
   );
 }
@@ -386,7 +371,6 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
   const [loadingRuntimes, setLoadingRuntimes] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
   const [runtimesExpanded, setRuntimesExpanded] = useState(false);
-  const [servicesExpanded, setServicesExpanded] = useState(true);
 
   const loadServices = async () => {
     setLoadingServices(true);
@@ -1023,9 +1007,9 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
     </div>
   );
 
-  /* ─── Runtime Detection Section ──────────────────────────── */
+  /* ─── Runtime Detection Section (compact) ────────────────── */
   const runtimeSection = (
-    <div className="provider-config-card" style={{ marginBottom: 24 }}>
+    <div className="provider-config-card" style={{ marginBottom: 20 }}>
       <div
         className="provider-config-header"
         onClick={() => setRuntimesExpanded(!runtimesExpanded)}
@@ -1035,11 +1019,9 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
           {runtimesExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
           <Wrench size={16} />
           <span style={{ fontWeight: 600, fontSize: 14 }}>Runtime Detection</span>
-          {!runtimesExpanded && runtimes.length > 0 && (
-            <span className="text-muted-sm" style={{ fontSize: 12, marginLeft: 4 }}>
-              ({runtimes.length} detected)
-            </span>
-          )}
+          <span className="text-muted-sm" style={{ fontSize: 12, marginLeft: 4 }}>
+            ({runtimes.filter(r => r.available).length} found)
+          </span>
         </div>
         <button className="btn btn-icon btn-sm" onClick={e => { e.stopPropagation(); loadRuntimes(); }} title="Refresh">
           <RefreshCw size={12} />
@@ -1049,14 +1031,19 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
         <div className="provider-config-body" style={{ overflow: "visible" }}>
           {loadingRuntimes ? (
             <div className="loading-pulse"><span /></div>
-          ) : runtimes.length === 0 ? (
-            <div className="empty-state-inline glass" style={{ borderRadius: "var(--radius)" }}>
-              <h4>No runtimes detected</h4>
-              <p className="text-muted-sm">Run the dweb desktop app to detect system runtimes.</p>
+          ) : runtimes.filter(r => r.available).length === 0 ? (
+            <div style={{ padding: "12px 0", fontSize: 12, color: "var(--text-muted)" }}>
+              No runtimes detected. Run the dweb desktop app to detect system runtimes.
             </div>
           ) : (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
-              {runtimes.map(r => <RuntimeCard key={r.name} runtime={r} />)}
+            <div className="runtimes-compact">
+              {runtimes.filter(r => r.available).map(r => <RuntimeCard key={r.name} runtime={r} />)}
+            </div>
+          )}
+          {runtimes.filter(r => !r.available).length > 0 && (
+            <div style={{ marginTop: 8, fontSize: 11, color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 6 }}>
+              <List size={12} />
+              {runtimes.filter(r => !r.available).map(r => r.name).join(", ")} — not found on this system
             </div>
           )}
         </div>
@@ -1064,84 +1051,48 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
     </div>
   );
 
-  /* ─── Services Tab ───────────────────────────────────────── */
-  const servicesTab = (
-    <div>
+  /* ─── Services Pill Bar ──────────────────────────────────── */
+  const servicesPillBar = (
+    <div className="services-pill-bar">
       {loadingServices ? (
-        <div className="loading-pulse"><span /></div>
+        <div className="loading-pulse" style={{ padding: "6px 0" }}><span /></div>
       ) : services.length === 0 ? (
-        <div className="empty-state glass">
-          <Zap size={48} className="empty-icon" />
-          <h3>No services yet</h3>
-          <p>Add your first service to get started.</p>
-          <div className="empty-actions">
-            <button className="btn btn-primary" onClick={() => setShowAddModal(true)}>
-              <Plus size={14} /> Add Service
-            </button>
-          </div>
+        <div style={{ fontSize: 12, color: "var(--text-muted)", padding: "6px 0" }}>
+          No services yet. <button className="btn btn-link" onClick={() => setShowAddModal(true)}>Add one</button>
         </div>
       ) : (
-        <div className="service-grid">
+        <div className="services-pills-wrap">
           {services.map((svc) => (
-            <div key={svc.name} className={`service-card glass ${svc.running ? "running" : "stopped"}`}>
-              <div className="service-indicator">
-                <span className={`indicator-dot ${svc.running ? "live" : "dead"}`} />
-              </div>
-              <div className="service-info">
-                <div className="service-name-row">
-                  <h4>{svc.name}</h4>
-                  <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 400 }}>
-                    {svc.type}
-                  </span>
-                  <span className={`service-status-badge ${svc.running ? "running" : "stopped"}`}>
-                    {svc.running ? "Running" : "Stopped"}
-                  </span>
-                </div>
-                <div className="service-meta-row">
-                  <span className="meta-item"><Server size={12} /> Port {svc.port}</span>
-                  {(svc as any).dir && (
-                    <span className="meta-item" title={(svc as any).dir}><FolderGit2 size={12} /> {(svc as any).dir.split(/[\\/]/).pop()}</span>
-                  )}
-                  {svc.running && (
-                    <>
-                      <span className="meta-item"><Activity size={12} /> CPU: {svc.cpu.toFixed(1)}%</span>
-                      <span className="meta-item"><Zap size={12} /> RAM: {(svc.memory / 1024 / 1024).toFixed(0)}MB</span>
-                    </>
-                  )}
-                </div>
-                {svc.running && (
-                  <div className="service-usage-bar">
-                    <div className="usage-track">
-                      <div className="usage-fill cpu" style={{ width: `${Math.min(svc.cpu, 100)}%` }} />
-                    </div>
-                    <div className="usage-track">
-                      <div className="usage-fill mem" style={{ width: `${Math.min(svc.memory / (1024 * 1024 * 10) * 100, 100)}%` }} />
-                    </div>
-                  </div>
-                )}
-              </div>
-              <div className="service-actions">
-                {svc.running ? (
-                  <>
-                    <button className="btn btn-sm btn-outline" title="Open in Browser"
-                      onClick={() => {
-                        const url = svc.port
-                          ? `http://localhost:${svc.port}`
-                          : `dweb://${svc.name.toLowerCase().replace(/\s+/g, "-")}.dweb`;
-                        onOpenInBrowser?.(url);
-                      }}>
-                      <ExternalLink size={14} />
-                    </button>
-                    <button className="btn btn-sm btn-danger" onClick={() => handleToggleService(svc.name, true)}>
-                      <Square size={14} />
-                    </button>
-                  </>
-                ) : (
-                  <button className="btn btn-sm btn-success" onClick={() => handleToggleService(svc.name, false)}>
-                    <Play size={14} /> Start
+            <div
+              key={svc.name}
+              className={`service-pill ${svc.running ? "running" : "stopped"}`}
+            >
+              <span className={`pill-dot ${svc.running ? "live" : "dead"}`} />
+              <span className="pill-name">{svc.name}</span>
+              <span className="pill-type">{svc.type}</span>
+              <span className="pill-port">:{svc.port}</span>
+              {(svc as any).dir && (
+                <span className="pill-dir" title={(svc as any).dir}>
+                  <FolderGit2 size={10} />
+                </span>
+              )}
+              {svc.running ? (
+                <>
+                  <button className="pill-btn" title="Open in Browser"
+                    onClick={() => onOpenInBrowser?.(`http://localhost:${svc.port}`)}>
+                    <ExternalLink size={12} />
                   </button>
-                )}
-              </div>
+                  <button className="pill-btn pill-stop" title="Stop"
+                    onClick={() => handleToggleService(svc.name, true)}>
+                    <Square size={12} />
+                  </button>
+                </>
+              ) : (
+                <button className="pill-btn pill-start" title="Start"
+                  onClick={() => handleToggleService(svc.name, false)}>
+                  <Play size={12} />
+                </button>
+              )}
             </div>
           ))}
         </div>
@@ -1184,31 +1135,24 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
 
       {runtimeSection}
 
-      <div className="provider-config-card" style={{ marginBottom: 0 }}>
-        <div
-          className="provider-config-header"
-          onClick={() => setServicesExpanded(!servicesExpanded)}
-          style={{ cursor: "pointer" }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            {servicesExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-            <Server size={16} />
-            <span style={{ fontWeight: 600, fontSize: 14 }}>Services</span>
-            {!servicesExpanded && services.length > 0 && (
-              <span className="text-muted-sm" style={{ fontSize: 12, marginLeft: 4 }}>
-                ({services.length} running)
+      {/* ── Services Bar ── */}
+      <div className="services-bar glass">
+        <div className="services-bar-top">
+          <div className="services-bar-title">
+            <Server size={15} />
+            <span>Services</span>
+            {services.length > 0 && (
+              <span className="services-bar-count">
+                {services.filter(s => s.running).length}/{services.length} active
               </span>
             )}
           </div>
-          <button className="btn btn-primary btn-sm" onClick={e => { e.stopPropagation(); setShowAddModal(true); }}>
-            <Plus size={14} /> Add Service
+          <button className="btn btn-primary btn-sm" style={{ height: 26, fontSize: 11, padding: "0 10px", gap: 4 }}
+            onClick={() => setShowAddModal(true)}>
+            <Plus size={12} /> Add
           </button>
         </div>
-        {servicesExpanded && (
-          <div className="provider-config-body" style={{ padding: "12px 16px 16px", overflow: "visible" }}>
-            {servicesTab}
-          </div>
-        )}
+        {servicesPillBar}
       </div>
 
       {showAddModal && (
