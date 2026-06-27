@@ -14,12 +14,19 @@ const PUBLIC_DOMAINS = [
   { name: "api-docs", owner: "345...678", registered: "2026-05-22", tld: ".dweb" },
 ];
 
+const DOMAINS_STORAGE_KEY = "dweb-domains-cache";
+
 interface DomainsProps {
   onOpenInBrowser?: (url: string) => void;
 }
 
 export default function Domains({ onOpenInBrowser }: DomainsProps) {
-  const [domains, setDomains] = useState<DomainRecord[]>([]);
+  const [domains, setDomains] = useState<DomainRecord[]>(() => {
+    try {
+      const raw = localStorage.getItem(DOMAINS_STORAGE_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch { return []; }
+  });
   const [loading, setLoading] = useState(true);
   const [registerName, setRegisterName] = useState("");
   const [registering, setRegistering] = useState(false);
@@ -27,15 +34,19 @@ export default function Domains({ onOpenInBrowser }: DomainsProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState<"mine" | "discover">("mine");
 
+  const persistDomains = (d: DomainRecord[]) => {
+    try { localStorage.setItem(DOMAINS_STORAGE_KEY, JSON.stringify(d)); } catch {}
+  };
+
   const loadDomains = async () => {
     setLoading(true);
     try {
-      // Will use real invoke when backend supports listing
-      // const result = await invoke<DomainRecord[]>("list_domains");
-      // setDomains(result);
-      setDomains([]);
+      const result = await invoke<DomainRecord[]>("list_domains");
+      setDomains(result);
+      persistDomains(result);
     } catch (e) {
-      console.error("Failed to load domains:", e);
+      console.warn("list_domains not available, using cached domains:", e);
+      // Keep the current (localStorage-restored) state — don't wipe on refresh
     } finally {
       setLoading(false);
     }
@@ -57,7 +68,11 @@ export default function Domains({ onOpenInBrowser }: DomainsProps) {
 
     try {
       const result = await invoke<DomainRecord>("register_domain", { name });
-      setDomains(prev => [...prev, result]);
+      setDomains(prev => {
+        const next = [...prev, result];
+        persistDomains(next);
+        return next;
+      });
       setRegisterName("");
     } catch (e) {
       setError(String(e));
