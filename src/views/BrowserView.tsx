@@ -437,11 +437,13 @@ export default function BrowserView({ initialUrl, navId }: BrowserViewProps) {
   }, [activeTabId, tabs, patchTab]);
 
   // Navigate to initialUrl when triggered from Dashboard/Domains
+  // Must wait for activeTabId to be set (starts as "") otherwise navigate
+  // returns early because it can't find a tab to navigate in.
   useEffect(() => {
-    if (!initialUrl) return;
+    if (!initialUrl || !activeTabId) return;
     const timer = setTimeout(() => navigate(initialUrl), 50);
     return () => clearTimeout(timer);
-  }, [initialUrl, navId, navigate]);
+  }, [initialUrl, navId, activeTabId, navigate]);
 
   const addBookmark = () => {
     if (!activeTab.url) return;
@@ -899,7 +901,7 @@ export default function BrowserView({ initialUrl, navId }: BrowserViewProps) {
       <div
         className="browser-content"
         ref={contentRef}
-        style={{ flex: 1, overflowY: "auto", minHeight: 0 }}
+        style={{ flex: 1, overflow: "hidden", minHeight: 0, display: "flex", flexDirection: "column" }}
       >
         {activeTab.loading ? (
           <div className="loading-state">
@@ -909,23 +911,29 @@ export default function BrowserView({ initialUrl, navId }: BrowserViewProps) {
             </p>
           </div>
         ) : isExternalUrl(activeTab.url) && !activeTab.contentHtml ? (
-          <>
+          <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
             {!dismissExternalWarn && (
-              <div className="external-warning glass" style={{
-                display: "flex", alignItems: "center", gap: 10,
-                padding: "10px 16px", margin: "8px 8px 0",
-                borderRadius: "var(--radius)",
-                fontSize: 13, color: "var(--accent-amber)",
-                border: "1px solid rgba(245,158,11,0.2)",
+              <div style={{
+                display: "flex", alignItems: "center", gap: 6,
+                padding: "4px 10px", margin: 0, minHeight: 28,
+                fontSize: 11, color: "var(--accent-amber)",
+                background: "rgba(245,158,11,0.06)",
+                borderBottom: "1px solid rgba(245,158,11,0.1)",
+                flexShrink: 0,
               }}>
-                <AlertTriangle size={16} />
-                <span style={{ flex: 1 }}>
-                  You are visiting an external site: <strong>{activeTab.url}</strong>
-                  . This page is loaded in a sandboxed iframe.
+                <AlertTriangle size={12} />
+                <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  External site: <strong>{activeTab.url}</strong>
                 </span>
-                <button className="btn btn-sm btn-secondary" onClick={() => setDismissExternalWarn(true)}>
-                  Dismiss
-                </button>
+                <button
+                  onClick={() => setDismissExternalWarn(true)}
+                  style={{
+                    background: "transparent", border: "none", color: "var(--accent-amber)",
+                    cursor: "pointer", padding: "2px 6px", borderRadius: 3, fontSize: 13,
+                    lineHeight: 1, display: "flex", alignItems: "center", opacity: 0.7,
+                  }}
+                  title="Dismiss"
+                >✕</button>
               </div>
             )}
             {(() => {
@@ -934,35 +942,34 @@ export default function BrowserView({ initialUrl, navId }: BrowserViewProps) {
               try { hostname = new URL(activeTab.url).hostname.replace('www.', ''); } catch {}
               return knownBlockingSites.includes(hostname);
             })() && (
-              <div className="external-warning glass" style={{
-                display: "flex", alignItems: "center", gap: 10,
-                padding: "8px 12px", margin: "4px 8px 0",
-                borderRadius: "var(--radius)",
-                fontSize: 12, color: "var(--accent-amber)",
-                border: "1px solid rgba(245,158,11,0.2)",
+              <div style={{
+                display: "flex", alignItems: "center", gap: 6,
+                padding: "2px 10px", minHeight: 24,
+                fontSize: 10, color: "var(--accent-amber)",
+                background: "rgba(245,158,11,0.04)",
+                borderBottom: "1px solid rgba(245,158,11,0.08)",
+                flexShrink: 0,
               }}>
-                <Info size={14} />
-                <span style={{ flex: 1 }}>
-                  This site often blocks iframe embedding. Try opening in your system browser.
-                </span>
-                <button className="btn btn-sm btn-secondary" onClick={() => window.open(activeTab.url, '_blank')}>
-                  <ExternalLink size={14} /> Open in Browser
-                </button>
+                <Info size={10} />
+                <span style={{ flex: 1 }}>Blocks iframes</span>
+                <button
+                  onClick={() => window.open(activeTab.url, '_blank')}
+                  style={{
+                    background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)",
+                    color: "var(--text-secondary)", cursor: "pointer", padding: "1px 6px",
+                    borderRadius: 3, fontSize: 10, lineHeight: "18px",
+                  }}
+                >Open ↗</button>
               </div>
             )}
             <iframe
               src={activeTab.url}
               className="sandboxed-frame"
-              style={{ flex: 1, minHeight: 400, border: "none", width: "100%" }}
+              style={{ flex: 1, minHeight: 0, border: "none", width: "100%", height: "100%" }}
               sandbox={sandboxEnabled ? "allow-scripts allow-same-origin allow-popups allow-forms allow-downloads" : undefined}
               title={activeTab.title}
             />
-            <div style={{ textAlign: "center", padding: "8px 8px 12px" }}>
-              <button className="btn btn-sm btn-secondary" onClick={() => window.open(activeTab.url, '_blank')}>
-                <ExternalLink size={14} /> Open in System Browser
-              </button>
-            </div>
-          </>
+          </div>
         ) : activeTab.contentHtml ? (
           sandboxEnabled ? (
             <iframe

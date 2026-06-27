@@ -52,6 +52,212 @@ const rateLimitMap     = new Map();
 
 // ── Managed services (started via /api/service/start) ──────────
 const runningServices  = new Map(); // name -> { server, port, type, dir }
+const SERVICES_FILE    = path.join(os.homedir(), ".dweb", "services.json");
+
+function saveServices() {
+  try {
+    const dir = path.dirname(SERVICES_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const data = [];
+    for (const [name, svc] of runningServices) {
+      data.push({ name, port: svc.port, type: svc.type, dir: svc.dir });
+    }
+    fs.writeFileSync(SERVICES_FILE, JSON.stringify(data, null, 2));
+  } catch (e) {
+    console.error("  [services] Failed to save services:", e.message);
+  }
+}
+
+function restoreServices() {
+  try {
+    if (!fs.existsSync(SERVICES_FILE)) return 0;
+    var data = JSON.parse(fs.readFileSync(SERVICES_FILE, "utf8"));
+    if (!Array.isArray(data)) return 0;
+    var restored = 0;
+    var cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS", "Access-Control-Allow-Headers": "Content-Type" };
+    var staticMime = {".html":"text/html; charset=utf-8",".css":"text/css; charset=utf-8",".js":"application/javascript; charset=utf-8",".json":"application/json; charset=utf-8",".png":"image/png",".jpg":"image/jpeg",".jpeg":"image/jpeg",".gif":"image/gif",".svg":"image/svg+xml",".webp":"image/webp",".ico":"image/x-icon",".txt":"text/plain; charset=utf-8",".md":"text/markdown; charset=utf-8",".pdf":"application/pdf"};
+    var dirTypes = ["Static Site","Single Page App","Documentation Site","Dashboard","File Browser","Image Gallery","Media Stream","Podcast Host","Log Viewer","Git Web UI"];
+
+    function restoreDirHandler(entry, baseDir) {
+      return function(svcReq, svcRes) {
+        if (svcReq.method === "OPTIONS") { svcRes.writeHead(204, cors); return svcRes.end(); }
+        var _u = new URL(svcReq.url, "http://localhost");
+        var resolved = path.resolve(baseDir, "." + _u.pathname);
+        if (!resolved.startsWith(path.resolve(baseDir))) { svcRes.writeHead(403, cors); return svcRes.end("Forbidden"); }
+        // ── DELETE (File Browser only) ──
+        if ((svcReq.method === "DELETE" || (svcReq.method === "POST" && _u.searchParams.has("delete"))) && entry.type === "File Browser") {
+          var delPath = svcReq.method === "DELETE" ? resolved : path.resolve(baseDir, "." + _u.searchParams.get("delete"));
+          if (!delPath.startsWith(path.resolve(baseDir))) { svcRes.writeHead(403, { ...cors, "Content-Type": "application/json" }); return svcRes.end(JSON.stringify({ error: "Forbidden" })); }
+          try {
+            var delStat = fs.statSync(delPath);
+            fs.rmSync(delPath, { recursive: true, force: true });
+            svcRes.writeHead(200, { ...cors, "Content-Type": "application/json" });
+            svcRes.end(JSON.stringify({ ok: true, deleted: _u.pathname }));
+          } catch (e3) { svcRes.writeHead(404, { ...cors, "Content-Type": "application/json" }); svcRes.end(JSON.stringify({ error: "Not found" })); }
+          return;
+        }
+        // ── POST upload (File Browser only) ──
+        if (svcReq.method === "POST" && !_u.searchParams.has("delete") && entry.type === "File Browser") {
+          var ct = svcReq.headers["content-type"] || "";
+          if (ct.includes("multipart/form-data")) {
+            var boundary = "--" + ct.split("boundary=")[1];
+            var bufs = [];
+            svcReq.on("data", function(c) { bufs.push(c); });
+            svcReq.on("end", function() {
+              var raw = Buffer.concat(bufs);
+              var parts = raw.toString("binary").split(boundary).filter(function(p) { return p.indexOf("Content-Disposition") !== -1; });
+              var fileName = "upload.bin", fileData = null, uploadDir = resolved;
+              for (var pi = 0; pi < parts.length; pi++) {
+                var headerEnd = parts[pi].indexOf("\r\n\r\n");
+                if (headerEnd === -1) continue;
+                var hdrs = parts[pi].substring(0, headerEnd);
+                var body = parts[pi].substring(headerEnd + 4);
+                if (hdrs.indexOf('name="dir"') !== -1) { var sub = body.trim(); if (sub) uploadDir = path.resolve(baseDir, sub); }
+                else if (hdrs.indexOf('name="file"') !== -1 || hdrs.indexOf('name="files"') !== -1) {
+                  var m = hdrs.match(/filename="([^"]*)"/);
+                  if (m) fileName = m[1];
+                  fileData = Buffer.from(body, "binary");
+                }
+              }
+              if (!fileData) { svcRes.writeHead(400, { ...cors, "Content-Type": "application/json" }); return svcRes.end(JSON.stringify({ error: "No file" })); }
+              var targetPath = path.join(uploadDir, fileName);
+              if (!targetPath.startsWith(path.resolve(baseDir))) { svcRes.writeHead(403); return svcRes.end(JSON.stringify({ error: "Forbidden" })); }
+              try {
+                fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+                fs.writeFileSync(targetPath, fileData);
+                svcRes.writeHead(200, { ...cors, "Content-Type": "application/json" });
+                svcRes.end(JSON.stringify({ ok: true, file: fileName }));
+              } catch (e4) { svcRes.writeHead(500); svcRes.end(JSON.stringify({ error: e4.message })); }
+            });
+            return;
+          }
+          // JSON upload
+          var body = "";
+          svcReq.on("data", function(c) { body += c; });
+          svcReq.on("end", function() {
+            try {
+              var data = JSON.parse(body);
+              var fname = data.file || data.name || "untitled.txt";
+              var targetFile = _u.searchParams.get("dir") ? path.resolve(baseDir, _u.searchParams.get("dir"), fname) : path.resolve(baseDir, fname);
+              if (!targetFile.startsWith(path.resolve(baseDir))) { svcRes.writeHead(403); return svcRes.end(JSON.stringify({ error: "Forbidden" })); }
+              fs.writeFileSync(targetFile, data.content || "");
+              svcRes.writeHead(200, { ...cors, "Content-Type": "application/json" });
+              svcRes.end(JSON.stringify({ ok: true, file: fname }));
+            } catch (e5) { svcRes.writeHead(400); svcRes.end(JSON.stringify({ error: "Invalid JSON: " + e5.message })); }
+          });
+          return;
+        }
+        try {
+          var st = fs.statSync(resolved);
+          if (st.isDirectory()) {
+            // JSON directory listing (?json)
+            if (_u.searchParams && _u.searchParams.has("json")) {
+              var fl2 = fs.readdirSync(resolved, { withFileTypes: true });
+              var fileList = [];
+              for (var fi2 = 0; fi2 < fl2.length; fi2++) {
+                var ent = fl2[fi2];
+                var info = { name: ent.name + (ent.isDirectory() ? "/" : ""), isDir: ent.isDirectory(), size: 0, mtime: null };
+                try { var s2 = fs.statSync(path.join(resolved, ent.name)); info.size = s2.size; info.mtime = s2.mtime.toISOString(); } catch (e) {}
+                fileList.push(info);
+              }
+              svcRes.writeHead(200, { ...cors, "Content-Type": "application/json; charset=utf-8" });
+              svcRes.end(JSON.stringify({ path: _u.pathname, files: fileList }));
+              return;
+            }
+            var ip = path.join(resolved, "index.html");
+            if (fs.existsSync(ip)) { svcRes.writeHead(302, { ...cors, "Location": _u.pathname.replace(/\/?$/, "/") + "index.html" }); return svcRes.end(); }
+            var fl = fs.readdirSync(resolved, { withFileTypes: true });
+            var h = "<!DOCTYPE html><html><head><meta charset=utf-8><title>" + entry.name + "</title><style>body{font-family:system-ui,sans-serif;background:#0f0f13;color:#e2e8f0;padding:20px}a{color:#3b82f6;text-decoration:none}td{padding:6px 12px}</style></head><body><h2>" + entry.name + "</h2><table>";
+            for (var fi = 0; fi < fl.length; fi++) {
+              var fn = fl[fi].name;
+              var icon = fl[fi].isDirectory() ? "\uD83D\uDCC1" : "\uD83D\uDCC4";
+              var href = _u.pathname.replace(/\/?$/, "/") + encodeURIComponent(fn);
+              h += "<tr><td>" + icon + "</td><td><a href='" + href + "'>" + fn.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;") + "</a></td></tr>";
+            }
+            h += "</table></body></html>";
+            svcRes.writeHead(200, { ...cors, "Content-Type": "text/html; charset=utf-8" });
+            svcRes.end(h);
+            return;
+          }
+          var ext = path.extname(resolved).toLowerCase();
+          svcRes.writeHead(200, { ...cors, "Content-Type": staticMime[ext] || "application/octet-stream" });
+          fs.createReadStream(resolved).pipe(svcRes);
+        } catch (e2) { svcRes.writeHead(404, cors); svcRes.end("Not Found"); }
+      };
+    }
+
+    function restoreProxyHandler(entry) {
+      return function(req, res) {
+        if (req.method === "OPTIONS") { res.writeHead(204, cors); return res.end(); }
+        res.writeHead(200, { ...cors, "Content-Type": "text/html; charset=utf-8" });
+        res.end('<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + entry.name + ' — Proxy Restore</title>'
+          + '<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,sans-serif;background:#0f0f13;color:#e2e8f0;padding:40px;text-align:center;max-width:600px;margin:auto}'
+          + 'h1{font-size:20px;margin-bottom:8px}.badge{display:inline-block;background:#3b82f622;color:#3b82f6;border-radius:6px;padding:2px 10px;font-size:12px;font-weight:600}'
+          + 'pre{background:#1a1a2e;padding:14px;border-radius:8px;font-size:12px;text-align:left;margin:12px 0;overflow:auto;border:1px solid rgba(255,255,255,0.06)}'
+          + '.muted{color:#6b7280;font-size:12px;margin-top:16px}</style></head><body>'
+          + '<h1>⚡ ' + entry.name + ' <span class="badge">Proxy Restored</span></h1>'
+          + '<p style="margin-bottom:12px;color:#94a3b8;font-size:14px">This service was restored after a server restart.</p>'
+          + '<p style="font-size:13px;margin-bottom:8px">Restart your application on port <strong>' + entry.port + '</strong>:</p>'
+          + '<pre># Your app needs to be running on port ' + entry.port + '\n# dweb proxies requests to that port.\n$ cd /path/to/your/project\n$ node server.js   # or python app.py, etc.</pre>'
+          + '<div class="muted">dweb is proxying to port ' + entry.port + '. Start your app to use this service.</div></body></html>');
+      };
+    }
+
+    function restoreGenericHandler(entry) {
+      return function(req, res) {
+        if (req.method === "OPTIONS") { res.writeHead(204, cors); return res.end(); }
+        res.writeHead(200, { ...cors, "Content-Type": "text/html; charset=utf-8" });
+        res.end('<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + entry.name + '</title>'
+          + '<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,sans-serif;background:#0f0f13;color:#e2e8f0;padding:40px;text-align:center;max-width:500px;margin:auto}'
+          + 'h1{font-size:20px;margin-bottom:8px}.muted{color:#6b7280;font-size:13px}</style></head><body>'
+          + '<h1>' + entry.type + ' ' + entry.name + '</h1>'
+          + '<div class="muted">Restored on port ' + entry.port + '. Configure and restart from the dashboard.</div></body></html>');
+      };
+    }
+
+    for (var i = 0; i < data.length; i++) {
+      var entry = data[i];
+      try {
+        var handler = null;
+        var baseDir = null;
+
+        if (dirTypes.indexOf(entry.type) !== -1) {
+          // Dir-based service — serve static files
+          if (!entry.dir || !fs.existsSync(entry.dir)) {
+            if (entry.dir && entry.dir.indexOf(os.tmpdir()) === 0) {
+              try { fs.mkdirSync(entry.dir, { recursive: true }); fs.writeFileSync(path.join(entry.dir, "index.html"), '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>' + entry.name + '</title><style>body{font-family:system-ui,sans-serif;background:#0f0f13;color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:20px;text-align:center}h1{font-size:24px;margin-bottom:8px}p{color:#94a3b8;font-size:14px}</style></head><body><h1>' + entry.name + '</h1><p>This directory was restored on restart. Add your files.</p></body></html>'); } catch (e) { console.error("  [services] Could not recreate dir for " + entry.name + ":", e.message); continue; }
+            } else { continue; }
+          }
+          baseDir = path.resolve(entry.dir);
+          handler = restoreDirHandler(entry, baseDir);
+        } else if (entry.type === "Node.js API" || entry.type === "Python Web App" || entry.type === "PHP Site") {
+          // Process proxy — show restart instructions
+          handler = restoreProxyHandler(entry);
+        } else {
+          // In-memory / generic — show placeholder (Webhook Tester, Pastebin, API Proxy, Health Check, Custom Command)
+          handler = restoreGenericHandler(entry);
+        }
+
+        if (!handler) continue;
+        var svr = http.createServer(handler);
+        var targetPort = entry.port;
+        svr.on("error", function(err) {
+          if (err.code === "EADDRINUSE") {
+            console.error("  [services] Port " + targetPort + " in use for \"" + entry.name + "\" — skipping restore");
+          } else {
+            console.error("  [services] Error restoring \"" + entry.name + "\":", err.message);
+          }
+        });
+        svr.listen(targetPort, "0.0.0.0");
+        runningServices.set(entry.name, { server: svr, port: targetPort, type: entry.type, dir: entry.dir || null });
+        restored++;
+        console.log("  [services] Restored \"" + entry.name + "\" (" + entry.type + ") on port " + targetPort);
+      } catch (e) { console.error("  [services] Failed to restore " + entry.name + ":", e.message); }
+    }
+    if (restored > 0) { console.log("  [services] Restored " + restored + " service(s) from disk"); }
+  } catch (e) { console.error("  [services] Failed to load services:", e.message); }
+  return restored;
+}
 
 // ── MIME types ─────────────────────────────────────────────────
 const MIME = {
@@ -70,6 +276,27 @@ const MIME = {
 };
 
 // ── Helpers ────────────────────────────────────────────────────
+
+function escHtml(s) { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+function formatBytes(b) {
+  if (!b || b === 0) return "";
+  const u = ["B","KB","MB","GB"]; let i = 0; let s = b;
+  while (s >= 1024 && i < u.length - 1) { s /= 1024; i++; }
+  return s.toFixed(i === 0 ? 0 : 1) + " " + u[i];
+}
+function getFileIcon(n) {
+  const e = n.split(".").pop().toLowerCase();
+  if (["jpg","jpeg","png","gif","svg","webp","ico","bmp"].includes(e)) return "\uD83D\uDDBC";
+  if (["mp4","webm","avi","mkv","mov"].includes(e)) return "\uD83C\uDFAC";
+  if (["mp3","wav","ogg","flac","m4a"].includes(e)) return "\uD83C\uDFB5";
+  if (["zip","tar","gz","rar","7z"].includes(e)) return "\uD83D\uDDDC";
+  if (["pdf"].includes(e)) return "\uD83D\uDCC4";
+  if (["doc","docx"].includes(e)) return "\uD83D\uDCDD";
+  if (["xls","xlsx","csv"].includes(e)) return "\uD83D\uDCCA";
+  if (["js","ts","jsx","tsx","json","html","css","scss","py","rb","go","rs","java","c","cpp","h","sh","bash","yml","yaml","toml","ini","cfg","md","txt"].includes(e)) return "\uD83D\uDCC4";
+  return "\uD83D\uDCC4";
+}
+
 function getLocalIPs() {
   const ifaces = os.networkInterfaces();
   const ips = [];
@@ -726,210 +953,842 @@ function handleRequest(req, res) {
   }
 
   if (pathname === "/api/service/start" && req.method === "POST") {
-    let body = "";
-    req.on("data", c => body += c);
-    req.on("end", () => {
-      try {
-        const { name, port, type, dir } = JSON.parse(body);
-        if (!name || !port) {
-          return jsonResponse(res, 400, { status: "error", message: "name and port required" });
-        }
-
-        // Check if already running
-        if (runningServices.has(name)) {
-          return jsonResponse(res, 200, { status: "ok", message: `Service "${name}" already running` });
-        }
-
-        // Create an HTTP server for this service
-        const svr = http.createServer((svcReq, svcRes) => {
-          // CORS headers for all responses
-          const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS", "Access-Control-Allow-Headers": "Content-Type" };
-          if (svcReq.method === "OPTIONS") {
-            svcRes.writeHead(204, cors); return svcRes.end();
-          }
-
-          // ── File Browser mode (when dir is provided) ──────────────
-          if (dir && fs.existsSync(dir)) {
-            const url = new URL(svcReq.url, "http://localhost");
-            let reqPath = decodeURIComponent(url.pathname);
-
-            // Security: prevent path traversal
-            const resolved = path.resolve(dir, "." + reqPath);
-            if (!resolved.startsWith(path.resolve(dir))) {
-              svcRes.writeHead(403, { ...cors, "Content-Type": "text/plain" });
-              return svcRes.end("Forbidden: path traversal detected");
+        // ── Service type dispatch ──────────────────────────────────
+        // Factory functions defined here for clean closure access.
+        // Factory functions are hoisted before body parsing.
+        function getDemoDir(type_, name_, port_) {
+          var DEMO_ROOT = path.join(os.tmpdir(), "dweb-demo");
+          var safeName = String(name_).replace(/[^a-zA-Z0-9_-]/g, "_");
+          var demoDir = path.join(DEMO_ROOT, safeName + "-" + port_);
+          if (fs.existsSync(demoDir)) return demoDir;
+          try {
+            fs.mkdirSync(demoDir, { recursive: true });
+            var t = type_ || "";
+            // ── File Browser ──
+            if (t === "File Browser") {
+              fs.writeFileSync(path.join(demoDir, "README.md"),
+                '# Welcome to \' + name_ + \'\n\nThis is a demo file browser directory.\n\n## Quick Start\n- Upload files using the toolbar above\n- Create folders to organize content\n- Drag & drop files to upload\n- Files are served immediately\n'
+                  .replace("' + name_ + '", name_));
+              fs.writeFileSync(path.join(demoDir, "index.html"),
+                '<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Demo</title><style>body{font-family:system-ui,sans-serif;background:#0f0f13;color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:20px}.card{background:#1a1a2e;border:1px solid rgba(255,255,255,0.06);border-radius:12px;padding:40px;max-width:520px;text-align:center}.icon{font-size:48px;margin-bottom:16px}h1{font-size:24px;font-weight:700;margin-bottom:8px;color:#f1f5f9}p{color:#94a3b8;font-size:14px;line-height:1.7;margin-bottom:20px}.tag{display:inline-block;padding:4px 12px;border-radius:20px;font-size:11px;background:rgba(59,130,246,0.1);color:#60a5fa;border:1px solid rgba(59,130,246,0.2);margin:2px}.hint{color:#6b7280;font-size:12px;margin-top:20px}</style></head><body><div class=\"card\"><div class=\"icon\">&#128196;</div><h1>\' + name_ + \'</h1><p>This is a <strong>demo environment</strong>. Upload your own files or create folders. All files are served instantly.</p><div><span class=\"tag\">Upload</span><span class=\"tag\">Drag & Drop</span><span class=\"tag\">Delete</span><span class=\"tag\">Browse</span></div><div class=\"hint\">This is a temporary demo. Configure a directory path for persistent storage.</div></div></body></html>'
+                  .replace("' + name_ + '", name_));
+              fs.writeFileSync(path.join(demoDir, "hello.js"),
+                '// Demo JavaScript file\nconsole.log(\'Hello from \' + name_ + \'!\');\n\nfunction greet(name) {\n  return \'Hello, \' + name + \'! Welcome to dweb.\';\n}\n'
+                  .replace("' + name_ + '", name_));
+              fs.writeFileSync(path.join(demoDir, "style.css"),
+                '/* Demo Stylesheet */\n:root {\n  --bg: #0f0f13;\n  --text: #e2e8f0;\n  --accent: #3b82f6;\n}\n* { margin: 0; padding: 0; box-sizing: border-box; }\nbody {\n  font-family: system-ui, sans-serif;\n  background: var(--bg);\n  color: var(--text);\n  line-height: 1.6;\n}\n');
             }
-
-            // ── HANDLE DELETE ──
-            if (svcReq.method === "DELETE" || (svcReq.method === "POST" && url.searchParams.has("delete"))) {
-              const delPath = svcReq.method === "DELETE" ? resolved : path.resolve(dir, "." + url.searchParams.get("delete"));
-              if (!delPath.startsWith(path.resolve(dir))) {
-                svcRes.writeHead(403, { ...cors, "Content-Type": "application/json" });
-                return svcRes.end(JSON.stringify({ error: "Forbidden" }));
+            // ── Image Gallery ──
+            if (t === "Image Gallery") {
+              var _colors = [{"name":"Sunset","bg1":"#f97316","bg2":"#ef4444"},{"name":"Mountains","bg1":"#3b82f6","bg2":"#1d4ed8"},{"name":"Forest","bg1":"#22c55e","bg2":"#15803d"},{"name":"Ocean","bg1":"#06b6d4","bg2":"#0891b2"},{"name":"Lavender","bg1":"#a855f7","bg2":"#7c3aed"},{"name":"Rose","bg1":"#f43f5e","bg2":"#e11d48"}];
+              for (var ci = 0; ci < _colors.length; ci++) {
+                var c = _colors[ci];
+                var svg = '<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"800\" height=\"600\"><defs><linearGradient id=\"g\" x1=\"0%\" y1=\"0%\" x2=\"100%\" y2=\"100%\"><stop offset=\"0%\" stop-color=\"%C1%\"/><stop offset=\"100%\" stop-color=\"%C2%\"/></linearGradient></defs><rect width=\"800\" height=\"600\" fill=\"url(#g)\"/><text x=\"400\" y=\"300\" text-anchor=\"middle\" fill=\"rgba(255,255,255,0.4)\" font-size=\"36\" font-family=\"system-ui,sans-serif\" font-weight=\"bold\">%NAME%</text><text x=\"400\" y=\"340\" text-anchor=\"middle\" fill=\"rgba(255,255,255,0.2)\" font-size=\"14\" font-family=\"system-ui,sans-serif\">Demo Image - dweb Gallery</text></svg>'
+                  .replace(/%C1%/g, c.bg1)
+                  .replace(/%C2%/g, c.bg2)
+                  .replace(/%NAME%/g, c.name);
+                fs.writeFileSync(path.join(demoDir, c.name.toLowerCase() + ".svg"), svg);
               }
-              fs.stat(delPath, (err, stat) => {
-                if (err) {
-                  svcRes.writeHead(404, { ...cors, "Content-Type": "application/json" });
-                  return svcRes.end(JSON.stringify({ error: "Not found" }));
-                }
-                const rmCmd = fs.rm;
-                rmCmd(delPath, { recursive: true, force: true }, (rmErr) => {
-                  if (rmErr) {
-                    svcRes.writeHead(500, { ...cors, "Content-Type": "application/json" });
-                    return svcRes.end(JSON.stringify({ error: rmErr.message }));
+              fs.writeFileSync(path.join(demoDir, "_demo.txt"), 'Image Gallery Demo\n\nThis directory contains sample SVG images for demonstration.\nUpload your own images (JPG, PNG, GIF, WebP) to populate the gallery.\n');
+            }
+            // ── Media Stream / Podcast Host ──
+            if (t === "Media Stream" || t === "Podcast Host") {
+              var _sampleRate = 44100;
+              var _duration = 2;
+              var _numSamples = _sampleRate * _duration;
+              var _wavBuf = Buffer.alloc(44 + _numSamples * 2);
+              _wavBuf.write("RIFF", 0);
+              _wavBuf.writeUInt32LE(36 + _numSamples * 2, 4);
+              _wavBuf.write("WAVE", 8);
+              _wavBuf.write("fmt ", 12);
+              _wavBuf.writeUInt32LE(16, 16);
+              _wavBuf.writeUInt16LE(1, 20);
+              _wavBuf.writeUInt16LE(1, 22);
+              _wavBuf.writeUInt32LE(_sampleRate, 24);
+              _wavBuf.writeUInt32LE(_sampleRate * 2, 28);
+              _wavBuf.writeUInt16LE(2, 32);
+              _wavBuf.writeUInt16LE(16, 34);
+              _wavBuf.write("data", 36);
+              _wavBuf.writeUInt32LE(_numSamples * 2, 40);
+              for (var wi = 0; wi < _numSamples; wi++) {
+                var _t = wi / _sampleRate;
+                var _sample = Math.sin(2 * Math.PI * 440 * _t) * 0.3 + Math.sin(2 * Math.PI * 880 * _t) * 0.15;
+                var _val = Math.max(-1, Math.min(1, _sample));
+                _wavBuf.writeInt16LE(Math.round(_val * 32767), 44 + wi * 2);
+              }
+              var _prefix = t === "Podcast Host" ? "episode" : "track";
+              fs.writeFileSync(path.join(demoDir, _prefix + "_001_demo.wav"), _wavBuf);
+              fs.writeFileSync(path.join(demoDir, _prefix + "_002_demo.wav"), _wavBuf);
+              fs.writeFileSync(path.join(demoDir, "_info.txt"),
+                '%TYPE% Demo\n\nThis directory contains demo audio files (WAV format, 44100Hz mono).\nUpload your own media files to replace them.\n\nFor %TYPE%, supported formats include:\n- Audio: MP3, WAV, OGG, FLAC, M4A\n- Video: MP4, WebM, MKV, MOV, AVI\n'.replace(/%TYPE%/g, t));
+            }
+            // ── Git Web UI ──
+            // Note: Git Web UI expects a PARENT directory containing repo subfolders,
+            // each with their own .git. So we create a subfolder "demo-repo" inside demoDir.
+            if (t === "Git Web UI") {
+              var _gitRepoDir = path.join(demoDir, "demo-repo");
+              fs.mkdirSync(_gitRepoDir, { recursive: true });
+              try {
+                var _cp = require("child_process");
+                _cp.execSync("git init", { cwd: _gitRepoDir, stdio: "ignore" });
+              } catch (_) { /* git not available */ }
+              fs.writeFileSync(path.join(_gitRepoDir, "README.md"), '# Demo Repository\n\nThis is a demo Git repository created for the Git Web UI service.\n\n## Features\n- Browse commit history\n- View branch information\n- Check repository status\n\n## Getting Started\nClone this repo or configure a real repository path in the service settings.\n');
+              fs.writeFileSync(path.join(_gitRepoDir, "index.js"), '// Demo Project\nconst http = require(\'http\');\n\nconst server = http.createServer((req, res) => {\n  res.writeHead(200, { \'Content-Type\': \'text/plain\' });\n  res.end(\'Hello from dweb!\\n\');\n});\n\nserver.listen(3000, () => {\n  console.log(\'Server running on http://localhost:3000\');\n});\n');
+              try {
+                _cp.execSync("git add .", { cwd: _gitRepoDir, stdio: "ignore" });
+                _cp.execSync("git -C " + _gitRepoDir + " config user.email demo@dweb.local", { stdio: "ignore" });
+                _cp.execSync("git -C " + _gitRepoDir + " config user.name \"dweb Demo\"", { stdio: "ignore" });
+                _cp.execSync("git commit -m \"Initial commit: demo project files\"", { cwd: _gitRepoDir, stdio: "ignore" });
+                fs.writeFileSync(path.join(_gitRepoDir, "README.md"),
+                  '# Demo Repository\n\nThis is a demo Git repository created for the Git Web UI service.\n\n## Features\n- Browse commit history with git log\n- View branch information (main)\n- Check dirty/clean status\n\n### Demo Files\n- `index.js` - A simple Node.js HTTP server\n- `README.md` - This file\n\n## Getting Started\nClone this repo or configure a real repository path.\n\n### Example\n```bash\ngit clone http://localhost:%PORT%/repo/demo-repo\n```\n'.replace(/%PORT%/g, String(port_)));
+                _cp.execSync("git add .", { cwd: _gitRepoDir, stdio: "ignore" });
+                _cp.execSync("git commit -m \"Enhance README with detailed documentation\"", { cwd: _gitRepoDir, stdio: "ignore" });
+              } catch (_) {}
+            }
+            // ── Log Viewer ──
+            if (t === "Log Viewer") {
+              var _now = Date.now();
+              var _day = 86400000;
+              function _fmtDate(offset) { return new Date(_now - offset).toISOString(); }
+              fs.writeFileSync(path.join(demoDir, "app.log"),
+                '[%DATE%] [INFO] Application started\n[%DATE%] [INFO] Database connection pool initialized (max: 20)\n[%DATE%] [WARN] Slow query detected: SELECT * FROM users WHERE status=\'active\' (320ms)\n[%DATE%] [INFO] User login: alice@example.com from IP 192.168.1.100\n[%DATE%] [ERROR] Failed to process payment #ORD-38472: upstream timeout after 30s\n[%DATE%] [INFO] Retry attempt 1/3 for payment #ORD-38472\n[%DATE%] [INFO] Payment #ORD-38472 completed successfully\n[%DATE%] [WARN] Memory usage threshold: 85% (limit: 1024MB)\n[%DATE2%] [INFO] Scheduled task: cleanup_temp_files started\n[%DATE2%] [INFO] Scheduled task: cleanup_temp_files completed (124 files removed, 2.3GB freed)\n[%DATE2%] [ERROR] Unhandled rejection: TypeError: Cannot read properties of undefined (reading \'data\') at /app/src/handler.js:42\n[%DATE3%] [INFO] Health check passed (uptime: 23h 45m 12s)\n[%DATE3%] [INFO] User logout: alice@example.com'
+                  .replace(/%DATE%/g, _fmtDate(_day))
+                  .replace(/%DATE2%/g, _fmtDate(_day / 2))
+                  .replace(/%DATE3%/g, _fmtDate(600000))
+                  + "\n");
+              fs.writeFileSync(path.join(demoDir, "access.log"),
+                '%DATE% 192.168.1.100 - - \"GET /api/users HTTP/1.1\" 200 1234 \"-\" \"Mozilla/5.0\"\n%DATE% 192.168.1.101 - - \"POST /api/login HTTP/1.1\" 200 56 \"-\" \"curl/7.88\"\n%DATE% 192.168.1.100 - - \"GET /api/data HTTP/1.1\" 304 0 \"-\" \"Mozilla/5.0\"\n%DATE% 10.0.0.1 - - \"GET /api/admin/users HTTP/1.1\" 403 23 \"-\" \"python-requests/2.31\"\n%DATE% 192.168.1.102 - - \"POST /api/orders HTTP/1.1\" 201 89 \"-\" \"axios/1.6\"\n%DATE3% 192.168.1.100 - - \"GET /api/status HTTP/1.1\" 200 12 \"-\" \"Mozilla/5.0\"'
+                  .replace(/%DATE%/g, _fmtDate(_day))
+                  .replace(/%DATE3%/g, _fmtDate(600000))
+                  + "\n");
+              fs.writeFileSync(path.join(demoDir, "error.log"),
+                '[%DATE%] ERROR: Database connection timeout after 30s (host: db.internal, port: 5432)\n[%DATE%] ERROR: Payment gateway returned 503 Service Unavailable (upstream: payments.example.com)\n[%DATE%] ERROR: Rate limit exceeded for API key: sk-proj-...f8k2 (limit: 1000 req/hr)\n[%DATE2%] ERROR: Unhandled rejection at /app/src/handler.js:42:16\n[%DATE3%] ERROR: Disk space warning: 92% full on /dev/sda1 (available: 4.2GB)\n[%DATE3%] ERROR: TLS certificate for *.dweb.local expires in 14 days'
+                  .replace(/%DATE%/g, _fmtDate(_day))
+                  .replace(/%DATE2%/g, _fmtDate(_day / 2))
+                  .replace(/%DATE3%/g, _fmtDate(1800000))
+                  + "\n");
+            }
+            // ── Static serving types ──
+            if (t === "Static Site" || t === "Single Page App" || t === "Documentation Site" || t === "Dashboard") {
+              var _html = (function() {
+                var icons = { "Static Site": "\u{1F310}", "Single Page App": "\u26A1", "Documentation Site": "\u{1F4DA}", "Dashboard": "\u{1F4CA}" };
+                var icon = icons[t] || "\u{1F310}";
+                var title = t === "Single Page App" ? "SPA" : t === "Documentation Site" ? "Documentation" : t;
+                var isSpa = t === "Single Page App";
+                var spaNav = isSpa ? '<nav style="background:#1a1a2e;padding:10px;display:flex;gap:20px;justify-content:center;border-bottom:1px solid rgba(255,255,255,0.06)"><a href="#" onclick="showPage(\'home\');return false" style="color:#3b82f6;text-decoration:none;font-size:14px;font-weight:500">Home</a><a href="#" onclick="showPage(\'about\');return false" style="color:#94a3b8;text-decoration:none;font-size:14px">About</a><a href="#" onclick="showPage(\'contact\');return false" style="color:#94a3b8;text-decoration:none;font-size:14px">Contact</a></nav>' : '';
+                var spaJs = isSpa ? '<script>function showPage(p){var pages={home:"<h2>Welcome Home</h2><p>This is the SPA home page. Navigation works without page reloads.</p>",about:"<h2>About This SPA</h2><p>This demo Single Page App uses hash-free client-side routing. All page transitions happen instantly without full-page reloads.</p>",contact:"<h2>Contact</h2><p>Reach out via the demo contact form.</p><form style=margin-top:16px onsubmit=\\"alert(\'Form submitted (demo)\');return false\\"><input placeholder=\\"Your email\\" style=margin-right:8px;padding:6px;border-radius:4px;border:1px solid rgba(255,255,255,0.1);background:rgba(0,0,0,0.3);color:#e2e8f0><button type=submit style=padding:6px 14px;border-radius:4px;border:none;background:#3b82f6;color:white;cursor:pointer>Send</button></form>"};document.getElementById("spa-content").innerHTML=pages[p]||pages.home;};document.addEventListener("DOMContentLoaded",function(){showPage("home");});<\/script>' : '';
+                return '<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>DEMO_NAME - Demo</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;background:#0f0f13;color:#e2e8f0;line-height:1.6}.hero{padding:80px 20px 60px;text-align:center;background:linear-gradient(180deg,rgba(59,130,246,0.08) 0%,transparent 100%)}.hero-icon{font-size:56px;margin-bottom:16px}.hero h1{font-size:36px;font-weight:800;margin-bottom:12px;background:linear-gradient(135deg,#60a5fa,#a855f7);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}.hero p{font-size:16px;color:#94a3b8;max-width:500px;margin:0 auto 24px}.badge{display:inline-block;padding:4px 14px;border-radius:20px;font-size:12px;font-weight:600;background:rgba(34,197,94,0.1);color:#22c55e;border:1px solid rgba(34,197,94,0.2);margin-bottom:16px}.features{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;max-width:700px;margin:0 auto;padding:0 20px 60px}.feature{background:#1a1a2e;border:1px solid rgba(255,255,255,0.06);border-radius:12px;padding:24px;text-align:center;transition:transform 0.2s,border-color 0.2s}.feature:hover{transform:translateY(-2px);border-color:rgba(59,130,246,0.3)}.feature-icon{font-size:28px;margin-bottom:8px}.feature h3{font-size:14px;font-weight:600;margin-bottom:4px}.feature p{font-size:12px;color:#6b7280}.footer{text-align:center;padding:20px;color:#6b7280;font-size:12px}.footer code{background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px}.spa-content{max-width:700px;margin:0 auto;padding:20px}.spa-content h2{font-size:24px;margin-bottom:12px}.spa-content p{color:#94a3b8;font-size:14px;line-height:1.7}</style></head><body>SPA_NAV<div class=\"hero\"><div class=\"hero-icon\">&#127760;</div><div class=\"badge\">&#9679; Running &bull; STATIC_SITE</div><h1>DEMO_NAME</h1><p>This is a demo static_site served by dweb. Configure a project directory to replace this with your own content.</p></div>SPA_CONTENT<div class=\"features\"><div class=\"feature\"><div class=\"feature-icon\">&#9889;</div><h3>Fast</h3><p>Served with HTTP/1.1 for maximum compatibility</p></div><div class=\"feature\"><div class=\"feature-icon\">&#128274;</div><h3>Local</h3><p>Running on your machine at port 8080</p></div><div class=\"feature\"><div class=\"feature-icon\">&#128196;</div><h3>THIRD_FEATURE</h3><p>THIRD_DESC</p></div></div><div class=\"footer\">dweb &bull; <code>http://localhost:8080</code></div>SPA_JS</body></html>'
+                  .replace("&#127760;", icon)
+                  .replace("&#9889;", isSpa ? "&#9889;" : "&#127760;")
+                  .replace("&#128200;", "&#128200;")
+                  .replace("&#128218;", "&#128218;")
+                  .replace("SPA_NAV", spaNav)
+                  .replace("SPA_CONTENT", isSpa ? '<div id="spa-content" class="spa-content"></div>' : "")
+                  .replace("SPA_JS", spaJs);
+              })();
+              var typeBadge = t === "Single Page App" ? "SPA" : t === "Documentation Site" ? "DOCS" : t === "Dashboard" ? "DASHBOARD" : "STATIC_SITE";
+              var typeSlug = t === "Single Page App" ? "spa" : t === "Documentation Site" ? "docs" : t === "Dashboard" ? "dashboard" : "static_site";
+              var feat3Title = t === "Single Page App" ? "SPA Ready" : t === "Documentation Site" ? "Markdown" : t === "Dashboard" ? "Live Stats" : "Static";
+              var feat3Desc = t === "Single Page App" ? "Client-side routing with dynamic pages" : t === "Documentation Site" ? "Render Markdown docs beautifully" : t === "Dashboard" ? "Real-time data dashboards" : "Serve HTML, CSS, JS, and assets";
+              _html = _html
+                .replaceAll("STATIC_SITE", typeBadge)
+                .replaceAll("static_site", typeSlug)
+                .replaceAll("DEMO_NAME", name_)
+                .replaceAll("8080", String(port_))
+                .replace("THIRD_FEATURE", feat3Title)
+                .replace("THIRD_DESC", feat3Desc);
+              fs.writeFileSync(path.join(demoDir, "index.html"), _html);
+            }
+            return demoDir;
+          } catch (e) {
+            console.error("  [demo] Failed to create demo dir for " + name_ + ":", e.message);
+            return null;
+          }
+        }
+
+        function createStaticHandler(baseDir, cors, spaFallback) {
+          if (!baseDir || !fs.existsSync(baseDir)) {
+            baseDir = getDemoDir(type, name, port);
+          }
+          return (req, res) => {
+            if (!baseDir || !fs.existsSync(baseDir)) {
+              return sendStatusPage(res, name, type, port, baseDir, cors);
+            }
+            const url = new URL(req.url, "http://localhost");
+            let reqPath = decodeURIComponent(url.pathname);
+            const resolved = path.resolve(baseDir, "." + reqPath);
+            if (!resolved.startsWith(path.resolve(baseDir))) {
+              res.writeHead(403, { ...cors, "Content-Type": "text/plain" });
+              return res.end("Forbidden");
+            }
+            fs.stat(resolved, (err, stat) => {
+              if (err || !stat) {
+                if (spaFallback) {
+                  const indexPath = path.join(baseDir, "index.html");
+                  if (fs.existsSync(indexPath)) {
+                    res.writeHead(200, { ...cors, "Content-Type": "text/html; charset=utf-8" });
+                    return fs.createReadStream(indexPath).pipe(res);
                   }
-                  svcRes.writeHead(200, { ...cors, "Content-Type": "application/json" });
-                  svcRes.end(JSON.stringify({ ok: true, deleted: reqPath }));
+                }
+                res.writeHead(404, { ...cors, "Content-Type": "text/plain" });
+                return res.end("Not found");
+              }
+              if (stat.isDirectory()) {
+                const indexPath = path.join(resolved, "index.html");
+                if (fs.existsSync(indexPath)) {
+                  res.writeHead(200, { ...cors, "Content-Type": "text/html; charset=utf-8" });
+                  return fs.createReadStream(indexPath).pipe(res);
+                }
+                return sendDirListing(res, resolved, reqPath, baseDir, cors);
+              }
+              const ext = path.extname(resolved).toLowerCase();
+              res.writeHead(200, { ...cors, "Content-Type": MIME[ext] || "application/octet-stream" });
+              fs.createReadStream(resolved).pipe(res);
+            });
+          };
+        }
+
+        function createFileBrowserHandler(baseDir, cors) {
+          if (!baseDir || !fs.existsSync(baseDir)) {
+            baseDir = getDemoDir(type, name, port);
+          }
+          if (!baseDir || !fs.existsSync(baseDir)) {
+            return (req, res) => sendStatusPage(res, name, type, port, baseDir, cors);
+          }
+          return (req, res) => {
+            const url = new URL(req.url, "http://localhost");
+            let reqPath = decodeURIComponent(url.pathname);
+            const resolved = path.resolve(baseDir, "." + reqPath);
+            if (!resolved.startsWith(path.resolve(baseDir))) {
+              res.writeHead(403, { ...cors, "Content-Type": "text/plain" });
+              return res.end("Forbidden: path traversal detected");
+            }
+            // JSON directory listing (?json)
+            if (url.searchParams.has("json") && req.method === "GET") {
+              fs.stat(resolved, (err, st) => {
+                if (err || !st) { res.writeHead(404, { ...cors, "Content-Type": "application/json" }); return res.end(JSON.stringify({ error: "Not found" })); }
+                if (!st.isDirectory()) { res.writeHead(400, { ...cors, "Content-Type": "application/json" }); return res.end(JSON.stringify({ error: "Not a directory" })); }
+                fs.readdir(resolved, { withFileTypes: true }, (rdErr, entries) => {
+                  if (rdErr) { res.writeHead(500, { ...cors, "Content-Type": "application/json" }); return res.end(JSON.stringify({ error: rdErr.message })); }
+                  const files = entries.map(e => {
+                    let info = { name: e.name + (e.isDirectory() ? "/" : ""), isDir: e.isDirectory(), size: 0, mtime: null };
+                    try { const s = fs.statSync(path.join(resolved, e.name)); info.size = s.size; info.mtime = s.mtime.toISOString(); } catch {}
+                    return info;
+                  });
+                  res.writeHead(200, { ...cors, "Content-Type": "application/json" });
+                  res.end(JSON.stringify({ path: reqPath, files }));
                 });
               });
               return;
             }
-
-            // ── HANDLE UPLOAD ──
-            if (svcReq.method === "POST" && !url.searchParams.has("delete")) {
-              const contentType = svcReq.headers["content-type"] || "";
-              if (contentType.includes("multipart/form-data")) {
-                // Simple multipart parser for single file upload
-                const boundary = "--" + contentType.split("boundary=")[1];
+            // DELETE
+            if (req.method === "DELETE" || (req.method === "POST" && url.searchParams.has("delete"))) {
+              const delPath = req.method === "DELETE" ? resolved : path.resolve(baseDir, "." + url.searchParams.get("delete"));
+              if (!delPath.startsWith(path.resolve(baseDir))) {
+                res.writeHead(403, { ...cors, "Content-Type": "application/json" });
+                return res.end(JSON.stringify({ error: "Forbidden" }));
+              }
+              fs.stat(delPath, (err) => {
+                if (err) { res.writeHead(404, { ...cors, "Content-Type": "application/json" }); return res.end(JSON.stringify({ error: "Not found" })); }
+                fs.rm(delPath, { recursive: true, force: true }, (rmErr) => {
+                  if (rmErr) { res.writeHead(500, { ...cors, "Content-Type": "application/json" }); return res.end(JSON.stringify({ error: rmErr.message })); }
+                  res.writeHead(200, { ...cors, "Content-Type": "application/json" });
+                  res.end(JSON.stringify({ ok: true, deleted: reqPath }));
+                });
+              });
+              return;
+            }
+            // POST upload
+            if (req.method === "POST" && !url.searchParams.has("delete")) {
+              const ct = req.headers["content-type"] || "";
+              if (ct.includes("multipart/form-data")) {
+                const boundary = "--" + ct.split("boundary=")[1];
                 const bufs = [];
-                svcReq.on("data", c => bufs.push(c));
-                svcReq.on("end", () => {
+                req.on("data", c => bufs.push(c));
+                req.on("end", () => {
                   const raw = Buffer.concat(bufs);
                   const parts = splitMultiPart(raw, boundary);
-                  let fileName = "upload.bin";
-                  let fileData = null;
-                  let uploadDir = resolved;
-
+                  let fileName = "upload.bin", fileData = null, uploadDir = resolved;
                   for (const part of parts) {
                     const headerEnd = part.indexOf("\r\n\r\n");
                     if (headerEnd === -1) continue;
-                    const headers = part.slice(0, headerEnd).toString("utf8");
+                    const hdrs = part.slice(0, headerEnd).toString("utf8");
                     const body = part.slice(headerEnd + 4);
-
-                    if (headers.includes('name="dir"')) {
-                      const sub = body.toString("utf8").trim();
-                      if (sub) uploadDir = path.resolve(dir, sub);
-                    } else if (headers.includes('name="file"') || headers.includes('name="files"')) {
-                      const nameMatch = headers.match(/filename="([^"]*)"/);
-                      if (nameMatch) fileName = nameMatch[1];
-                      fileData = body;
-                    }
+                    if (hdrs.includes('name="dir"')) { const sub = body.toString("utf8").trim(); if (sub) uploadDir = path.resolve(baseDir, sub); }
+                    else if (hdrs.includes('name="file"') || hdrs.includes('name="files"')) { const m = hdrs.match(/filename="([^"]*)"/); if (m) fileName = m[1]; fileData = body; }
                   }
-
-                  if (!fileData) {
-                    svcRes.writeHead(400, { ...cors, "Content-Type": "application/json" });
-                    return svcRes.end(JSON.stringify({ error: "No file in upload" }));
-                  }
-
+                  if (!fileData) { res.writeHead(400, { ...cors, "Content-Type": "application/json" }); return res.end(JSON.stringify({ error: "No file in upload" })); }
                   const targetPath = path.join(uploadDir, fileName);
-                  if (!targetPath.startsWith(path.resolve(dir))) {
-                    svcRes.writeHead(403, { ...cors, "Content-Type": "application/json" });
-                    return svcRes.end(JSON.stringify({ error: "Forbidden" }));
-                  }
-
-                  // Strip trailing \r\n from multipart body (fileData is a Buffer)
-                  const cleanData = fileData.length >= 2 && fileData[fileData.length - 1] === 0x0a && fileData[fileData.length - 2] === 0x0d
-                    ? fileData.slice(0, -2) : fileData;
-
+                  if (!targetPath.startsWith(path.resolve(baseDir))) { res.writeHead(403); return res.end(JSON.stringify({ error: "Forbidden" })); }
+                  const clean = fileData.length >= 2 && fileData[fileData.length - 1] === 0x0a && fileData[fileData.length - 2] === 0x0d ? fileData.slice(0, -2) : fileData;
                   fs.mkdir(path.dirname(targetPath), { recursive: true }, () => {
-                    fs.writeFile(targetPath, cleanData, (writeErr) => {
-                      if (writeErr) {
-                        svcRes.writeHead(500, { ...cors, "Content-Type": "application/json" });
-                        return svcRes.end(JSON.stringify({ error: writeErr.message }));
-                      }
-                      svcRes.writeHead(200, { ...cors, "Content-Type": "application/json" });
-                      svcRes.end(JSON.stringify({ ok: true, file: fileName, path: targetPath }));
-                    });
+                    fs.writeFile(targetPath, clean, (e) => { if (e) { res.writeHead(500); return res.end(JSON.stringify({ error: e.message })); } res.writeHead(200); res.end(JSON.stringify({ ok: true, file: fileName })); });
                   });
                 });
                 return;
               }
-
-              // JSON body upload (file creation + folder creation)
+              // JSON upload
               let body = "";
-              svcReq.on("data", c => body += c);
-              svcReq.on("end", () => {
+              req.on("data", c => body += c);
+              req.on("end", () => {
                 try {
                   const data = JSON.parse(body);
                   const { file, content, name: fname, mkdir, dir: subDir } = data;
-
                   if (mkdir || (fname && !file && content === undefined)) {
-                    // Create folder
                     const folderName = fname || "new-folder";
-                    const targetDir = subDir ? path.resolve(dir, subDir, folderName) : path.join(resolved, folderName);
-                    if (!targetDir.startsWith(path.resolve(dir))) {
-                      svcRes.writeHead(403, { ...cors, "Content-Type": "application/json" });
-                      return svcRes.end(JSON.stringify({ error: "Forbidden" }));
-                    }
-                    fs.mkdir(targetDir, { recursive: true }, (mkErr) => {
-                      if (mkErr) {
-                        svcRes.writeHead(500, { ...cors, "Content-Type": "application/json" });
-                        return svcRes.end(JSON.stringify({ error: mkErr.message }));
-                      }
-                      svcRes.writeHead(200, { ...cors, "Content-Type": "application/json" });
-                      svcRes.end(JSON.stringify({ ok: true, folder: folderName }));
-                    });
+                    const targetDir = subDir ? path.resolve(baseDir, subDir, folderName) : path.join(resolved, folderName);
+                    if (!targetDir.startsWith(path.resolve(baseDir))) { res.writeHead(403); return res.end(JSON.stringify({ error: "Forbidden" })); }
+                    fs.mkdir(targetDir, { recursive: true }, (e) => { if (e) { res.writeHead(500); return res.end(JSON.stringify({ error: e.message })); } res.writeHead(200); res.end(JSON.stringify({ ok: true, folder: folderName })); });
                     return;
                   }
-
-                  // Write file
                   const targetFile = fname || file || "untitled.txt";
-                  const targetPath = subDir ? path.resolve(dir, subDir, targetFile) : path.join(resolved, targetFile);
-                  if (!targetPath.startsWith(path.resolve(dir))) {
-                    svcRes.writeHead(403, { ...cors, "Content-Type": "application/json" });
-                    return svcRes.end(JSON.stringify({ error: "Forbidden" }));
-                  }
-                  fs.writeFile(targetPath, content || "", (writeErr) => {
-                    if (writeErr) {
-                      svcRes.writeHead(500, { ...cors, "Content-Type": "application/json" });
-                      return svcRes.end(JSON.stringify({ error: writeErr.message }));
-                    }
-                    svcRes.writeHead(200, { ...cors, "Content-Type": "application/json" });
-                    svcRes.end(JSON.stringify({ ok: true, file: targetFile }));
-                  });
-                } catch {
-                  svcRes.writeHead(400, { ...cors, "Content-Type": "application/json" });
-                  svcRes.end(JSON.stringify({ error: "Invalid JSON" }));
-                }
+                  const targetPath = subDir ? path.resolve(baseDir, subDir, targetFile) : path.join(resolved, targetFile);
+                  if (!targetPath.startsWith(path.resolve(baseDir))) { res.writeHead(403); return res.end(JSON.stringify({ error: "Forbidden" })); }
+                  fs.writeFile(targetPath, content || "", (e) => { if (e) { res.writeHead(500); return res.end(JSON.stringify({ error: e.message })); } res.writeHead(200); res.end(JSON.stringify({ ok: true, file: targetFile })); });
+                } catch { res.writeHead(400); res.end(JSON.stringify({ error: "Invalid JSON" })); }
               });
               return;
             }
-
-            // ── HANDLE DIRECTORY LISTING ──
+            // GET
             fs.stat(resolved, (err, stat) => {
               if (err) {
-                if (reqPath === "/" || reqPath === "") {
-                  return sendStatusPage(svcRes, name, type, port, dir, cors);
-                }
-                svcRes.writeHead(404, { ...cors, "Content-Type": "text/plain" });
-                return svcRes.end("Not found");
+                if (reqPath === "/" || reqPath === "") return sendStatusPage(res, name, type, port, baseDir, cors);
+                res.writeHead(404); return res.end("Not found");
               }
-
               if (stat.isDirectory()) {
-                // Check for index.html
                 const indexPath = path.join(resolved, "index.html");
-                if (fs.existsSync(indexPath)) {
-                  const ext = path.extname(indexPath).toLowerCase();
-                  svcRes.writeHead(200, { ...cors, "Content-Type": MIME[ext] || "text/html; charset=utf-8" });
-                  return fs.createReadStream(indexPath).pipe(svcRes);
-                }
-                // Show directory listing
-                return sendDirListing(svcRes, resolved, reqPath, dir, cors);
+                if (fs.existsSync(indexPath)) { const ext = path.extname(indexPath).toLowerCase(); res.writeHead(200, { ...cors, "Content-Type": MIME[ext] || "text/html; charset=utf-8" }); return fs.createReadStream(indexPath).pipe(res); }
+                return sendDirListing(res, resolved, reqPath, baseDir, cors);
               }
-
-              // Serve file
               const ext = path.extname(resolved).toLowerCase();
-              svcRes.writeHead(200, { ...cors, "Content-Type": MIME[ext] || "application/octet-stream" });
-              fs.createReadStream(resolved).pipe(svcRes);
+              res.writeHead(200, { ...cors, "Content-Type": MIME[ext] || "application/octet-stream" });
+              fs.createReadStream(resolved).pipe(res);
             });
-            return;
+          };
+        }
+
+        function createGalleryHandler(baseDir, cors) {
+          if (!baseDir || !fs.existsSync(baseDir)) {
+            baseDir = getDemoDir("Image Gallery", name, port);
           }
+          if (!baseDir || !fs.existsSync(baseDir)) return (req, res) => sendStatusPage(res, name, "Image Gallery", port, baseDir, cors);
+          return (req, res) => {
+            const url = new URL(req.url, "http://localhost");
+            let reqPath = decodeURIComponent(url.pathname);
+            const resolved = path.resolve(baseDir, "." + reqPath);
+            if (!resolved.startsWith(path.resolve(baseDir))) { res.writeHead(403); return res.end("Forbidden"); }
+            fs.stat(resolved, (err, stat) => {
+              if (err) { res.writeHead(404); return res.end("Not found"); }
+              if (stat.isDirectory()) {
+                fs.readdir(resolved, (readErr, entries) => {
+                  if (readErr) { res.writeHead(500); return res.end("Error"); }
+                  const imgExt = ["jpg","jpeg","png","gif","webp","svg","ico","bmp"];
+                  const images = entries.filter(e => imgExt.includes(e.split(".").pop().toLowerCase()));
+                  const dirs = entries.filter(e => { try { return fs.statSync(path.join(resolved, e)).isDirectory(); } catch { return false; }});
+                  const cards = images.map(img => `<div class="card"><a href="${encodeURIComponent(img)}"><img src="${encodeURIComponent(img)}" loading="lazy"></a><div class="label">${escHtml(img)}</div></div>`).join("");
+                  const dirHTML = dirs.length ? dirs.map(d => `<li>📁 <a href="${encodeURIComponent(d)}/">${escHtml(d)}</a></li>`).join("") : "";
+                  res.writeHead(200, { ...cors, "Content-Type": "text/html; charset=utf-8" });
+                  res.end(`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escHtml(name)} — Gallery</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,sans-serif;background:#0f0f13;color:#e2e8f0;padding:20px}
+h1{font-size:20px;margin-bottom:16px}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px}
+.card{background:#1a1a2e;border-radius:8px;overflow:hidden;border:1px solid rgba(255,255,255,0.06)}
+.card img{width:100%;height:150px;object-fit:cover;display:block}
+.card .label{padding:6px 10px;font-size:11px;color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+li{padding:4px 0}a{color:#3b82f6;text-decoration:none}.muted{color:#6b7280;font-size:12px;margin-top:16px}</style></head><body>
+<h1>🖼️ ${escHtml(name)}</h1>
+${dirHTML ? '<div style="margin-bottom:12px">' + dirHTML + '</div>' : ""}
+<div class="grid">${cards || '<div class="muted" style="grid-column:1/-1;padding:40px;text-align:center">No images found</div>'}</div>
+<div class="muted">${escHtml(baseDir)} — ${images.length} images</div></body></html>`);
+                });
+              } else { const ext = path.extname(resolved).toLowerCase(); res.writeHead(200, { ...cors, "Content-Type": MIME[ext] || "application/octet-stream" }); fs.createReadStream(resolved).pipe(res); }
+            });
+          };
+        }
 
-          // ── Default: status page (no dir provided) ────────────────
-          sendStatusPage(svcRes, name, type, port, dir, cors);
-        });
+        function createMediaHandler(baseDir, cors) {
+          if (!baseDir || !fs.existsSync(baseDir)) {
+            baseDir = getDemoDir("Media Stream", name, port);
+          }
+          if (!baseDir || !fs.existsSync(baseDir)) return (req, res) => sendStatusPage(res, name, "Media Stream", port, baseDir, cors);
+          return (req, res) => {
+            const url = new URL(req.url, "http://localhost");
+            let reqPath = decodeURIComponent(url.pathname);
+            const resolved = path.resolve(baseDir, "." + reqPath);
+            if (!resolved.startsWith(path.resolve(baseDir))) { res.writeHead(403); return res.end("Forbidden"); }
+            fs.stat(resolved, (err, stat) => {
+              if (err) { res.writeHead(404); return res.end("Not found"); }
+              if (stat.isDirectory()) {
+                fs.readdir(resolved, (readErr, entries) => {
+                  if (readErr) { res.writeHead(500); return res.end("Error"); }
+                  const mediaExt = ["mp3","wav","ogg","flac","m4a","mp4","webm","mkv","mov","avi"];
+                  const dirs = entries.filter(e => { try { return fs.statSync(path.join(resolved, e)).isDirectory(); } catch { return false; }});
+                  const files = entries.filter(e => { try { return fs.statSync(path.join(resolved, e)).isFile(); } catch { return false; }});
+                  const mediaFiles = files.filter(e => mediaExt.includes(e.split(".").pop().toLowerCase()));
+                  const rows = [...dirs.map(d => `<tr><td>📁</td><td><a href="${encodeURIComponent(d)}/">${escHtml(d)}</a></td><td></td></tr>`),
+                    ...mediaFiles.map(f => { const isAudio = ["mp3","wav","ogg","flac","m4a"].includes(f.split(".").pop().toLowerCase()); return `<tr><td>${isAudio ? "🎵" : "🎬"}</td><td><a href="${encodeURIComponent(f)}">${escHtml(f)}</a></td><td>${formatBytes(fs.statSync(path.join(resolved, f)).size)}</td></tr>`; })].join("");
+                  res.writeHead(200, { ...cors, "Content-Type": "text/html; charset=utf-8" });
+                  res.end(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escHtml(name)} — Media</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,sans-serif;background:#0f0f13;color:#e2e8f0;padding:20px}
+h1{font-size:20px;margin-bottom:12px}table{width:100%;border-collapse:collapse}td{padding:6px 8px;border-bottom:1px solid rgba(255,255,255,0.05)}
+a{color:#3b82f6;text-decoration:none}.muted{color:#6b7280;font-size:12px;margin-top:12px}</style></head><body>
+<h1>🎵 ${escHtml(name)}</h1><table>${rows || '<tr><td colspan="3" style="padding:40px;text-align:center;color:#6b7280">No media files found</td></tr>'}</table>
+<div class="muted">${escHtml(baseDir)}</div></body></html>`);
+                });
+              } else {
+                const ext = path.extname(resolved).toLowerCase();
+                const isVideo = ["mp4","webm","mkv","mov","avi"].includes(ext);
+                const isAudio = ["mp3","wav","ogg","flac","m4a"].includes(ext);
+                if (isVideo || isAudio) {
+                  const fileSize = fs.statSync(resolved).size;
+                  const range = req.headers.range;
+                  if (range) {
+                    const parts = range.replace(/bytes=/, "").split("-");
+                    const start = parseInt(parts[0], 10);
+                    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+                    res.writeHead(206, { ...cors, "Content-Range": `bytes ${start}-${end}/${fileSize}`, "Accept-Ranges": "bytes", "Content-Length": end - start + 1, "Content-Type": MIME[ext] || "application/octet-stream" });
+                    return fs.createReadStream(resolved, { start, end }).pipe(res);
+                  }
+                  res.writeHead(200, { ...cors, "Accept-Ranges": "bytes", "Content-Length": fileSize, "Content-Type": MIME[ext] || "application/octet-stream" });
+                  return fs.createReadStream(resolved).pipe(res);
+                }
+                res.writeHead(200, { ...cors, "Content-Type": MIME[ext] || "application/octet-stream" });
+                fs.createReadStream(resolved).pipe(res);
+              }
+            });
+          };
+        }
 
-        // ── Multipart parser helper ──
+        function createPodcastHandler(baseDir, cors) {
+          if (!baseDir || !fs.existsSync(baseDir)) {
+            baseDir = getDemoDir("Podcast Host", name, port);
+          }
+          if (!baseDir || !fs.existsSync(baseDir)) return (req, res) => sendStatusPage(res, name, "Podcast Host", port, baseDir, cors);
+          return (req, res) => {
+            const url = new URL(req.url, "http://localhost");
+            const reqPath = decodeURIComponent(url.pathname);
+            if (reqPath === "/feed.xml") {
+              fs.readdir(baseDir, (err, entries) => {
+                const audioExt = ["mp3","wav","ogg","flac","m4a"];
+                const episodes = entries.filter(e => audioExt.includes(e.split(".").pop().toLowerCase()));
+                const items = episodes.map(ep => { let size = 0; try { size = fs.statSync(path.join(baseDir, ep)).size; } catch {} const epUrl = `http://${req.headers.host || "localhost:" + port}/${encodeURIComponent(ep)}`; return `<item><title>${escHtml(ep)}</title><enclosure url="${epUrl}" length="${size}" type="audio/mpeg"/><guid>${epUrl}</guid></item>`; }).join("");
+                res.writeHead(200, { ...cors, "Content-Type": "application/rss+xml; charset=utf-8" });
+                res.end(`<?xml version="1.0"?><rss version="2.0"><channel><title>${escHtml(name)}</title><link>http://localhost:${port}</link><description>dweb podcast</description>${items}</channel></rss>`);
+              });
+              return;
+            }
+            const resolved = path.resolve(baseDir, "." + reqPath);
+            if (!resolved.startsWith(path.resolve(baseDir))) { res.writeHead(403); return res.end("Forbidden"); }
+            fs.stat(resolved, (err, stat) => {
+              if (err || !stat) { res.writeHead(404); return res.end("Not found"); }
+              if (stat.isDirectory()) {
+                fs.readdir(resolved, (readErr, entries) => {
+                  if (readErr) { res.writeHead(500); return res.end("Error"); }
+                  const audioExt = ["mp3","wav","ogg","flac","m4a"];
+                  const audioFiles = entries.filter(e => { try { return fs.statSync(path.join(resolved, e)).isFile(); } catch { return false; }}).filter(f => audioExt.includes(f.split(".").pop().toLowerCase()));
+                  const rows = audioFiles.map(f => `<tr><td>🎙️</td><td><a href="${encodeURIComponent(f)}">${escHtml(f)}</a></td><td>${formatBytes(fs.statSync(path.join(resolved, f)).size)}</td></tr>`).join("");
+                  res.writeHead(200, { ...cors, "Content-Type": "text/html; charset=utf-8" });
+                  res.end(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escHtml(name)} — Podcast</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,sans-serif;background:#0f0f13;color:#e2e8f0;padding:20px}
+h1{font-size:20px;margin-bottom:12px}table{width:100%;border-collapse:collapse}td{padding:6px 8px;border-bottom:1px solid rgba(255,255,255,0.05)}
+a{color:#3b82f6;text-decoration:none}.muted{color:#6b7280;font-size:12px;margin-top:12px}.rss{display:inline-block;margin-top:12px;padding:6px 12px;background:#1a1a2e;border-radius:6px;font-size:12px}</style></head><body>
+<h1>🎙️ ${escHtml(name)}</h1><table>${rows || '<tr><td colspan="3" style="padding:40px;text-align:center;color:#6b7280">No audio files found</td></tr>'}</table>
+<a class="rss" href="/feed.xml">📡 RSS Feed</a><div class="muted">${escHtml(baseDir)} — ${audioFiles.length} episodes</div></body></html>`);
+                });
+              } else {
+                const ext = path.extname(resolved).toLowerCase();
+                if (["mp3","wav","ogg","flac","m4a"].includes(ext)) {
+                  const fileSize = fs.statSync(resolved).size; const range = req.headers.range;
+                  if (range) { const p = range.replace(/bytes=/, "").split("-"); const s = parseInt(p[0], 10), e = p[1] ? parseInt(p[1], 10) : fileSize - 1; res.writeHead(206, { ...cors, "Content-Range": `bytes ${s}-${e}/${fileSize}`, "Accept-Ranges": "bytes", "Content-Length": e - s + 1, "Content-Type": MIME[ext] || "application/octet-stream" }); return fs.createReadStream(resolved, { start: s, end: e }).pipe(res); }
+                  res.writeHead(200, { ...cors, "Accept-Ranges": "bytes", "Content-Length": fileSize, "Content-Type": MIME[ext] || "application/octet-stream" }); return fs.createReadStream(resolved).pipe(res);
+                }
+                res.writeHead(200, { ...cors, "Content-Type": "application/octet-stream" }); fs.createReadStream(resolved).pipe(res);
+              }
+            });
+          };
+        }
+
+        function createLogViewerHandler(baseDir, cors) {
+          const MAX_LINES = 500;
+          if (!baseDir || !fs.existsSync(baseDir)) {
+            baseDir = getDemoDir("Log Viewer", name, port);
+          }
+          if (!baseDir || !fs.existsSync(baseDir)) {
+            return (req, res) => { res.writeHead(200, { ...cors, "Content-Type": "text/html; charset=utf-8" }); res.end(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escHtml(name)} — Log Viewer</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,sans-serif;background:#0f0f13;color:#e2e8f0;padding:40px;text-align:center}
+h1{font-size:20px;margin-bottom:12px}.muted{color:#6b7280;font-size:14px}</style></head><body>
+<h1>📋 ${escHtml(name)}</h1><div class="muted">This service needs a log directory. Stop it, then restart with a directory path.</div></body></html>`); };
+          }
+          return (req, res) => {
+            const url = new URL(req.url, "http://localhost");
+            const reqPath = decodeURIComponent(url.pathname);
+            if (reqPath === "/api/logs/list") {
+              fs.readdir(baseDir, (err, entries) => { if (err) return jsonResponse(res, 500, { error: err.message }); const files = entries.filter(e => { try { return fs.statSync(path.join(baseDir, e)).isFile(); } catch { return false; }}).map(f => { const st = fs.statSync(path.join(baseDir, f)); return { name: f, size: st.size, mtime: st.mtime.toISOString() }; }).sort((a, b) => b.mtime.localeCompare(a.mtime)); return jsonResponse(res, 200, { files }); });
+              return;
+            }
+            if (reqPath.startsWith("/api/logs/tail/")) {
+              const logFile = decodeURIComponent(reqPath.slice("/api/logs/tail/".length));
+              const fullPath = path.resolve(baseDir, logFile);
+              if (!fullPath.startsWith(path.resolve(baseDir))) { res.writeHead(403); return res.end("Forbidden"); }
+              const nLines = parseInt(url.searchParams.get("lines") || "100", 10);
+              const grep = url.searchParams.get("grep") || "";
+              fs.readFile(fullPath, "utf8", (err, data) => { if (err) return jsonResponse(res, 404, { error: "Not found" }); let allLines = data.split("\n").filter(Boolean); if (grep) allLines = allLines.filter(l => l.toLowerCase().includes(grep.toLowerCase())); const tailed = allLines.slice(-Math.min(nLines, MAX_LINES)); return jsonResponse(res, 200, { file: logFile, total: allLines.length, lines: tailed, grep: grep || null }); });
+              return;
+            }
+            // UI
+            fs.readdir(baseDir, (err, entries) => {
+              const files = entries ? entries.filter(e => { try { return fs.statSync(path.join(baseDir, e)).isFile(); } catch { return false; }}).sort() : [];
+              const opts = files.map(f => `<option value="${escHtml(f)}">${escHtml(f)}</option>`).join("");
+              res.writeHead(200, { ...cors, "Content-Type": "text/html; charset=utf-8" });
+              res.end(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escHtml(name)} — Log Viewer</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,sans-serif;background:#0f0f13;color:#e2e8f0;padding:20px}
+h1{font-size:20px;margin-bottom:12px}.controls{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+select,input,button{background:#1a1a2e;color:#e2e8f0;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:6px 10px;font-size:13px}
+button{background:#3b82f6;border-color:#3b82f6;cursor:pointer}pre{background:#0f0f13;padding:12px;border-radius:8px;font-size:12px;overflow:auto;max-height:70vh;border:1px solid rgba(255,255,255,0.04)}
+.muted{color:#6b7280;font-size:12px;margin-top:8px}</style></head><body>
+<h1>📋 ${escHtml(name)}</h1><div class="controls">
+<select id="logFile">${opts}</select>
+<input type="number" id="lineCount" value="100" min="10" max="${MAX_LINES}" style="width:70px">
+<input type="text" id="grepFilter" placeholder="Filter..." style="width:150px">
+<button onclick="tailLog()">Tail</button>
+<button onclick="tailLog(true)" title="Auto-refresh every 5s">🔄 Watch</button></div>
+<pre id="output">Select a log file and click Tail</pre>
+<script>
+let watchInterval;
+function tailLog(watch) {
+  clearInterval(watchInterval);
+  const file = document.getElementById("logFile").value;
+  const lines = document.getElementById("lineCount").value || 100;
+  const grep = document.getElementById("grepFilter").value;
+  if (!file) return;
+  document.getElementById("output").textContent = "Loading...";
+  fetch("/api/logs/tail/" + encodeURIComponent(file) + "?lines=" + lines + (grep ? "&grep=" + encodeURIComponent(grep) : ""))
+    .then(r => r.json()).then(d => {
+      document.getElementById("output").textContent = d.lines.join("\\n") || "(empty or no matches)";
+      if (watch) watchInterval = setInterval(() => tailLog(true), 5000);
+    }).catch(e => { document.getElementById("output").textContent = "Error: " + e.message; });
+}
+document.getElementById("logFile").addEventListener("change", () => tailLog());
+if (${files.length > 0 ? "true" : "false"}) tailLog();
+</script>
+<div class="muted">${escHtml(baseDir)} — ${files.length} files</div></body></html>`);
+            });
+          };
+        }
+
+        // ── API-based service handlers ──
+        const webhookStore = []; const pasteStore = new Map();
+
+        function createWebhookHandler(name, port, cors) {
+          return (req, res) => {
+            const url = new URL(req.url, "http://localhost");
+            const reqPath = decodeURIComponent(url.pathname);
+            if (["POST","PUT","PATCH"].includes(req.method)) {
+              let body = ""; req.on("data", c => body += c); req.on("end", () => {
+                const entry = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), method: req.method, path: reqPath, headers: req.headers, body, timestamp: new Date().toISOString() };
+                webhookStore.unshift(entry); if (webhookStore.length > 200) webhookStore.length = 200;
+                res.writeHead(200, { ...cors, "Content-Type": "application/json" }); res.end(JSON.stringify({ ok: true, id: entry.id }));
+              }); return;
+            }
+            if (reqPath === "/api/webhooks") return jsonResponse(res, 200, { total: webhookStore.length, webhooks: webhookStore });
+            if (reqPath === "/api/webhooks/clear" && req.method === "POST") { webhookStore.length = 0; return jsonResponse(res, 200, { ok: true }); }
+            const rows = webhookStore.slice(0, 50).map(w => { const s = w.body.length > 200 ? w.body.slice(0, 200) + "..." : w.body; return `<tr data-id="${w.id}"><td><span class="method method-${w.method}">${w.method}</span></td><td class="path">${escHtml(w.path)}</td><td class="time">${new Date(w.timestamp).toLocaleTimeString()}</td><td class="summary">${escHtml(s)}</td></tr>`; }).join("");
+            res.writeHead(200, { ...cors, "Content-Type": "text/html; charset=utf-8" });
+            res.end(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escHtml(name)} — Webhook Tester</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,sans-serif;background:#0f0f13;color:#e2e8f0;padding:20px}
+h1{font-size:20px;margin-bottom:4px}.sub{color:#6b7280;font-size:12px;margin-bottom:12px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;padding:8px;color:#6b7280;font-size:11px;text-transform:uppercase;border-bottom:1px solid rgba(255,255,255,0.1)}
+td{padding:8px;border-bottom:1px solid rgba(255,255,255,0.04);cursor:pointer}tr:hover{background:rgba(255,255,255,0.03)}
+.method{display:inline-block;padding:2px 6px;border-radius:3px;font-size:11px;font-weight:600;color:#fff}
+.method-POST{background:#22c55e}.method-PUT{background:#3b82f6}.method-PATCH{background:#f59e0b}.method-DELETE{background:#ef4444}
+.path{color:#3b82f6}.time{color:#6b7280;white-space:nowrap}.summary{color:#94a3b8;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.actions{margin-bottom:12px}.btn{background:#1a1a2e;color:#e2e8f0;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer;margin-right:6px}
+.btn.danger{background:#ef444422;border-color:#ef444444;color:#ef4444}
+#detail{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:100;padding:40px;overflow:auto}
+#detail pre{background:#1a1a2e;padding:20px;border-radius:8px;max-width:800px;margin:auto;font-size:12px;white-space:pre-wrap}
+#detail .close{position:absolute;top:20px;right:30px;font-size:24px;cursor:pointer;color:#fff}
+</style></head><body>
+<h1>🔔 ${escHtml(name)}</h1>
+<div class="sub">Webhook URL: <code>http://${req.headers.host || "localhost:" + port}/</code></div>
+<div class="actions">
+<button class="btn" onclick="location.reload()">🔄 Refresh</button>
+<button class="btn danger" onclick="if(confirm('Clear all webhooks?'))fetch('/api/webhooks/clear',{method:'POST'}).then(()=>location.reload())">🗑 Clear</button>
+</div>
+${webhookStore.length ? '<table><thead><tr><th>Method</th><th>Path</th><th>Time</th><th>Body</th></tr></thead><tbody>' + rows + '</tbody></table>' : '<div style="padding:40px;text-align:center;color:#6b7280">⏳ Waiting for webhooks...<br><span style="font-size:12px">Send a POST/PUT/PATCH to this URL</span></div>'}
+<div id="detail" onclick="this.style.display='none'"><span class="close">&times;</span><pre id="detail-content"></pre></div>
+<script>
+document.querySelectorAll("tr[data-id]").forEach(tr => {
+  tr.addEventListener("click", function() {
+    const id = this.getAttribute("data-id");
+    fetch("/api/webhooks").then(r => r.json()).then(d => {
+      const w = d.webhooks.find(x => x.id === id);
+      if (w) { document.getElementById("detail-content").textContent = JSON.stringify(w, null, 2); document.getElementById("detail").style.display = "block"; }
+    });
+  });
+});
+</script>
+</body></html>`);
+          };
+        }
+
+        function createPastebinHandler(name, port, cors) {
+          return (req, res) => {
+            const url = new URL(req.url, "http://localhost");
+            const reqPath = decodeURIComponent(url.pathname);
+            if (reqPath === "/api/pastes" && req.method === "POST") {
+              let body = ""; req.on("data", c => body += c); req.on("end", () => {
+                try { const data = JSON.parse(body); const key = Date.now().toString(36) + Math.random().toString(36).slice(2, 8); pasteStore.set(key, { content: data.content || "", lang: data.lang || "text", created: new Date().toISOString() }); return jsonResponse(res, 200, { key, url: `http://${req.headers.host || "localhost:" + port}/p/${key}` }); } catch { return jsonResponse(res, 400, { error: "Invalid JSON" }); }
+              }); return;
+            }
+            if (reqPath === "/api/pastes" && req.method === "GET") { const list = Array.from(pasteStore.entries()).map(([k, v]) => ({ key: k, ...v })); return jsonResponse(res, 200, { total: list.length, pastes: list }); }
+            const apiMatch = reqPath.match(/^\/api\/pastes\/([a-z0-9]+)$/);
+            if (apiMatch && req.method === "GET") { const key = apiMatch[1]; const paste = pasteStore.get(key); if (!paste) return jsonResponse(res, 404, { error: "Not found" }); return jsonResponse(res, 200, { key, ...paste }); }
+            const viewMatch = reqPath.match(/^\/p\/([a-z0-9]+)$/);
+            if (viewMatch) {
+              const key = viewMatch[1]; const paste = pasteStore.get(key);
+              if (!paste) { res.writeHead(404); return res.end("Paste not found"); }
+              const langMap = { text: "", javascript: "javascript", python: "python", html: "markup", css: "css", json: "json", typescript: "typescript", bash: "bash" };
+              res.writeHead(200, { ...cors, "Content-Type": "text/html; charset=utf-8" });
+              res.end(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Paste #${key}</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,sans-serif;background:#0f0f13;color:#e2e8f0;padding:20px}
+h1{font-size:18px;margin-bottom:8px}pre{background:#1a1a2e;padding:16px;border-radius:8px;overflow:auto;font-size:13px;border:1px solid rgba(255,255,255,0.06);white-space:pre-wrap}
+.meta{color:#6b7280;font-size:12px;margin-bottom:12px}a{color:#3b82f6}</style></head><body>
+<h1>📝 Paste #${key}</h1><div class="meta">${paste.lang} — ${new Date(paste.created).toLocaleString()}</div>
+<pre>${escHtml(paste.content)}</pre></body></html>`);
+              return;
+            }
+            const pasteRows = Array.from(pasteStore.entries()).slice(-20).reverse().map(([k, v]) => `<tr><td><a href="/p/${k}">${k}</a></td><td>${escHtml(v.lang)}</td><td>${new Date(v.created).toLocaleString()}</td></tr>`).join("");
+            res.writeHead(200, { ...cors, "Content-Type": "text/html; charset=utf-8" });
+            res.end(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escHtml(name)} — Pastebin</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,sans-serif;background:#0f0f13;color:#e2e8f0;padding:20px;max-width:900px;margin:auto}
+h1{font-size:20px;margin-bottom:4px}.sub{color:#6b7280;font-size:12px;margin-bottom:16px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.card{background:#1a1a2e;border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:16px}
+.card h3{font-size:14px;margin-bottom:8px}textarea{width:100%;height:140px;background:#0f0f13;color:#e2e8f0;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:10px;font-family:monospace;font-size:13px;resize:vertical}
+select,input{background:#0f0f13;color:#e2e8f0;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:6px 10px;font-size:13px;width:100%;margin-bottom:8px}
+button{background:#3b82f6;color:#fff;border:none;border-radius:6px;padding:8px 16px;font-size:13px;cursor:pointer;width:100%}
+button:hover{opacity:0.9}#result{margin-top:8px;word-break:break-all;font-size:12px}
+a{color:#3b82f6;text-decoration:none}table{width:100%;border-collapse:collapse;font-size:12px;margin-top:12px}
+th{text-align:left;padding:6px 8px;color:#6b7280;border-bottom:1px solid rgba(255,255,255,0.1)}
+td{padding:6px 8px;border-bottom:1px solid rgba(255,255,255,0.04)}</style></head><body>
+<h1>📝 ${escHtml(name)}</h1><div class="sub">Create and share text snippets</div>
+<div class="grid">
+<div class="card"><h3>New Paste</h3>
+<select id="lang"><option value="text">Plain Text</option><option value="javascript">JavaScript</option><option value="python">Python</option><option value="html">HTML</option><option value="css">CSS</option><option value="json">JSON</option><option value="typescript">TypeScript</option><option value="bash">Shell</option></select>
+<textarea id="content" placeholder="Paste your text here..."></textarea>
+<button onclick="createPaste()">Create Paste</button>
+<div id="result"></div></div>
+<div class="card"><h3>Recent Pastes</h3>
+${pasteRows ? '<table><thead><tr><th>Key</th><th>Lang</th><th>Created</th></tr></thead><tbody>' + pasteRows + '</tbody></table>' : '<div style="color:#6b7280;font-size:12px">No pastes yet</div>'}</div></div>
+<script>
+function createPaste() {
+  const content = document.getElementById("content").value;
+  const lang = document.getElementById("lang").value;
+  if (!content.trim()) return;
+  fetch("/api/pastes", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({content,lang}) })
+    .then(r=>r.json()).then(d => { document.getElementById("result").innerHTML = '<a href="/p/'+d.key+'" target="_blank">Open: p/'+d.key+'</a>'; setTimeout(() => location.reload(), 500); })
+    .catch(e => alert(e.message));
+}
+</script></body></html>`);
+          };
+        }
+
+        function createApiProxyHandler(name, cors) {
+          return (req, res) => {
+            const url = new URL(req.url, "http://localhost");
+            const reqPath = decodeURIComponent(url.pathname);
+            const targetUrl = url.searchParams.get("url");
+            if (reqPath.startsWith("/proxy") && targetUrl) {
+              const parsed = new URL(targetUrl);
+              const mod = parsed.protocol === "https:" ? https : http;
+              const options = { hostname: parsed.hostname, port: parsed.port || (parsed.protocol === "https:" ? 443 : 80), path: parsed.pathname + parsed.search, method: req.method, headers: { ...req.headers, host: parsed.host }, timeout: 15000 };
+              delete options.headers["x-forwarded-for"]; delete options.headers["host"];
+              const proxyReq = mod.request(options, (proxyRes) => {
+                const h = { ...cors }; if (proxyRes.headers["content-type"]) h["Content-Type"] = proxyRes.headers["content-type"];
+                res.writeHead(proxyRes.statusCode, h); proxyRes.pipe(res);
+              });
+              proxyReq.on("error", (e) => { res.writeHead(502, { ...cors, "Content-Type": "application/json" }); res.end(JSON.stringify({ error: e.message })); });
+              if (["POST","PUT","PATCH"].includes(req.method)) { let b = ""; req.on("data", c => b += c); req.on("end", () => proxyReq.end(b)); } else { proxyReq.end(); }
+              return;
+            }
+            res.writeHead(200, { ...cors, "Content-Type": "text/html; charset=utf-8" });
+            res.end(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escHtml(name)} — API Proxy</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,sans-serif;background:#0f0f13;color:#e2e8f0;padding:40px;max-width:600px;margin:auto}
+h1{font-size:20px;margin-bottom:8px}.muted{color:#6b7280;font-size:13px;margin-bottom:16px}
+.card{background:#1a1a2e;border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:16px}
+label{display:block;font-size:12px;color:#94a3b8;margin-bottom:4px}
+input[type=url]{width:100%;background:#0f0f13;color:#e2e8f0;border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:8px 10px;font-size:13px;margin-bottom:8px}
+button{background:#3b82f6;color:#fff;border:none;border-radius:6px;padding:8px 16px;font-size:13px;cursor:pointer}
+pre{background:#0f0f13;padding:12px;border-radius:6px;font-size:12px;margin-top:12px;max-height:400px;overflow:auto;border:1px solid rgba(255,255,255,0.04)}
+code{background:rgba(255,255,255,0.06);padding:2px 6px;border-radius:3px;font-size:12px}</style></head><body>
+<h1>🔁 ${escHtml(name)}</h1>
+<div class="muted">CORS proxy for external APIs. Use <code>/proxy?url=...</code></div>
+<div class="card">
+<label>Target URL</label>
+<input type="url" id="targetUrl" placeholder="https://api.example.com/data" value="https://httpbin.org/get">
+<button onclick="doRequest()">Send GET</button>
+<pre id="result">Response will appear here</pre>
+</div>
+<script>
+function doRequest() {
+  const url = document.getElementById("targetUrl").value;
+  if (!url) return;
+  document.getElementById("result").textContent = "Loading...";
+  fetch("/proxy?url=" + encodeURIComponent(url)).then(r => r.text()).then(t => { try { document.getElementById("result").textContent = JSON.stringify(JSON.parse(t), null, 2); } catch { document.getElementById("result").textContent = t; }}).catch(e => { document.getElementById("result").textContent = "Error: " + e.message; });
+}
+</script></body></html>`);
+          };
+        }
+
+        function createGitWebHandler(baseDir, cors) {
+          if (!baseDir || !fs.existsSync(baseDir)) {
+            baseDir = getDemoDir("Git Web UI", name, port);
+          }
+          if (!baseDir || !fs.existsSync(baseDir)) return (req, res) => sendStatusPage(res, name, "Git Web UI", port, baseDir, cors);
+          return (req, res) => {
+            const url = new URL(req.url, "http://localhost");
+            const reqPath = decodeURIComponent(url.pathname);
+            if (reqPath === "/api/repos") {
+              fs.readdir(baseDir, (err, entries) => { if (err) return jsonResponse(res, 500, { error: err.message }); const repos = entries.filter(e => { try { return fs.statSync(path.join(baseDir, e, ".git")).isDirectory(); } catch { return false; }}); return jsonResponse(res, 200, { repos }); });
+              return;
+            }
+            const repoMatch = reqPath.match(/^\/api\/repo\/([^/]+)\/log$/);
+            if (repoMatch && req.method === "GET") {
+              const repoName = decodeURIComponent(repoMatch[1]); const repoPath = path.resolve(baseDir, repoName);
+              if (!repoPath.startsWith(path.resolve(baseDir))) return jsonResponse(res, 403, { error: "Forbidden" });
+              const maxCount = parseInt(url.searchParams.get("count") || "20", 10);
+              try { const cp = require("child_process"); const log = cp.execSync(`git log --oneline --graph --decorate -${maxCount}`, { cwd: repoPath, encoding: "utf8", maxBuffer: 1024 * 1024 }); const branches = cp.execSync("git branch -a", { cwd: repoPath, encoding: "utf8" }); const status = cp.execSync("git status --short", { cwd: repoPath, encoding: "utf8" }); return jsonResponse(res, 200, { name: repoName, log: log.split("\n").filter(Boolean), branches: branches.split("\n").filter(Boolean).map(b => b.trim()), dirty: status.trim().length > 0, changes: status.split("\n").filter(Boolean) }); }
+              catch (e) { return jsonResponse(res, 500, { error: e.message }); }
+            }
+            res.writeHead(200, { ...cors, "Content-Type": "text/html; charset=utf-8" });
+            res.end(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escHtml(name)} — Git Web</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,sans-serif;background:#0f0f13;color:#e2e8f0;padding:20px}
+h1{font-size:20px;margin-bottom:8px}.sub{color:#6b7280;font-size:12px;margin-bottom:16px}
+.repo{background:#1a1a2e;border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:16px;margin-bottom:12px}
+.repo h3{margin-bottom:8px;display:flex;justify-content:space-between}
+pre{background:#0f0f13;padding:12px;border-radius:6px;font-size:12px;overflow:auto;max-height:300px;border:1px solid rgba(255,255,255,0.04);color:#a0aec0}
+.muted{color:#6b7280;font-size:12px}</style></head><body>
+<h1>🔀 ${escHtml(name)}</h1>
+<div class="sub">Browse git repositories — ${escHtml(baseDir)}</div>
+<div id="repos">Scanning...</div>
+<script>
+fetch("/api/repos").then(r => r.json()).then(d => {
+  if (!d.repos || !d.repos.length) { document.getElementById("repos").innerHTML = '<div class="muted" style="padding:40px;text-align:center">No git repositories found</div>'; return; }
+  Promise.all(d.repos.map(r => fetch("/api/repo/" + encodeURIComponent(r) + "/log?count=10").then(r2 => r2.json()).catch(() => null))).then(results => {
+    let html = "";
+    d.repos.forEach((r, i) => { const info = results[i]; html += '<div class="repo"><h3><span>📂 ' + r + '</span><span class="muted">' + (info ? (info.dirty ? '⚠ modified' : '✓ clean') : '') + '</span></h3>'; if (info) { html += '<pre>' + escHtml(info.log.join("\\n")) + '</pre>'; if (info.branches && info.branches.length > 1) html += '<div class="muted">Branches: ' + info.branches.join(", ") + '</div>'; } else { html += '<div class="muted">Could not read repo</div>'; } html += '</div>'; });
+    document.getElementById("repos").innerHTML = html;
+  });
+});
+function escHtml(s) { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+</script></body></html>`);
+          };
+        }
+
+        function createHealthCheckHandler(name, cors) {
+          return (req, res) => {
+            const url = new URL(req.url, "http://localhost");
+            const reqPath = decodeURIComponent(url.pathname);
+            if (reqPath === "/ping") return jsonResponse(res, 200, { status: "ok", service: name, timestamp: new Date().toISOString(), uptime: Math.floor((Date.now() - START_TIME) / 1000) });
+            if (reqPath === "/health" || reqPath === "/") { const mem = process.memoryUsage(); return jsonResponse(res, 200, { status: "healthy", service: name, hostname: os.hostname(), platform: process.platform, uptime: Math.floor((Date.now() - START_TIME) / 1000), memory: { rss: Math.round(mem.rss / 1024 / 1024) + "MB", heapUsed: Math.round(mem.heapUsed / 1024 / 1024) + "MB" }, timestamp: new Date().toISOString() }); }
+            res.writeHead(404, { ...cors, "Content-Type": "application/json" }); res.end(JSON.stringify({ error: "Not found" }));
+          };
+        }
+
+        function createProcessProxyHandler(proxyPort, name, port, cors) {
+          return (req, res) => {
+            const url = new URL(req.url, "http://localhost");
+            const reqPath = url.pathname + url.search;
+            const options = { hostname: "127.0.0.1", port: proxyPort, path: reqPath, method: req.method, headers: { ...req.headers, host: "localhost:" + proxyPort, connection: "close" }, timeout: 30000 };
+            delete options.headers["x-forwarded-for"];
+            const proxyReq = http.request(options, (proxyRes) => {
+              const h = { ...cors, "Access-Control-Allow-Origin": "*" };
+              for (const [k, v] of Object.entries(proxyRes.headers)) { if (!["transfer-encoding", "connection"].includes(k)) h[k] = v; }
+              res.writeHead(proxyRes.statusCode, h); proxyRes.pipe(res);
+            });
+            proxyReq.on("error", () => {
+              res.writeHead(200, { ...cors, "Content-Type": "text/html; charset=utf-8" });
+              res.end(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escHtml(name)} — Proxy Setup</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,sans-serif;background:#0f0f13;color:#e2e8f0;padding:40px;text-align:center;max-width:600px;margin:auto}
+h1{font-size:20px;margin-bottom:8px}.badge{display:inline-block;background:#3b82f622;color:#3b82f6;border-radius:6px;padding:2px 10px;font-size:12px;font-weight:600}
+pre{background:#1a1a2e;padding:14px;border-radius:8px;font-size:12px;text-align:left;margin:12px 0;overflow:auto;border:1px solid rgba(255,255,255,0.06)}
+.muted{color:#6b7280;font-size:12px;margin-top:16px}</style></head><body>
+<h1>⚡ ${escHtml(name)} <span class="badge">Proxy Mode</span></h1>
+<p style="margin-bottom:12px;color:#94a3b8;font-size:14px">This service proxies requests to your app running on port <strong>${proxyPort}</strong>.</p>
+<p style="font-size:13px;margin-bottom:8px">Start your application manually on port ${proxyPort}:</p>
+<pre># Example:
+$ cd /path/to/your/project
+$ node server.js   # listen on port ${proxyPort}
+
+# dweb proxies:
+# http://localhost:${port} → http://localhost:${proxyPort}</pre>
+<div class="muted">dweb is proxying to port ${proxyPort}. Your app must be running there.</div>
+</body></html>`);
+            });
+            if (["POST","PUT","PATCH"].includes(req.method)) { let b = ""; req.on("data", c => b += c); req.on("end", () => proxyReq.end(b)); } else { proxyReq.end(); }
+          };
+        }
+
+        function createCustomCommandHandler(name, port, cors) {
+          return (req, res) => {
+            res.writeHead(200, { ...cors, "Content-Type": "text/html; charset=utf-8" });
+            res.end(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escHtml(name)} — Custom Command</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,sans-serif;background:#0f0f13;color:#e2e8f0;padding:40px;text-align:center;max-width:500px;margin:auto}
+h1{font-size:20px;margin-bottom:8px}.muted{color:#6b7280;font-size:13px}</style></head><body>
+<h1>⚙️ ${escHtml(name)}</h1>
+<div class="muted">Custom Command service. Run your binary or script manually on port ${port}.</div>
+</body></html>`);
+          };
+        }
+
+        // ── Dispatch ──────────────────────────────────────────────
+        function createServiceHandler(type, dir, name, port, cors) {
+          switch (type) {
+            case "Static Site": case "Documentation Site": case "Dashboard": return createStaticHandler(dir, cors, false);
+            case "Single Page App": return createStaticHandler(dir, cors, true);
+            case "File Browser": return createFileBrowserHandler(dir, cors);
+            case "Image Gallery": return createGalleryHandler(dir, cors);
+            case "Media Stream": return createMediaHandler(dir, cors);
+            case "Podcast Host": return createPodcastHandler(dir, cors);
+            case "Log Viewer": return createLogViewerHandler(dir, cors);
+            case "Node.js API": case "Python Web App": case "PHP Site": return createProcessProxyHandler(port, name, port, cors);
+            case "API Proxy": return createApiProxyHandler(name, cors);
+            case "Webhook Tester": return createWebhookHandler(name, port, cors);
+            case "Pastebin": return createPastebinHandler(name, port, cors);
+            case "Git Web UI": return createGitWebHandler(dir, cors);
+            case "Health Check": return createHealthCheckHandler(name, cors);
+            case "Custom Command": return createCustomCommandHandler(name, port, cors);
+            default: return createStaticHandler(dir, cors, false);
+          }
+        }
+
+        // ── Parse request body ──
+        let body = "";
+        req.on("data", c => body += c);
+        req.on("end", () => {
+          try {
+            const { name, port, type, dir } = JSON.parse(body);
+            if (!name || !port) {
+              return jsonResponse(res, 400, { status: "error", message: "name and port required" });
+            }
+
+            // Check if already running
+            if (runningServices.has(name)) {
+              return jsonResponse(res, 200, { status: "ok", message: `Service "${name}" already running` });
+            }
+
+            // ── Create server with handler dispatch ───────────────────
+            const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS", "Access-Control-Allow-Headers": "Content-Type" };
+            const handler = createServiceHandler(type || "Custom", dir, name, port, cors);
+            const svr = http.createServer((svcReq, svcRes) => {
+              if (svcReq.method === "OPTIONS") {
+                svcRes.writeHead(204, cors); return svcRes.end();
+              }
+              handler(svcReq, svcRes);
+            });
+
+
+        // ── Helper functions ──
         function splitMultiPart(buf, boundary) {
           const parts = [];
           const bLen = Buffer.byteLength(boundary);
@@ -937,16 +1796,12 @@ function handleRequest(req, res) {
           while (start < buf.length) {
             const idx = buf.indexOf(boundary, start);
             if (idx === -1) break;
-            // Check for closing boundary (--boundary--) → stop
             const after = idx + bLen;
             if (after < buf.length && buf[after] === 0x2d) break;
-            // Skip \r\n after the boundary line
             let contentStart = after;
             if (contentStart + 1 < buf.length && buf[contentStart] === 0x0d && buf[contentStart + 1] === 0x0a) contentStart += 2;
-            // Find next boundary (regular or closing)
             const nextIdx = buf.indexOf(boundary, contentStart);
             if (nextIdx === -1) break;
-            // Strip \r\n before the next boundary
             let contentEnd = nextIdx;
             if (contentEnd >= 2 && buf[contentEnd - 2] === 0x0d && buf[contentEnd - 1] === 0x0a) contentEnd -= 2;
             const part = buf.slice(contentStart, contentEnd);
@@ -956,21 +1811,35 @@ function handleRequest(req, res) {
           return parts;
         }
 
-        // ── Directory listing HTML ──
+        function escHtml(s) { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+        function formatBytes(b) {
+          if (!b || b === 0) return "";
+          const u = ["B","KB","MB","GB"]; let i = 0; let s = b;
+          while (s >= 1024 && i < u.length - 1) { s /= 1024; i++; }
+          return s.toFixed(i === 0 ? 0 : 1) + " " + u[i];
+        }
+        function getFileIcon(n) {
+          const e = n.split(".").pop().toLowerCase();
+          if (["jpg","jpeg","png","gif","svg","webp","ico","bmp"].includes(e)) return "\uD83D\uDDBC";
+          if (["mp4","webm","avi","mkv","mov"].includes(e)) return "\uD83C\uDFAC";
+          if (["mp3","wav","ogg","flac","m4a"].includes(e)) return "\uD83C\uDFB5";
+          if (["zip","tar","gz","rar","7z"].includes(e)) return "\uD83D\uDDDC";
+          if (["pdf"].includes(e)) return "\uD83D\uDCC4";
+          if (["doc","docx"].includes(e)) return "\uD83D\uDCDD";
+          if (["xls","xlsx","csv"].includes(e)) return "\uD83D\uDCCA";
+          if (["js","ts","jsx","tsx","json","html","css","scss","py","rb","go","rs","java","c","cpp","h","sh","bash","yml","yaml","toml","ini","cfg","md","txt"].includes(e)) return "\uD83D\uDCC4";
+          return "\uD83D\uDCC4";
+        }
         function sendDirListing(resp, absPath, relPath, baseDir, cors) {
           fs.readdir(absPath, { withFileTypes: true }, (readErr, entries) => {
             if (readErr) {
               resp.writeHead(500, { ...cors, "Content-Type": "text/plain" });
               return resp.end("Error reading directory");
             }
-
-            // Sort: directories first, then files, alphabetical
             entries.sort((a, b) => {
               if (a.isDirectory() !== b.isDirectory()) return a.isDirectory() ? -1 : 1;
               return a.name.localeCompare(b.name);
             });
-
-            // Build breadcrumb path
             const crumbs = relPath.replaceAll("\\", "/").split("/").filter(Boolean);
             const breadcrumbHTML = crumbs.length === 0
               ? `<span style="font-weight:700">/</span>`
@@ -981,7 +1850,6 @@ function handleRequest(req, res) {
                       ? `<span style="font-weight:600">${escHtml(c)}</span>`
                       : `<a href="${p}" style="color:#3b82f6;text-decoration:none">${escHtml(c)}</a> /`;
                   }).join(" ");
-
             const rows = entries.map(e => {
               const isDir = e.isDirectory();
               const fullPath = path.join(absPath, e.name);
@@ -991,7 +1859,7 @@ function handleRequest(req, res) {
                 size = isDir ? "" : formatBytes(s.size);
                 mtime = s.mtime.toLocaleString();
               } catch {}
-              const icon = isDir ? "📁" : getFileIcon(e.name);
+              const icon = isDir ? "\uD83D\uDCC1" : getFileIcon(e.name);
               const href = (relPath === "/" ? "" : relPath) + "/" + encodeURIComponent(e.name);
               return `<tr>
                 <td class="icon">${icon}</td>
@@ -999,12 +1867,10 @@ function handleRequest(req, res) {
                 <td class="size">${size}</td>
                 <td class="date">${mtime}</td>
                 <td class="actions">
-                  ${isDir ? "" : `<button class="dl-btn" onclick="fetch('${href}',{method:'DELETE'}).then(()=>location.reload())" title="Delete">🗑</button>`}
-                  <button class="dl-btn" onclick="if(prompt('Delete ${isDir ? "folder: " : "file: "}${escHtml(e.name)}?'))fetch('${href}',{method:'DELETE'}).then(()=>location.reload())" title="Delete">🗑</button>
+                  ${isDir ? `<button class="dl-btn" onclick="if(prompt('Delete folder: ${escHtml(e.name)}?'))fetch('${href}',{method:'DELETE'}).then(()=>location.reload())" title="Delete">\uD83D\uDDD1</button>` : `<button class="dl-btn" onclick="fetch('${href}',{method:'DELETE'}).then(()=>location.reload())" title="Delete">\uD83D\uDDD1</button>`}
                 </td>
               </tr>`;
             }).join("\n");
-
             const html = `<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -1117,72 +1983,6 @@ if (window.name !== "dweb-browser") setTimeout(() => location.reload(), 30000);
           });
         }
 
-        // ── Status page (when no dir provided or no index.html) ──
-        function sendStatusPage(resp, svcName, svcType, svcPort, svcDir, cors) {
-          const svcInfo = runningServices.get(svcName);
-          const html = `<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="utf-8"><title>${svcName}</title>
-<style>
-  * { box-sizing:border-box; margin:0; padding:0; }
-  body { font-family:system-ui,sans-serif; background:#0f0f13; color:#e2e8f0; min-height:100vh; display:flex; align-items:center; justify-content:center; }
-  .card { background:#1a1a2e; border:1px solid rgba(255,255,255,0.06); border-radius:12px; padding:32px; max-width:520px; width:90%; }
-  h1 { font-size:20px; font-weight:700; display:flex; align-items:center; gap:10px; }
-  .badge { display:inline-block; background:#22c55e22; color:#22c55e; border-radius:6px; padding:2px 10px; font-size:12px; font-weight:600; }
-  .label { color:#6b7280; font-size:11px; text-transform:uppercase; letter-spacing:0.5px; margin-top:16px; margin-bottom:4px; }
-  .value { color:#e2e8f0; font-size:14px; }
-  pre { background:#0f0f13; color:#cdd6f4; padding:14px; border-radius:8px; overflow:auto; font-size:12px; margin-top:16px; border:1px solid rgba(255,255,255,0.04); }
-  .meta { color:#6b7280; font-size:12px; margin-top:16px; }
-  a { color:#3b82f6; text-decoration:none; }
-  .actions { display:flex; gap:8px; margin-top:16px; }
-  .actions a { display:inline-flex; align-items:center; gap:6px; padding:8px 16px; border-radius:6px; font-size:13px; font-weight:500; transition:all 0.15s; }
-  .actions a.primary { background:#3b82f6; color:#fff; }
-  .actions a.secondary { background:rgba(255,255,255,0.06); color:#e2e8f0; border:1px solid rgba(255,255,255,0.1); }
-  .actions a:hover { transform:translateY(-1px); }
-</style></head>
-<body>
-  <div class="card">
-    <h1>${escHtml(svcName)} <span class="badge">● Running</span></h1>
-    ${svcType ? `<div class="label">Type</div><div class="value">${escHtml(svcType)}</div>` : ""}
-    ${svcDir ? `<div class="label">Directory</div><div class="value"><code>${escHtml(svcDir)}</code></div>` : ""}
-    <pre>dweb service since ${new Date().toISOString()}
-
-  Local:    http://localhost:${svcPort}
-  Network:  http://${getLocalIPs()[0] || "127.0.0.1"}:${svcPort}
-  dweb:     dweb://${svcName.toLowerCase().replace(/\\s+/g, "-")}.dweb</pre>
-    ${svcDir ? `<div class="actions">
-      <a class="primary" href="/">📂 Browse Files</a>
-      <a class="secondary" href="#" onclick="document.getElementById('fu').click();return false">📤 Upload</a>
-      <input type="file" id="fu" multiple style="display:none" onchange="(f=>{for(const x of f){const d=new FormData();d.append('file',x);fetch('',{method:'POST',body:d})}setTimeout(()=>location.href='/',500)})(this.files)">
-    </div>` : ""}
-    <div class="meta">This service is managed by dweb-server. Stop it from the Dashboard.</div>
-  </div>
-</body></html>`;
-          resp.writeHead(200, { ...cors, "Content-Type": "text/html; charset=utf-8" });
-          resp.end(html);
-        }
-
-        // ── Helpers ──
-        function escHtml(s) { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
-        function formatBytes(b) {
-          if (!b || b === 0) return "";
-          const u = ["B","KB","MB","GB"]; let i = 0; let s = b;
-          while (s >= 1024 && i < u.length - 1) { s /= 1024; i++; }
-          return s.toFixed(i === 0 ? 0 : 1) + " " + u[i];
-        }
-        function getFileIcon(n) {
-          const e = n.split(".").pop().toLowerCase();
-          if (["jpg","jpeg","png","gif","svg","webp","ico","bmp"].includes(e)) return "🖼";
-          if (["mp4","webm","avi","mkv","mov"].includes(e)) return "🎬";
-          if (["mp3","wav","ogg","flac","m4a"].includes(e)) return "🎵";
-          if (["zip","tar","gz","rar","7z"].includes(e)) return "🗜";
-          if (["pdf"].includes(e)) return "📄";
-          if (["doc","docx"].includes(e)) return "📝";
-          if (["xls","xlsx","csv"].includes(e)) return "📊";
-          if (["js","ts","jsx","tsx","json","html","css","scss","py","rb","go","rs","java","c","cpp","h","sh","bash","yml","yaml","toml","ini","cfg","md","txt"].includes(e)) return "📄";
-          return "📄";
-        }
-
         // Handle EADDRINUSE gracefully
         svr.once("error", (err) => {
           if (err.code === "EADDRINUSE") {
@@ -1193,6 +1993,7 @@ if (window.name !== "dweb-browser") setTimeout(() => location.reload(), 30000);
 
         svr.listen(port, "0.0.0.0", () => {
           runningServices.set(name, { server: svr, port, type: type || "Custom", dir: dir || null });
+          saveServices();
           console.log(`  [service] Started "${name}" on port ${port}${dir ? ` dir="${dir}"` : ""}`);
           return jsonResponse(res, 200, {
             status: "ok",
@@ -1219,6 +2020,7 @@ if (window.name !== "dweb-browser") setTimeout(() => location.reload(), 30000);
         }
         svc.server.close();
         runningServices.delete(name);
+        saveServices();
         console.log(`  [service] Stopped "${name}" on port ${svc.port}`);
         return jsonResponse(res, 200, { status: "ok", message: `Service "${name}" stopped` });
       } catch (e) {
@@ -1322,6 +2124,9 @@ server.listen(PORT, "0.0.0.0", () => {
   lines.push(`\x1b[2m  Rate limit: ${RATE_LIMIT_MAX} req/min per IP\x1b[0m`);
   lines.push(`  Server started. Press Ctrl+C to stop.\n`);
   console.log(lines.join("\n"));
+
+  // Restore persisted services from disk
+  restoreServices();
 
   // Register with relay (HTTP)
   registerWithRelay();

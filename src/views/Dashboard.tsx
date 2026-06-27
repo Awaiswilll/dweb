@@ -30,6 +30,7 @@ type OnlineMode = "local" | "p2p-visible" | "p2p-anonymous";
 
 const REMOTE_STORAGE_KEY = "dweb-remote-instances";
 const ONLINE_MODE_KEY = "dweb-online-mode";
+const SERVICES_STORAGE_KEY = "dweb-services-cache";
 
 function loadRemotes(): RemoteInstance[] {
   try {
@@ -69,8 +70,8 @@ const MOCK_RUNTIMES: RuntimeInfo[] = [
 ];
 
 const MOCK_SERVICES: Service[] = [
-  { name: "My Static Site", type: "Static Site", port: 8080, running: true, cpu: 2.1, memory: 45_000_000 },
-  { name: "API Server", type: "Node.js API", port: 3001, running: false, cpu: 0, memory: 0 },
+  { name: "My Static Site", type: "Static Site", port: 2901, running: false, cpu: 0, memory: 0 },
+  { name: "API Server", type: "Node.js API", port: 2902, running: false, cpu: 0, memory: 0 },
 ];
 
 /* ─── Service Catalog ───────────────────────────────────────── */
@@ -87,41 +88,41 @@ interface CatalogEntry {
 
 const SERVICE_CATALOG: CatalogEntry[] = [
   // ── Web ──
-  { type: "Static Site",        icon: "🌐", description: "Serve HTML, CSS, JS from a folder",              defaultPort: 8080, category: "Web",     needsDir: true,  dirHint: "C:\\projects\\my-site\\dist",              recommended: true },
-  { type: "Node.js API",        icon: "🟢", description: "REST API backend (Express, Fastify, etc.)",       defaultPort: 3001, category: "Web",     needsDir: false, dirHint: "Point to your API project folder",        recommended: true },
-  { type: "Python Web App",     icon: "🐍", description: "Flask, FastAPI, or Django web app",               defaultPort: 5000, category: "Web",     needsDir: true,  dirHint: "C:\\projects\\my-flask-app",               recommended: true },
-  { type: "PHP Site",           icon: "🐘", description: "WordPress, Laravel, or plain PHP site",           defaultPort: 8080, category: "Web",     needsDir: true,  dirHint: "C:\\xampp\\htdocs\\my-project",             recommended: false },
-  { type: "Single Page App",    icon: "⚛️", description: "React / Vue / Svelte built SPA (dist folder)",   defaultPort: 8081, category: "Web",     needsDir: true,  dirHint: "C:\\projects\\my-app\\dist",                recommended: true },
-  { type: "Documentation Site", icon: "📚", description: "Serve generated docs (Docusaurus, MkDocs, etc.)", defaultPort: 8082, category: "Web",     needsDir: true,  dirHint: "C:\\projects\\docs\\build",                 recommended: false },
+  { type: "Static Site",        icon: "🌐", description: "Serve HTML, CSS, JS from a folder",              defaultPort: 2901, category: "Web",     needsDir: true,  dirHint: "C:\\projects\\my-site\\dist",              recommended: true },
+  { type: "Node.js API",        icon: "🟢", description: "REST API backend (Express, Fastify, etc.)",       defaultPort: 2902, category: "Web",     needsDir: false, dirHint: "Point to your API project folder",        recommended: true },
+  { type: "Python Web App",     icon: "🐍", description: "Flask, FastAPI, or Django web app",               defaultPort: 2903, category: "Web",     needsDir: true,  dirHint: "C:\\projects\\my-flask-app",               recommended: true },
+  { type: "PHP Site",           icon: "🐘", description: "WordPress, Laravel, or plain PHP site",           defaultPort: 2904, category: "Web",     needsDir: true,  dirHint: "C:\\xampp\\htdocs\\my-project",             recommended: false },
+  { type: "Single Page App",    icon: "⚛️", description: "React / Vue / Svelte built SPA (dist folder)",   defaultPort: 2905, category: "Web",     needsDir: true,  dirHint: "C:\\projects\\my-app\\dist",                recommended: true },
+  { type: "Documentation Site", icon: "📚", description: "Serve generated docs (Docusaurus, MkDocs, etc.)", defaultPort: 2906, category: "Web",     needsDir: true,  dirHint: "C:\\projects\\docs\\build",                 recommended: false },
 
   // ── Dev Tools ──
-  { type: "File Browser",       icon: "📁", description: "Browse, upload & download files",                 defaultPort: 8083, category: "Dev Tools", needsDir: true,  dirHint: "C:\\shared\\files",                          recommended: true },
-  { type: "API Proxy",          icon: "🔁", description: "CORS proxy for external APIs",                    defaultPort: 8084, category: "Dev Tools", needsDir: false, dirHint: "",                                           recommended: false },
-  { type: "Webhook Tester",     icon: "🔔", description: "Receive & inspect incoming webhooks",             defaultPort: 8085, category: "Dev Tools", needsDir: false, dirHint: "",                                           recommended: false },
-  { type: "Log Viewer",         icon: "📋", description: "Tail & search log files in a directory",          defaultPort: 8086, category: "Dev Tools", needsDir: true,  dirHint: "C:\\logs\\app",                               recommended: false },
-  { type: "Pastebin",           icon: "📝", description: "Share text & code snippets",                      defaultPort: 8087, category: "Dev Tools", needsDir: false, dirHint: "",                                           recommended: false },
-  { type: "Git Web UI",         icon: "🔀", description: "Browse git repositories via web",                 defaultPort: 8088, category: "Dev Tools", needsDir: true,  dirHint: "C:\\repositories",                            recommended: false },
+  { type: "File Browser",       icon: "📁", description: "Browse, upload & download files",                 defaultPort: 2907, category: "Dev Tools", needsDir: true,  dirHint: "C:\\shared\\files",                          recommended: true },
+  { type: "API Proxy",          icon: "🔁", description: "CORS proxy for external APIs",                    defaultPort: 2908, category: "Dev Tools", needsDir: false, dirHint: "",                                           recommended: false },
+  { type: "Webhook Tester",     icon: "🔔", description: "Receive & inspect incoming webhooks",             defaultPort: 2909, category: "Dev Tools", needsDir: false, dirHint: "",                                           recommended: false },
+  { type: "Log Viewer",         icon: "📋", description: "Tail & search log files in a directory",          defaultPort: 2910, category: "Dev Tools", needsDir: true,  dirHint: "C:\\logs\\app",                               recommended: false },
+  { type: "Pastebin",           icon: "📝", description: "Share text & code snippets",                      defaultPort: 2911, category: "Dev Tools", needsDir: false, dirHint: "",                                           recommended: false },
+  { type: "Git Web UI",         icon: "🔀", description: "Browse git repositories via web",                 defaultPort: 2912, category: "Dev Tools", needsDir: true,  dirHint: "C:\\repositories",                            recommended: false },
 
   // ── Media ──
-  { type: "Image Gallery",      icon: "🖼️", description: "View & browse photos from a directory",           defaultPort: 8090, category: "Media",    needsDir: true,  dirHint: "C:\\Photos\\vacation",                       recommended: true },
-  { type: "Media Stream",       icon: "🎵", description: "Stream audio & video files",                      defaultPort: 8091, category: "Media",    needsDir: true,  dirHint: "C:\\Music\\playlist",                        recommended: false },
-  { type: "Podcast Host",       icon: "🎙️", description: "Host & serve podcast audio files",                defaultPort: 8092, category: "Media",    needsDir: true,  dirHint: "C:\\Podcasts\\episodes",                      recommended: false },
+  { type: "Image Gallery",      icon: "🖼️", description: "View & browse photos from a directory",           defaultPort: 2913, category: "Media",    needsDir: true,  dirHint: "C:\\Photos\\vacation",                       recommended: true },
+  { type: "Media Stream",       icon: "🎵", description: "Stream audio & video files",                      defaultPort: 2914, category: "Media",    needsDir: true,  dirHint: "C:\\Music\\playlist",                        recommended: false },
+  { type: "Podcast Host",       icon: "🎙️", description: "Host & serve podcast audio files",                defaultPort: 2915, category: "Media",    needsDir: true,  dirHint: "C:\\Podcasts\\episodes",                      recommended: false },
 
   // ── Infra ──
-  { type: "Dashboard",          icon: "📊", description: "Custom metrics or status dashboard",               defaultPort: 8093, category: "Infra",    needsDir: true,  dirHint: "C:\\projects\\dashboard\\build",              recommended: false },
-  { type: "Health Check",       icon: "💚", description: "Simple uptime & health endpoint",                  defaultPort: 8094, category: "Infra",    needsDir: false, dirHint: "",                                           recommended: false },
+  { type: "Dashboard",          icon: "📊", description: "Custom metrics or status dashboard",               defaultPort: 2916, category: "Infra",    needsDir: true,  dirHint: "C:\\projects\\dashboard\\build",              recommended: false },
+  { type: "Health Check",       icon: "💚", description: "Simple uptime & health endpoint",                  defaultPort: 2917, category: "Infra",    needsDir: false, dirHint: "",                                           recommended: false },
 
   // ── Custom ──
-  { type: "Custom Command",     icon: "⚙️", description: "Run any binary or script as a service",           defaultPort: 8099, category: "Custom",   needsDir: false, dirHint: "Working directory for the command",           recommended: false },
+  { type: "Custom Command",     icon: "⚙️", description: "Run any binary or script as a service",           defaultPort: 2918, category: "Custom",   needsDir: false, dirHint: "Working directory for the command",           recommended: false },
 ];
 
 const RECOMMENDED_SERVICES: { name: string; type: string; port: number; description: string }[] = [
-  { name: "File Browser",    type: "File Browser",    port: 8083, description: "Browse & share files from a directory" },
-  { name: "Image Gallery",   type: "Image Gallery",   port: 8090, description: "View photos from a folder" },
-  { name: "React SPA",       type: "Single Page App", port: 8081, description: "Serve a built React/Vue/Svelte app" },
-  { name: "Log Viewer",      type: "Log Viewer",      port: 8086, description: "Tail & search application logs" },
-  { name: "Shared Pastebin", type: "Pastebin",        port: 8087, description: "Share text and code snippets" },
-  { name: "API Proxy",       type: "API Proxy",       port: 8084, description: "CORS proxy for external APIs" },
+  { name: "File Browser",    type: "File Browser",    port: 2907, description: "Browse & share files from a directory" },
+  { name: "Image Gallery",   type: "Image Gallery",   port: 2913, description: "View photos from a folder" },
+  { name: "React SPA",       type: "Single Page App", port: 2905, description: "Serve a built React/Vue/Svelte app" },
+  { name: "Log Viewer",      type: "Log Viewer",      port: 2910, description: "Tail & search application logs" },
+  { name: "Shared Pastebin", type: "Pastebin",        port: 2911, description: "Share text and code snippets" },
+  { name: "API Proxy",       type: "API Proxy",       port: 2908, description: "CORS proxy for external APIs" },
 ];
 
 /* ─── Runtime Icon ────────────────────────────────────────── */
@@ -184,7 +185,7 @@ function AddServiceModal({ onClose, onAdd }: { onClose: () => void; onAdd: (svc:
     onAdd({
       name: name.trim(),
       type,
-      port: parseInt(port, 10) || 8080,
+      port: parseInt(port, 10) || 2901,
       running: false,
       cpu: 0,
       memory: 0,
@@ -365,7 +366,13 @@ interface DashboardProps {
 }
 
 export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
-  const [services, setServices] = useState<Service[]>([]);
+  // Restore services from localStorage cache so pills appear immediately on tab switch
+  const [services, setServices] = useState<Service[]>(() => {
+    try {
+      const raw = localStorage.getItem(SERVICES_STORAGE_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch { return []; }
+  });
   const [runtimes, setRuntimes] = useState<RuntimeInfo[]>([]);
   const [loadingServices, setLoadingServices] = useState(true);
   const [loadingRuntimes, setLoadingRuntimes] = useState(true);
@@ -376,23 +383,34 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
     setLoadingServices(true);
     try {
       const result = await invoke<Service[]>("get_services");
-      setServices(result.length > 0 ? result : MOCK_SERVICES);
+      if (result.length > 0) {
+        setServices(result);
+        try { localStorage.setItem(SERVICES_STORAGE_KEY, JSON.stringify(result)); } catch {}
+      } else {
+        setServices([]);
+        try { localStorage.removeItem(SERVICES_STORAGE_KEY); } catch {}
+      }
     } catch {
       // Try dweb-server managed services
       try {
         const resp = await fetch(`${window.location.origin}/api/services`);
         const data = await resp.json();
         if (data?.services?.length > 0) {
-          // Merge mock + managed, managed override mock
-          const merged = [...MOCK_SERVICES];
-          for (const ms of data.services) {
-            const idx = merged.findIndex(m => m.name === ms.name);
-            if (idx >= 0) merged[idx] = { ...merged[idx], ...ms, dir: ms.dir || (merged[idx] as any).dir };
-            else merged.push(ms);
-          }
-          setServices(merged);
+          const live = data.services.map((s: any) => ({
+            name: s.name,
+            type: s.type || "Custom",
+            port: s.port,
+            dir: s.dir || null,
+            running: true,
+            cpu: s.cpu ?? 0.5,
+            memory: s.memory ?? 8_000_000,
+          }));
+          setServices(live);
+          // Persist to localStorage so services survive tab switches
+          try { localStorage.setItem(SERVICES_STORAGE_KEY, JSON.stringify(live)); } catch {}
         } else {
-          setServices(MOCK_SERVICES);
+          setServices([]);
+          try { localStorage.removeItem(SERVICES_STORAGE_KEY); } catch {}
         }
       } catch {
         setServices(MOCK_SERVICES);
@@ -420,8 +438,13 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
   }, []);
 
   const handleAddService = (svc: Service) => {
-    setServices(prev => [...prev, svc]);
-    // Auto-start via dweb-server
+    // Add with running=true immediately, save to localStorage, and auto-start via API
+    const liveSvc = { ...svc, running: true };
+    setServices(prev => {
+      const next = [...prev, liveSvc];
+      try { localStorage.setItem(SERVICES_STORAGE_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
     fetch(`${window.location.origin}/api/service/start`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: svc.name, port: svc.port, type: svc.type, dir: (svc as any).dir }),
@@ -1133,8 +1156,6 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
 
       {networkSection}
 
-      {runtimeSection}
-
       {/* ── Services Bar ── */}
       <div className="services-bar glass">
         <div className="services-bar-top">
@@ -1147,9 +1168,9 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
               </span>
             )}
           </div>
-          <button className="btn btn-primary btn-sm" style={{ height: 26, fontSize: 11, padding: "0 10px", gap: 4 }}
+          <button className="btn btn-primary btn-sm" style={{ height: 28, fontSize: 13, padding: "0 12px", gap: 4 }}
             onClick={() => setShowAddModal(true)}>
-            <Plus size={12} /> Add
+            <Plus size={14} /> Add
           </button>
         </div>
         {servicesPillBar}
@@ -1161,6 +1182,8 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
           onAdd={handleAddService}
         />
       )}
+
+      {runtimeSection}
 
       {showConnectModal && (
         <ConnectModal onClose={() => setShowConnectModal(false)} />
