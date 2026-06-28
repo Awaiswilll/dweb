@@ -9,13 +9,38 @@ export interface Service {
   memory: number;
 }
 
+export type DomainTier = "free" | "premium" | "business";
+
+export interface TierInfo {
+  label: string;
+  price: number;
+  ttlDays: number;
+  permanent: boolean;
+  customDomain: boolean;
+  ssl: boolean;
+  description: string;
+}
+
 export interface DomainRecord {
   name: string;
   owner_key: string;
   address: string | null;
+  tier: DomainTier;
+  tierInfo: TierInfo;
+  service_name: string | null;
+  port: number | null;
+  custom_domain: string | null;
   registered_at: string;
-  expires_at: string;
+  expires_at: string | null;
+  auto_renew: boolean;
   active: boolean;
+  paid_until: string | null;
+}
+
+export interface ServiceBinding {
+  name: string;
+  port: number;
+  type: string;
 }
 
 export interface PeerInfo {
@@ -406,7 +431,7 @@ export interface AISessionMessage {
 
 /* ─── Social / Integration Platform Types ─────────────────── */
 
-export type IntegrationPlatform = "discord" | "whatsapp" | "linkedin" | "telegram";
+export type IntegrationPlatform = "discord" | "whatsapp" | "linkedin" | "telegram" | "github" | "gitlab";
 
 export interface IntegrationConfig {
   platform: IntegrationPlatform;
@@ -467,6 +492,26 @@ export const INTEGRATION_PLATFORMS: Record<IntegrationPlatform, {
     description: "Real-time alerts and build status updates via Telegram bot.",
     fields: [
       { key: "bot_token", label: "Bot Token", placeholder: "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11", type: "password" },
+    ],
+  },
+  github: {
+    label: "GitHub",
+    icon: "🐙",
+    color: "#2b3137",
+    description: "Connect repositories, trigger CI/CD, and manage deployments from GitHub.",
+    fields: [
+      { key: "access_token", label: "Personal Access Token", placeholder: "ghp_xxxxxxxxxxxxxxxxxxxx", type: "password" },
+      { key: "webhook_url", label: "Webhook URL (optional)", placeholder: "https://api.github.com/repos/owner/repo/hooks", type: "text" },
+    ],
+  },
+  gitlab: {
+    label: "GitLab",
+    icon: "🦊",
+    color: "#FC6D26",
+    description: "Connect GitLab projects, pipelines, and merge requests for automated deployment.",
+    fields: [
+      { key: "access_token", label: "Personal Access Token", placeholder: "glpat-xxxxxxxxxxxxxxxx", type: "password" },
+      { key: "webhook_url", label: "Webhook URL (optional)", placeholder: "https://gitlab.com/api/v4/projects/...", type: "text" },
     ],
   },
 };

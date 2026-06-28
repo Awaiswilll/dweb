@@ -5,7 +5,7 @@ import {
   Plus, RefreshCw, CheckCircle2, FolderGit2,
   ExternalLink, Wrench, Wifi, WifiOff,
   Link2, Unlink, Shield, Monitor, Radio, Users,
-  ChevronDown, ChevronRight, List,
+  ChevronDown, ChevronRight, List, Save,
 } from "lucide-react";
 import type { Service } from "../types";
 import {
@@ -160,13 +160,18 @@ function RuntimeCard({ runtime }: { runtime: RuntimeInfo }) {
   );
 }
 
-/* ─── Add Service Modal ───────────────────────────────────── */
-function AddServiceModal({ onClose, onAdd }: { onClose: () => void; onAdd: (svc: Service) => void }) {
-  const [tab, setTab] = useState<"custom" | "quick">("quick");
-  const [name, setName] = useState("");
-  const [type, setType] = useState(SERVICE_CATALOG[0].type);
-  const [port, setPort] = useState(String(SERVICE_CATALOG[0].defaultPort));
-  const [dir, setDir] = useState("");
+/* ─── Add / Edit Service Modal ────────────────────────────── */
+function AddServiceModal({ onClose, onAdd, initialData }: {
+  onClose: () => void;
+  onAdd: (svc: Service) => void;
+  initialData?: Service & { dir?: string };
+}) {
+  const isEditing = !!initialData;
+  const [tab, setTab] = useState<"custom" | "quick">(isEditing ? "custom" : "quick");
+  const [name, setName] = useState(initialData?.name || "");
+  const [type, setType] = useState(initialData?.type || SERVICE_CATALOG[0].type);
+  const [port, setPort] = useState(String(initialData?.port || SERVICE_CATALOG[0].defaultPort));
+  const [dir, setDir] = useState(initialData?.dir || "");
 
   const currentEntry = SERVICE_CATALOG.find(e => e.type === type) || SERVICE_CATALOG[0];
 
@@ -186,9 +191,9 @@ function AddServiceModal({ onClose, onAdd }: { onClose: () => void; onAdd: (svc:
       name: name.trim(),
       type,
       port: parseInt(port, 10) || 2901,
-      running: false,
-      cpu: 0,
-      memory: 0,
+      running: initialData?.running ?? false,
+      cpu: initialData?.cpu ?? 0,
+      memory: initialData?.memory ?? 0,
       dir: dir.trim() || undefined,
     } as Service & { dir?: string });
     onClose();
@@ -225,15 +230,16 @@ function AddServiceModal({ onClose, onAdd }: { onClose: () => void; onAdd: (svc:
         {/* Tab bar */}
         <div style={{ display: "flex", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
           <button
-            onClick={() => setTab("quick")}
+            onClick={() => !isEditing && setTab("quick")}
             style={{
-              flex: 1, padding: "12px 16px", border: "none", cursor: "pointer",
+              flex: 1, padding: "12px 16px", border: "none", cursor: isEditing ? "not-allowed" : "pointer",
               background: tab === "quick" ? "rgba(59,130,246,0.1)" : "transparent",
               color: tab === "quick" ? "var(--accent-blue)" : "var(--text-muted)",
               fontWeight: tab === "quick" ? 600 : 400, fontSize: 13,
               borderBottom: tab === "quick" ? "2px solid var(--accent-blue)" : "2px solid transparent",
-              transition: "all 0.15s",
+              transition: "all 0.15s", opacity: isEditing ? 0.4 : 1,
             }}
+            title={isEditing ? "Switch to Quick Add tab to add a new service" : ""}
           >
             ⚡ Quick Add
           </button>
@@ -248,7 +254,7 @@ function AddServiceModal({ onClose, onAdd }: { onClose: () => void; onAdd: (svc:
               transition: "all 0.15s",
             }}
           >
-            ⚙️ Custom Service
+            ⚙️ {isEditing ? "Edit Service" : "Custom Service"}
           </button>
         </div>
 
@@ -296,7 +302,9 @@ function AddServiceModal({ onClose, onAdd }: { onClose: () => void; onAdd: (svc:
         ) : (
           /* ── Custom Service Tab ── */
           <div style={{ padding: 20 }}>
-            <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 14 }}>Configure Service</h4>
+            <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 14 }}>
+              {isEditing ? `Edit Service: ${initialData?.name || ""}` : "Configure Service"}
+            </h4>
 
             <div className="provider-field">
               <label>Service Name</label>
@@ -350,7 +358,7 @@ function AddServiceModal({ onClose, onAdd }: { onClose: () => void; onAdd: (svc:
               <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
               <button className="btn btn-primary" onClick={handleSubmit}
                 disabled={!name.trim() || !port.trim() || (currentEntry.needsDir && !dir.trim())}>
-                <Plus size={14} /> Create Service
+                {isEditing ? <Save size={14} /> : <Plus size={14} />} {isEditing ? "Save Changes" : "Create Service"}
               </button>
             </div>
           </div>
@@ -377,6 +385,7 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
   const [loadingServices, setLoadingServices] = useState(true);
   const [loadingRuntimes, setLoadingRuntimes] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [editService, setEditService] = useState<(Service & { dir?: string }) | null>(null);
   const [runtimesExpanded, setRuntimesExpanded] = useState(false);
 
   const loadServices = async () => {
@@ -448,41 +457,78 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
     fetch(`${window.location.origin}/api/service/start`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: svc.name, port: svc.port, type: svc.type, dir: (svc as any).dir }),
-    }).catch(() => {});
+    }).then(async (resp) => {
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ message: resp.statusText }));
+        setConnectionMsg({ type: "error", text: `Failed to start "${svc.name}": ${err.message || err.error || resp.status}` });
+        // Revert running state
+        setServices(prev => prev.map(s => s.name === svc.name ? { ...s, running: false } : s));
+      }
+    }).catch((err) => {
+      setConnectionMsg({ type: "error", text: `Failed to start "${svc.name}": ${err.message}` });
+      setServices(prev => prev.map(s => s.name === svc.name ? { ...s, running: false } : s));
+    });
+  };
+
+  const handleUpdateService = (updated: Service) => {
+    setServices(prev => {
+      const next = prev.map(s => s.name === updated.name ? { ...s, ...updated, running: s.running } : s);
+      try { localStorage.setItem(SERVICES_STORAGE_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+    setConnectionMsg({ type: "success", text: `Service "${updated.name}" updated` });
   };
 
   const handleToggleService = async (name: string, running: boolean) => {
     const svc = services.find(s => s.name === name);
-    const apiBase = window.location.origin; // e.g. http://localhost:49737
+    const apiBase = window.location.origin;
 
     if (running) {
       // Stop: try Tauri, fallback to dweb-server API
       try {
         await invoke("stop_service", { name });
+        setServices(prev => prev.map(s => s.name === name ? { ...s, running: false } : s));
+        return;
       } catch {
         try {
-          await fetch(`${apiBase}/api/service/stop`, {
+          const resp = await fetch(`${apiBase}/api/service/stop`, {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ name }),
           });
-        } catch {}
+          if (resp.ok) {
+            setServices(prev => prev.map(s => s.name === name ? { ...s, running: false } : s));
+            return;
+          }
+          const err = await resp.json().catch(() => ({ message: resp.statusText }));
+          setConnectionMsg({ type: "error", text: `Failed to stop "${name}": ${err.message || resp.status}` });
+        } catch (err: any) {
+          setConnectionMsg({ type: "error", text: `Failed to stop "${name}": ${err.message}` });
+        }
       }
     } else {
-      // Start: try Tauri, fallback to dweb-server API
+      // Start
+      if (!svc) return;
       try {
         await invoke("start_service", { name });
+        setServices(prev => prev.map(s => s.name === name ? { ...s, running: true } : s));
+        return;
       } catch {
-        if (svc) {
-          try {
-            await fetch(`${apiBase}/api/service/start`, {
-              method: "POST", headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ name: svc.name, port: svc.port, type: svc.type, dir: (svc as any).dir }),
-            });
-          } catch {}
+        try {
+          const resp = await fetch(`${apiBase}/api/service/start`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: svc.name, port: svc.port, type: svc.type, dir: (svc as any).dir }),
+          });
+          if (resp.ok) {
+            setServices(prev => prev.map(s => s.name === name ? { ...s, running: true } : s));
+            return;
+          }
+          const err = await resp.json().catch(() => ({ message: resp.statusText }));
+          setConnectionMsg({ type: "error", text: `Failed to start "${name}": ${err.message || resp.status}` });
+        } catch (err: any) {
+          setConnectionMsg({ type: "error", text: `Failed to start "${name}": ${err.message}` });
         }
       }
     }
-    setServices(prev => prev.map(s => s.name === name ? { ...s, running: !s.running } : s));
   };
 
   /* ─── Remote Instances State ────────────────────────── */
@@ -1088,7 +1134,9 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
           {services.map((svc) => (
             <div
               key={svc.name}
-              className={`service-pill ${svc.running ? "running" : "stopped"}`}
+              className={`service-pill ${svc.running ? "running" : "stopped"} pill-clickable`}
+              onClick={() => setEditService(svc as Service & { dir?: string })}
+              title="Click to edit service configuration"
             >
               <span className={`pill-dot ${svc.running ? "live" : "dead"}`} />
               <span className="pill-name">{svc.name}</span>
@@ -1102,17 +1150,17 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
               {svc.running ? (
                 <>
                   <button className="pill-btn" title="Open in Browser"
-                    onClick={() => onOpenInBrowser?.(`http://localhost:${svc.port}`)}>
+                    onClick={(e) => { e.stopPropagation(); onOpenInBrowser?.(`http://${window.location.hostname}:${svc.port}`); }}>
                     <ExternalLink size={12} />
                   </button>
                   <button className="pill-btn pill-stop" title="Stop"
-                    onClick={() => handleToggleService(svc.name, true)}>
+                    onClick={(e) => { e.stopPropagation(); handleToggleService(svc.name, true); }}>
                     <Square size={12} />
                   </button>
                 </>
               ) : (
                 <button className="pill-btn pill-start" title="Start"
-                  onClick={() => handleToggleService(svc.name, false)}>
+                  onClick={(e) => { e.stopPropagation(); handleToggleService(svc.name, false); }}>
                   <Play size={12} />
                 </button>
               )}
@@ -1180,6 +1228,16 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
         <AddServiceModal
           onClose={() => setShowAddModal(false)}
           onAdd={handleAddService}
+        />
+      )}
+      {editService && (
+        <AddServiceModal
+          initialData={editService}
+          onClose={() => setEditService(null)}
+          onAdd={(svc) => {
+            handleUpdateService(svc);
+            setEditService(null);
+          }}
         />
       )}
 

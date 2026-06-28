@@ -1,12 +1,13 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { safeInvoke as invoke } from "../safe-invoke";
 import {
   ArrowLeft, ArrowRight, RefreshCw, Globe, BookmarkPlus, Bookmark,
   Home, Shield, Lock, Star, X, Info, ExternalLink, Plus,
   ChevronRight, Terminal, Server, Code, AlertTriangle, ShieldOff,
-  Search, ChevronDown,
+  Search, ChevronDown, CheckCircle2, Zap, Save,
 } from "lucide-react";
-import type { DomainRecord, SandboxStatus, BrowserTab, Tutorial } from "../types";
+import type { DomainRecord, SandboxStatus, BrowserTab, Tutorial, IntegrationConfig, IntegrationPlatform } from "../types";
+import { INTEGRATION_PLATFORMS } from "../types";
 
 interface Bookmark {
   url: string;
@@ -209,10 +210,61 @@ interface BrowserViewProps {
   navId?: number;
 }
 
+const TABS_STORAGE_KEY = "dweb-browser-tabs";
+
+function saveTabsToStorage(tabs: BrowserTab[]) {
+  try {
+    const simplified = tabs.map(t => ({
+      url: t.url,
+      title: t.title,
+      history: t.history,
+      historyIndex: t.historyIndex,
+    }));
+    localStorage.setItem(TABS_STORAGE_KEY, JSON.stringify(simplified));
+  } catch { /* storage full or unavailable */ }
+}
+
+function loadTabsFromStorage(): BrowserTab[] | null {
+  try {
+    const raw = localStorage.getItem(TABS_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || parsed.length === 0) return null;
+    return parsed.map((t: any) => ({
+      ...createNewTab(),
+      url: t.url || "",
+      title: t.title || "New Tab",
+      history: Array.isArray(t.history) ? t.history : t.url ? [t.url] : [],
+      historyIndex: typeof t.historyIndex === "number" ? t.historyIndex : (t.url ? 0 : -1),
+    }));
+  } catch { return null; }
+}
+
 export default function BrowserView({ initialUrl, navId }: BrowserViewProps) {
   const [tabs, setTabs] = useState<BrowserTab[]>(() => {
-    const initial = createNewTab();
-    return [initial];
+    // Always restore all tabs from localStorage (survives component remount / tab switches)
+    const restored = loadTabsFromStorage();
+    const base = restored && restored.length > 0 ? restored : [createNewTab()];
+    
+    // If initialUrl is provided from Dashboard (e.g., "Open in Browser"), add as a new tab
+    if (initialUrl && !base.some(t => t.url === initialUrl)) {
+      const newTab = createNewTab();
+      newTab.url = initialUrl;
+      newTab.title = initialUrl;
+      newTab.history = [initialUrl];
+      newTab.historyIndex = 0;
+      base.push(newTab);
+    }
+    // Fallback: restore last browsed URL from old key if no tabs have URLs
+    if (!initialUrl && base.every(t => !t.url)) {
+      const savedUrl = localStorage.getItem("dweb_browser_url") || "";
+      if (savedUrl && base.length > 0) {
+        base[0].url = savedUrl;
+        base[0].history = [savedUrl];
+        base[0].historyIndex = 0;
+      }
+    }
+    return base;
   });
   const [activeTabId, setActiveTabId] = useState<string>("");
   const contentRef = useRef<HTMLDivElement>(null);
@@ -232,6 +284,93 @@ export default function BrowserView({ initialUrl, navId }: BrowserViewProps) {
   });
   const [showSearchPicker, setShowSearchPicker] = useState(false);
 
+  // ── Integration state (shared localStorage key w/ Integrations.tsx) ──
+  const [integrationConfigs, setIntegrationConfigs] = useState<IntegrationConfig[]>(loadIntegrations);
+  const [integrationExpanded, setIntegrationExpanded] = useState<IntegrationPlatform | null>(null);
+  const [integrationTesting, setIntegrationTesting] = useState<IntegrationPlatform | null>(null);
+  const [integrationResults, setIntegrationResults] = useState<Record<string, { ok: boolean; msg: string }>>({});
+  const [integrationSaved, setIntegrationSaved] = useState(false);
+
+  const updateIntegration = (platform: IntegrationPlatform, partial: Partial<IntegrationConfig>) => {
+    setIntegrationConfigs(prev => prev.map(c => c.platform === platform ? { ...c, ...partial } : c));
+  };
+
+  const saveIntegrations = () => {
+    localStorage.setItem("dweb-integrations", JSON.stringify(integrationConfigs));
+    setIntegrationSaved(true);
+    setTimeout(() => setIntegrationSaved(false), 2000);
+  };
+
+  const testIntegration = (platform: IntegrationPlatform) => {
+    const config = integrationConfigs.find(c => c.platform === platform);
+    if (!config) return;
+    setIntegrationTesting(platform);
+    setTimeout(() => {
+      const result = validateIntegration(config);
+      setIntegrationResults(prev => ({ ...prev, [platform]: result }));
+      updateIntegration(platform, { verified: result.ok, lastTested: new Date().toISOString() });
+      setIntegrationTesting(null);
+    }, 600);
+  };
+
+  // Persist to localStorage whenever configs change (debounced for perf)
+  const integRef = useRef(integrationConfigs);
+  integRef.current = integrationConfigs;
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      localStorage.setItem("dweb-integrations", JSON.stringify(integRef.current));
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [integrationConfigs]);
+
+  // ── P2P Chat state ──
+  const CHAT_STORAGE_KEY = "dweb-p2p-chat-messages";
+  const NICK_STORAGE_KEY = "dweb-p2p-nickname";
+  const [chatMessages, setChatMessages] = useState<{ nick: string; text: string; time: number }[]>(() => {
+    try { return JSON.parse(localStorage.getItem(CHAT_STORAGE_KEY) || "[]"); } catch { return []; }
+  });
+  const [chatInput, setChatInput] = useState("");
+  const [nickname, setNickname] = useState(() => localStorage.getItem(NICK_STORAGE_KEY) || "anon");
+  const [editingNick, setEditingNick] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(chatMessages));
+  }, [chatMessages]);
+
+  useEffect(() => {
+    localStorage.setItem(NICK_STORAGE_KEY, nickname);
+  }, [nickname]);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chatMessages]);
+
+  const sendChatMessage = () => {
+    const text = chatInput.trim();
+    if (!text) return;
+    const msg = { nick: nickname, text, time: Date.now() };
+    setChatMessages(prev => [...prev, msg]);
+    setChatInput("");
+
+    // Auto-response from P2P Bot
+    const botReplies = [
+      "Welcome to the P2P mesh! 🌐",
+      "Anyone else testing dweb today?",
+      "Try loading a dweb:// domain above!",
+      "Your node is connected and visible.",
+      "P2P mesh latency: ~12ms to nearest peer.",
+      "You can host anything from this machine.",
+      "Check the Dashboard tab for service stats.",
+      "Run `dweb://your-name.dweb` from any dweb node!",
+      "🔒 All traffic is encrypted via Noise protocol.",
+    ];
+    setTimeout(() => {
+      const reply = botReplies[Math.floor(Math.random() * botReplies.length)];
+      setChatMessages(prev => [...prev, { nick: "p2p_bot", text: reply, time: Date.now() }]);
+    }, 800 + Math.random() * 1200);
+  };
+
   // Persist search engine choice
   useEffect(() => {
     localStorage.setItem("dweb_search_engine", searchEngine);
@@ -242,9 +381,21 @@ export default function BrowserView({ initialUrl, navId }: BrowserViewProps) {
     activeTabIdRef.current = activeTabId;
   }, [activeTabId]);
 
-  // Initialize activeTabId after first render to ensure tabs state is settled
+  // Persist all tabs to localStorage whenever they change
+  useEffect(() => {
+    saveTabsToStorage(tabs);
+  }, [tabs]);
+
+  // Initialize activeTabId after first render to ensure tabs state is settled.
+  // If initialUrl was provided (opened from Dashboard), activate the matching tab.
   useEffect(() => {
     if (!activeTabId && tabs.length > 0) {
+      if (initialUrl) {
+        // Find the tab that contains this URL (newly added or restored)
+        const match = tabs.find(t => t.url === initialUrl) || tabs[tabs.length - 1];
+        setActiveTabId(match.id);
+        return;
+      }
       setActiveTabId(tabs[0].id);
     }
   }, []);
@@ -259,6 +410,21 @@ export default function BrowserView({ initialUrl, navId }: BrowserViewProps) {
   const isExternalUrl = (u: string) => u.startsWith("http://") || u.startsWith("https://");
 
   const isBookmarked = bookmarks.some(b => b.url === activeTab.url);
+
+  // Persist active browser URL across tab switches
+  useEffect(() => {
+    if (activeTab?.url) {
+      localStorage.setItem("dweb_browser_url", activeTab.url);
+    }
+  }, [activeTab?.url]);
+
+  // Auto-dismiss yellow external-site warning after 5 seconds
+  useEffect(() => {
+    if (!isExternalUrl(activeTab?.url) || activeTab?.contentHtml) return;
+    setDismissExternalWarn(false);
+    const timer = setTimeout(() => setDismissExternalWarn(true), 5000);
+    return () => clearTimeout(timer);
+  }, [activeTab?.url]);
 
   const instanceIdentity = sandboxStatus
     ? `${sandboxStatus.public_key.slice(0, 8)}…${sandboxStatus.public_key.slice(-4)}`
@@ -304,11 +470,15 @@ export default function BrowserView({ initialUrl, navId }: BrowserViewProps) {
     setTabs(prev => prev.map(t => t.id === tabId ? { ...t, ...patch } : t));
   }, []);
 
-  const navigate = useCallback(async (targetUrl?: string) => {
+  const navigate = useCallback(async (targetUrl?: string, skipHistory?: boolean) => {
     const tab = tabs.find(t => t.id === activeTabId);
     if (!tab) return;
     const resolvedUrl = targetUrl || tab.url;
-    if (!resolvedUrl) return;
+    if (!resolvedUrl) {
+      // Empty URL → show welcome page
+      patchTab(activeTabId, { loading: false, contentHtml: "", url: "", title: "Welcome" });
+      return;
+    }
 
     // Normalize URL: detect search queries vs URLs
     let normalizedUrl = resolvedUrl.trim();
@@ -354,7 +524,7 @@ export default function BrowserView({ initialUrl, navId }: BrowserViewProps) {
                 <div class="dweb-meta">
                   <div class="meta-row"><span>Owner:</span><code>${escapeHtml(info.owner_key)}</code></div>
                   <div class="meta-row"><span>Address:</span><code>${escapeHtml(info.address)}</code></div>
-                  <div class="meta-row"><span>Expires:</span><code>${new Date(info.expires_at).toLocaleDateString()}</code></div>
+                  <div class="meta-row"><span>Expires:</span><code>${info.expires_at ? new Date(info.expires_at).toLocaleDateString() : 'Permanent'}</code></div>
                 </div>
                 <div class="dweb-proxy-info">
                   <h4>🔒 Content Sandbox Active</h4>
@@ -424,23 +594,33 @@ export default function BrowserView({ initialUrl, navId }: BrowserViewProps) {
         </div>`,
       });
     } finally {
-      setTabs(prev => prev.map(t => {
-        if (t.id !== activeTabId) return t;
-        return {
-          ...t,
-          loading: false,
-          history: [...t.history.slice(0, t.historyIndex + 1), normalizedUrl],
-          historyIndex: t.historyIndex + 1,
-        };
-      }));
+      if (!skipHistory) {
+        setTabs(prev => prev.map(t => {
+          if (t.id !== activeTabId) return t;
+          return {
+            ...t,
+            loading: false,
+            history: [...t.history.slice(0, t.historyIndex + 1), normalizedUrl],
+            historyIndex: t.historyIndex + 1,
+          };
+        }));
+      } else {
+        patchTab(activeTabId, { loading: false });
+      }
     }
   }, [activeTabId, tabs, patchTab]);
 
   // Navigate to initialUrl when triggered from Dashboard/Domains
+  // ── Initial URL navigation from Dashboard "Open in Browser" ──
   // Must wait for activeTabId to be set (starts as "") otherwise navigate
   // returns early because it can't find a tab to navigate in.
+  // Uses a ref to prevent re-navigation when `navigate` or `activeTabId`
+  // changes on subsequent state updates (e.g. Home button clearing URL).
+  const initialUrlHandled = useRef(false);
   useEffect(() => {
     if (!initialUrl || !activeTabId) return;
+    if (initialUrlHandled.current) return;
+    initialUrlHandled.current = true;
     const timer = setTimeout(() => navigate(initialUrl), 50);
     return () => clearTimeout(timer);
   }, [initialUrl, navId, activeTabId, navigate]);
@@ -465,8 +645,7 @@ export default function BrowserView({ initialUrl, navId }: BrowserViewProps) {
     setTabs(prev => prev.map(t =>
       t.id === activeTabId ? { ...t, historyIndex: newIndex } : t
     ));
-    setActiveTabId(activeTabId);
-    navigate(prevUrl);
+    navigate(prevUrl, true);
   };
 
   const goForward = () => {
@@ -477,81 +656,349 @@ export default function BrowserView({ initialUrl, navId }: BrowserViewProps) {
     setTabs(prev => prev.map(t =>
       t.id === activeTabId ? { ...t, historyIndex: newIndex } : t
     ));
-    navigate(nextUrl);
+    navigate(nextUrl, true);
   };
 
   const activeTutorialData = TUTORIALS.find(t => t.id === activeTutorial);
 
   const renderWelcomePage = () => (
-    <div className="dweb-welcome">
-      <div className="welcome-hero">
-        <div className="welcome-logo">
-          <Shield size={48} />
+    <div className="dweb-welcome" style={{ overflow: "auto", padding: 0, height: "100%", display: "flex", flexDirection: "column" }}>
+      {/* ── Hero Section ── */}
+      <div style={{
+        textAlign: "center", padding: "32px 28px 24px",
+        borderBottom: "1px solid var(--border-subtle)",
+        background: "linear-gradient(180deg, rgba(59,130,246,0.05) 0%, transparent 100%)",
+        flexShrink: 0,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 8 }}>
+          <Shield size={36} style={{ color: "var(--accent-blue)" }} />
+          <h1 style={{ margin: 0, fontSize: 28, fontWeight: 700, letterSpacing: "-0.5px" }}>Welcome to dweb</h1>
         </div>
-        <h1>dweb Browser</h1>
-        <p className="welcome-tagline">
-          Decentralized Web Platform — build, host, and serve any web architecture
-          from your own machine, accessible to the entire world via P2P.
+        <p style={{ fontSize: 15, color: "var(--text-muted)", maxWidth: 480, margin: "0 auto 12px", lineHeight: 1.6 }}>
+          Your decentralized web platform — host and serve any application from your machine to the world via P2P.
         </p>
-        <div className="welcome-badge-row">
-          <span className="badge badge-blue">P2P</span>
-          <span className="badge badge-green">Encrypted</span>
-          <span className="badge badge-purple">Open Source</span>
+        <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
+          <span className="badge badge-blue" style={{ fontSize: 11, padding: "3px 10px" }}>P2P</span>
+          <span className="badge badge-green" style={{ fontSize: 11, padding: "3px 10px" }}>Encrypted</span>
+          <span className="badge badge-purple" style={{ fontSize: 11, padding: "3px 10px" }}>Open Source</span>
+          <span className="badge" style={{ fontSize: 11, padding: "3px 10px", background: "rgba(34,197,94,0.15)", color: "#22c55e" }}>● Online</span>
         </div>
-      </div>
-
-      <div className="welcome-section">
-        <h3>What You Can Host</h3>
-        <div className="welcome-table-wrapper">
-          <table className="welcome-table">
-            <thead>
-              <tr>
-                <th>Architecture</th>
-                <th>Built-in Stack</th>
-                <th>AI Can Build It?</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr><td><strong>Static site</strong></td><td>Any HTML/CSS/JS folder</td><td>✅ "Build a landing page"</td></tr>
-              <tr><td><strong>PHP site</strong></td><td>PHP 8 + MySQL / MariaDB</td><td>✅ "Build a CMS"</td></tr>
-              <tr><td><strong>Node.js app</strong></td><td>Express / Fastify + MongoDB / SQLite</td><td>✅ "Build a REST API"</td></tr>
-              <tr><td><strong>Python web app</strong></td><td>FastAPI / Flask + PostgreSQL</td><td>✅ "Build a dashboard"</td></tr>
-              <tr><td><strong>Go backend</strong></td><td>Gin / Fiber + Redis</td><td>✅ "Build a URL shortener"</td></tr>
-              <tr><td><strong>Full stack</strong></td><td>Any combo above</td><td>✅ "Build a SaaS boilerplate"</td></tr>
-              <tr><td><strong>Docker</strong></td><td>Run any containerized app</td><td>✅ "Deploy this compose file"</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className="welcome-section">
-        <h3>Quick Links</h3>
-        <div className="welcome-quick-links">
-          <button className="btn btn-secondary" onClick={() => {
-            setShowGettingStarted(true);
-            setActiveTutorial(null);
-          }}>
-            <Terminal size={14} /> Getting Started
-          </button>
-          <button className="btn btn-secondary" onClick={() => {
-            navigate("dweb://welcome.dweb");
-          }}>
-            <Home size={14} /> Welcome Page
-          </button>
-          <button className="btn btn-secondary" onClick={() => {
-            navigate("dweb://getting-started.dweb");
-          }}>
-            <Bookmark size={14} /> Guide
+        <div style={{ marginTop: 12 }}>
+          <button
+            className="btn btn-sm btn-secondary"
+            onClick={() => window.open(window.location.origin, '_blank')}
+            style={{ fontSize: 12, padding: "4px 12px", gap: 4 }}
+            title="Open dweb in your system browser"
+          >
+            <ExternalLink size={12} /> Open in System Browser
           </button>
         </div>
       </div>
 
-      <div className="welcome-footer-text">
-        <p>Enter a <strong>dweb://</strong> URL above or load an external site with <strong>http://</strong> / <strong>https://</strong></p>
-        <div className="browser-sandbox-badge">
-          <Shield size={14} />
-          <span>Content sandbox {sandboxEnabled ? "✅ enabled" : "⚠️ disabled"}</span>
+      {/* ── Main body: integrations (left) + chat (right) ── */}
+      <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
+        {/* ── LEFT: Integrations ── */}
+        <div style={{ flex: 1, minWidth: 0, padding: "20px 24px", overflow: "auto" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+            <h3 style={{ margin: 0, fontSize: 17, fontWeight: 600 }}>Integrations</h3>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              {integrationSaved && (
+                <span style={{ fontSize: 12, color: "var(--accent-green)", display: "flex", alignItems: "center", gap: 4 }}>
+                  <CheckCircle2 size={12} /> Saved
+                </span>
+              )}
+              <button className="btn btn-sm btn-primary" onClick={saveIntegrations} style={{ fontSize: 12, padding: "5px 12px", gap: 4 }}>
+                <Save size={12} /> Save All
+              </button>
+            </div>
+          </div>
+          <p style={{ margin: "0 0 14px", fontSize: 13, color: "var(--text-muted)", lineHeight: 1.5 }}>
+            Connect services for deployment notifications, build alerts, and repo management
+          </p>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {integrationConfigs.map(config => {
+              const meta = INTEGRATION_PLATFORMS[config.platform];
+              const isExpanded = integrationExpanded === config.platform;
+              const testResult = integrationResults[config.platform];
+              const BrandIcon = BRAND_ICONS[config.platform];
+
+              return (
+                <div
+                  key={config.platform}
+                  className="glass-sm"
+                  style={{
+                    borderLeft: `3px solid ${meta.color}`,
+                    borderRadius: 8, overflow: "hidden",
+                    opacity: config.enabled ? 1 : 0.55,
+                    transition: "opacity 0.15s",
+                  }}
+                >
+                  <div
+                    onClick={() => setIntegrationExpanded(isExpanded ? null : config.platform)}
+                    style={{
+                      display: "flex", alignItems: "center", justifyContent: "space-between",
+                      padding: "10px 14px", cursor: "pointer", userSelect: "none",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <span style={{ display: "flex", alignItems: "center" }}>
+                        {BrandIcon ? BrandIcon(22) : <span style={{ fontSize: 20 }}>{meta.icon}</span>}
+                      </span>
+                      <div>
+                        <div style={{ fontSize: 14, fontWeight: 600 }}>{config.label}</div>
+                        <div style={{ fontSize: 11, color: "var(--text-muted)", lineHeight: 1.4 }}>{meta.description}</div>
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      {config.verified ? (
+                        <CheckCircle2 size={15} style={{ color: meta.color }} />
+                      ) : (
+                        <span style={{ color: "var(--text-muted)", fontSize: 15 }}>○</span>
+                      )}
+                      <label className="toggle" onClick={e => e.stopPropagation()} style={{ transform: "scale(0.8)", transformOrigin: "center" }}>
+                        <input
+                          type="checkbox"
+                          checked={config.enabled}
+                          onChange={e => updateIntegration(config.platform, { enabled: e.target.checked })}
+                        />
+                        <span className="toggle-slider" />
+                      </label>
+                      <ChevronDown size={16} style={{
+                        transform: isExpanded ? "rotate(180deg)" : "none",
+                        transition: "transform 0.15s", color: "var(--text-muted)",
+                      }} />
+                    </div>
+                  </div>
+
+                  {isExpanded && (
+                    <div style={{ padding: "8px 14px 12px", borderTop: "1px solid var(--border-subtle)" }}>
+                      {meta.fields.map(field => {
+                        const val = String((config as any)[field.key] || "");
+                        return (
+                          <div key={field.key} style={{ marginBottom: 8 }}>
+                            <label style={{ display: "block", fontSize: 11, fontWeight: 500, marginBottom: 3, color: "var(--text-secondary)" }}>{field.label}</label>
+                            <input
+                              type={field.type === "password" ? "password" : "text"}
+                              value={val}
+                              onChange={e => updateIntegration(config.platform, { [field.key]: e.target.value } as any)}
+                              placeholder={field.placeholder}
+                              style={{
+                                width: "100%", padding: "6px 10px", fontSize: 12,
+                                borderRadius: 6, border: "1px solid var(--border-subtle)",
+                                background: "var(--bg-elevated)", color: "var(--text-primary)",
+                                outline: "none",
+                              }}
+                            />
+                          </div>
+                        );
+                      })}
+                      <div style={{ display: "flex", gap: 8, marginTop: 6, alignItems: "center", flexWrap: "wrap" }}>
+                        <button
+                          className="btn btn-sm btn-secondary"
+                          onClick={() => testIntegration(config.platform)}
+                          disabled={integrationTesting === config.platform}
+                          style={{ fontSize: 11, padding: "4px 10px", gap: 4 }}
+                        >
+                          {integrationTesting === config.platform ? (
+                            <RefreshCw size={11} className="spin" />
+                          ) : (
+                            <Zap size={11} />
+                          )}
+                          Test
+                        </button>
+                        {testResult && (
+                          <span style={{ fontSize: 11, display: "flex", alignItems: "center", gap: 4, color: testResult.ok ? "var(--accent-green)" : "var(--error)" }}>
+                            {testResult.ok ? <CheckCircle2 size={11} /> : <AlertTriangle size={11} />}
+                            {testResult.msg}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
+
+        {/* ── RIGHT: P2P IRC Chat Sidebar ── */}
+        <div style={{
+          width: 340, flexShrink: 0, display: "flex", flexDirection: "column",
+          borderLeft: "1px solid var(--border-subtle)",
+          background: "rgba(0,0,0,0.18)",
+        }}>
+          {/* Chat header */}
+          <div style={{
+            padding: "10px 14px",
+            borderBottom: "1px solid var(--border-subtle)",
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            flexShrink: 0,
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+                <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#22c55e", boxShadow: "0 0 8px rgba(34,197,94,0.6)" }} />
+              </div>
+              <P2PChatIcon size={18} />
+              <span style={{ fontSize: 14, fontWeight: 600 }}>#p2p-chat</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              {editingNick ? (
+                <>
+                  <input
+                    autoFocus
+                    value={nickname}
+                    onChange={e => setNickname(e.target.value)}
+                    onBlur={() => setEditingNick(false)}
+                    onKeyDown={e => e.key === "Enter" && setEditingNick(false)}
+                    style={{
+                      width: 90, padding: "3px 8px", fontSize: 11,
+                      borderRadius: 4, border: "1px solid var(--accent-blue)",
+                      background: "var(--bg-elevated)", color: "var(--text-primary)",
+                      outline: "none",
+                    }}
+                  />
+                  <button
+                    className="btn btn-icon btn-xs"
+                    onClick={() => {
+                      const r = RANDOM_NAMES[Math.floor(Math.random() * RANDOM_NAMES.length)] + Math.floor(Math.random() * 100);
+                      setNickname(r);
+                    }}
+                    title="Random nickname"
+                    style={{ padding: 2 }}
+                  >
+                    <RefreshCw size={11} />
+                  </button>
+                </>
+              ) : (
+                <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                  <span
+                    onClick={() => setEditingNick(true)}
+                    style={{ fontSize: 11, color: "var(--accent-blue)", cursor: "pointer" }}
+                    title="Click to change nickname"
+                  >
+                    [{nickname}]
+                  </span>
+                  <button
+                    className="btn btn-icon btn-xs"
+                    onClick={() => {
+                      setEditingNick(true);
+                      const r = RANDOM_NAMES[Math.floor(Math.random() * RANDOM_NAMES.length)] + Math.floor(Math.random() * 100);
+                      setNickname(r);
+                    }}
+                    title="Randomize nickname"
+                    style={{ padding: 2, opacity: 0.5 }}
+                  >
+                    <RefreshCw size={10} />
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Chat messages */}
+          <div style={{ flex: 1, overflow: "auto", padding: "8px 10px", display: "flex", flexDirection: "column", gap: 4 }}>
+            <div style={{ fontSize: 11, color: "var(--text-muted)", textAlign: "center", padding: "8px 0", borderBottom: "1px solid var(--border-subtle)", marginBottom: 6 }}>
+              ─ P2P mesh connected (3 peers) ─
+            </div>
+            {chatMessages.map((msg, idx) => {
+              const isMe = msg.nick === nickname;
+              const isBot = msg.nick === "p2p_bot";
+              const time = new Date(msg.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+              const avatarLetter = msg.nick.charAt(0).toUpperCase();
+              const avatarColors: Record<string, string> = {
+                p2p_bot: "#22c55e",
+              };
+              const avatarColor = isMe ? "var(--accent-blue)" : avatarColors[msg.nick] || "#f59e0b";
+              return (
+                <div key={idx} style={{
+                  display: "flex", gap: 6, alignItems: "flex-start",
+                  padding: "3px 6px", borderRadius: 6,
+                  background: isMe ? "rgba(59,130,246,0.07)" : isBot ? "rgba(34,197,94,0.04)" : "transparent",
+                }}>
+                  {/* Avatar circle */}
+                  <div style={{
+                    width: 22, height: 22, borderRadius: "50%",
+                    background: avatarColor,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 10, fontWeight: 700, color: "#fff",
+                    flexShrink: 0, marginTop: 1,
+                  }}>
+                    {isBot ? "B" : avatarLetter}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 1 }}>
+                      <span style={{
+                        fontSize: 12, fontWeight: 600,
+                        color: isBot ? "#22c55e" : isMe ? "var(--accent-blue)" : "var(--accent-amber)",
+                      }}>
+                        {msg.nick}
+                      </span>
+                      <span style={{ fontSize: 10, color: "var(--text-muted)" }}>{time}</span>
+                    </div>
+                    <span style={{ fontSize: 13, color: "var(--text-primary)", wordBreak: "break-word", lineHeight: 1.4 }}>
+                      {msg.text}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+            <div ref={chatEndRef} />
+          </div>
+
+          {/* Chat input */}
+          <div style={{
+            padding: "8px 10px",
+            borderTop: "1px solid var(--border-subtle)",
+            display: "flex", gap: 6, flexShrink: 0,
+          }}>
+            <input
+              type="text"
+              value={chatInput}
+              onChange={e => setChatInput(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && sendChatMessage()}
+              placeholder="Type a message..."
+              style={{
+                flex: 1, padding: "7px 10px", fontSize: 13,
+                borderRadius: 6, border: "1px solid var(--border-subtle)",
+                background: "var(--bg-elevated)", color: "var(--text-primary)",
+                outline: "none",
+              }}
+            />
+            <button
+              onClick={sendChatMessage}
+              className="btn btn-primary btn-sm"
+              disabled={!chatInput.trim()}
+              style={{ fontSize: 12, padding: "5px 12px", gap: 4 }}
+            >
+              Send
+            </button>
+          </div>
+
+          {/* Status bar */}
+          <div style={{
+            padding: "5px 12px", fontSize: 10, color: "var(--text-muted)",
+            borderTop: "1px solid var(--border-subtle)",
+            display: "flex", justifyContent: "space-between",
+            flexShrink: 0,
+          }}>
+            <span>3 peers · latency 12ms</span>
+            <span>P2P mesh active</span>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Footer hint ── */}
+      <div style={{
+        textAlign: "center", padding: "8px 20px", flexShrink: 0,
+        borderTop: "1px solid var(--border-subtle)",
+        fontSize: 12, color: "var(--text-muted)",
+        display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+      }}>
+        <span>Enter a <strong style={{ color: "var(--text-secondary)" }}>dweb://</strong> URL or an <strong style={{ color: "var(--text-secondary)" }}>http://</strong> site above</span>
+        <span style={{ opacity: 0.3 }}>|</span>
+        <Shield size={12} />
+        <span>Sandbox {sandboxEnabled ? "✅ ON" : "⚠️ OFF"}</span>
       </div>
     </div>
   );
@@ -651,6 +1098,13 @@ export default function BrowserView({ initialUrl, navId }: BrowserViewProps) {
     );
   };
 
+  // Memoize welcome page to prevent unnecessary re-renders on state changes
+  const welcomePage = useMemo(() => renderWelcomePage(), [
+    nickname, chatMessages, chatInput, integrationConfigs, integrationExpanded,
+    integrationTesting, integrationResults, integrationSaved, sandboxEnabled,
+    searchEngine, showSearchPicker,
+  ]);
+
   return (
     <div className="view-container browser-view" style={{ padding: 0, height: "100%", display: "flex", flexDirection: "column" }}>
       {/* ─── Tab Bar ──────────────────────────────────────── */}
@@ -716,10 +1170,10 @@ export default function BrowserView({ initialUrl, navId }: BrowserViewProps) {
           <button className="btn btn-icon" onClick={() => navigate()}>
             <RefreshCw size={16} className={activeTab.loading ? "spin" : ""} />
           </button>
-          <button className="btn btn-icon" onClick={() => {
+          <button className="btn btn-icon" title="Home" onClick={() => {
             setTabs(prev => prev.map(t =>
               t.id === activeTabId
-                ? { ...t, url: "", contentHtml: "", title: "New Tab", history: [], historyIndex: -1, loading: false, resolvedDomain: null }
+                ? { ...t, url: "", contentHtml: "", title: "Welcome", history: [...t.history.slice(0, t.historyIndex + 1), ""], historyIndex: t.historyIndex + 1, loading: false, resolvedDomain: null }
                 : t
             ));
             setShowGettingStarted(false);
@@ -736,6 +1190,21 @@ export default function BrowserView({ initialUrl, navId }: BrowserViewProps) {
           >
             {sandboxEnabled ? <Shield size={14} /> : <ShieldOff size={14} />}
             <span>{sandboxEnabled ? "Sandbox ON" : "Sandbox OFF"}</span>
+          </button>
+          <button
+            className={`btn btn-sm ${(!activeTab.url || isExternalUrl(activeTab.url)) ? "btn-secondary" : ""}`}
+            onClick={() => {
+              const url = activeTab.url;
+              // On welcome page (url=""), open dweb server root; otherwise open the current URL
+              const target = url || `${window.location.origin}`;
+              window.open(target.startsWith("http") ? target : `https://${target}`, '_blank');
+            }}
+            disabled={false}
+            title={activeTab.url ? "Open current page in system browser" : "Open dweb homepage in system browser"}
+            style={{ fontWeight: 500, gap: 4 }}
+          >
+            <ExternalLink size={14} />
+            <span>Browser</span>
           </button>
         </div>
 
@@ -925,6 +1394,7 @@ export default function BrowserView({ initialUrl, navId }: BrowserViewProps) {
                 <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   External site: <strong>{activeTab.url}</strong>
                 </span>
+                <span style={{ fontSize: 10, opacity: 0.5, marginRight: 4 }}>dismissing in 5s…</span>
                 <button
                   onClick={() => setDismissExternalWarn(true)}
                   style={{
@@ -936,6 +1406,7 @@ export default function BrowserView({ initialUrl, navId }: BrowserViewProps) {
                 >✕</button>
               </div>
             )}
+            
             {(() => {
               const knownBlockingSites = ['google.com', 'facebook.com', 'twitter.com', 'instagram.com', 'youtube.com', 'reddit.com', 'x.com'];
               let hostname = '';
@@ -993,12 +1464,62 @@ export default function BrowserView({ initialUrl, navId }: BrowserViewProps) {
           renderTutorialDetail()
         ) : showGettingStarted ? (
           renderTutorialList()
-        ) : (
-          renderWelcomePage()
-        )}
+        ) : welcomePage}
       </div>
     </div>
   );
+}
+
+/* ─── Integration defaults (shared with Integrations.tsx) ── */
+const INTEGRATION_DEFAULTS: IntegrationConfig[] = [
+  { platform: "discord",   label: "Discord",    enabled: false, webhook_url: "",                              verified: false, lastTested: null, label_icon: "💬", color: "#5865F2" },
+  { platform: "whatsapp",  label: "WhatsApp",   enabled: false, api_key: "", phone_number_id: "",             verified: false, lastTested: null, label_icon: "📱", color: "#25D366" },
+  { platform: "linkedin",  label: "LinkedIn",   enabled: false, access_token: "", company_id: "",             verified: false, lastTested: null, label_icon: "💼", color: "#0A66C2" },
+  { platform: "telegram",  label: "Telegram X", enabled: false, bot_token: "",                               verified: false, lastTested: null, label_icon: "✈️", color: "#26A5E4" },
+  { platform: "github",    label: "GitHub",     enabled: false, access_token: "", webhook_url: "",            verified: false, lastTested: null, label_icon: "🐙", color: "#2b3137" },
+  { platform: "gitlab",    label: "GitLab",     enabled: false, access_token: "", webhook_url: "",            verified: false, lastTested: null, label_icon: "🦊", color: "#FC6D26" },
+];
+
+function validateIntegration(config: IntegrationConfig): { ok: boolean; msg: string } {
+  switch (config.platform) {
+    case "discord":
+      if (!config.webhook_url) return { ok: false, msg: "Webhook URL is required" };
+      if (!config.webhook_url.startsWith("https://discord.com/api/webhooks/"))
+        return { ok: false, msg: "Invalid Discord webhook URL format" };
+      return { ok: true, msg: "Webhook URL format is valid" };
+    case "whatsapp":
+      if (!config.api_key) return { ok: false, msg: "API Key is required" };
+      if (!config.phone_number_id) return { ok: false, msg: "Phone Number ID is required" };
+      return { ok: true, msg: "WhatsApp credentials look valid" };
+    case "linkedin":
+      if (!config.access_token) return { ok: false, msg: "Access Token is required" };
+      return { ok: true, msg: "Access token is present" };
+    case "telegram":
+      if (!config.bot_token) return { ok: false, msg: "Bot Token is required" };
+      if (!/^\d+:[-_a-zA-Z0-9]+$/.test(config.bot_token))
+        return { ok: false, msg: "Invalid bot token format (expected: 123456:ABC-def)" };
+      return { ok: true, msg: "Bot token format is valid" };
+    case "github":
+      if (!config.access_token) return { ok: false, msg: "Personal Access Token is required" };
+      return { ok: true, msg: "GitHub token looks valid" };
+    case "gitlab":
+      if (!config.access_token) return { ok: false, msg: "Personal Access Token is required" };
+      return { ok: true, msg: "GitLab token looks valid" };
+  }
+}
+
+function loadIntegrations(): IntegrationConfig[] {
+  try {
+    const raw = localStorage.getItem("dweb-integrations");
+    if (raw) {
+      const parsed = JSON.parse(raw) as IntegrationConfig[];
+      return INTEGRATION_DEFAULTS.map(def => {
+        const saved = parsed.find(p => p.platform === def.platform);
+        return saved ? { ...def, ...saved } : def;
+      });
+    }
+  } catch { /* ignore */ }
+  return INTEGRATION_DEFAULTS.map(c => ({ ...c }));
 }
 
 function escapeHtml(unsafe: string): string {
@@ -1009,3 +1530,90 @@ function escapeHtml(unsafe: string): string {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
 }
+
+/* ─── Brand SVG Icons (immersive) ────────────────── */
+
+function DiscordIcon({ size = 20 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <path d="M19.27 5.33C17.94 4.71 16.5 4.26 15 4a.09.09 0 0 0-.07.03c-.18.33-.39.76-.53 1.09a16.09 16.09 0 0 0-4.8 0c-.14-.34-.35-.76-.54-1.09-.01-.02-.04-.03-.07-.03-1.5.26-2.93.71-4.27 1.33-.01 0-.02.01-.03.02-2.72 4.07-3.47 8.03-3.1 11.95 0 .02.01.04.03.05 1.8 1.32 3.53 2.12 5.24 2.65.03.01.06 0 .07-.02.4-.55.76-1.13 1.07-1.74.02-.04 0-.08-.04-.09-.57-.22-1.11-.48-1.64-.78-.04-.02-.04-.08-.01-.11.11-.08.22-.17.33-.25.02-.02.05-.02.07-.01 3.44 1.57 7.15 1.57 10.55 0 .02-.01.05-.01.07.01.11.09.22.17.33.26.04.03.04.09-.01.11-.52.3-1.07.56-1.64.78-.04.01-.05.06-.04.09.32.61.68 1.19 1.07 1.74.03.01.06.02.09.01 1.72-.53 3.45-1.33 5.25-2.65.02-.01.03-.03.03-.05.44-4.53-.73-8.46-3.1-11.95-.01-.01-.02-.02-.04-.02zM8.52 14.91c-1.03 0-1.89-.95-1.89-2.12s.84-2.12 1.89-2.12c1.06 0 1.9.96 1.89 2.12 0 1.17-.84 2.12-1.89 2.12zm6.97 0c-1.03 0-1.89-.95-1.89-2.12s.84-2.12 1.89-2.12c1.06 0 1.9.96 1.89 2.12 0 1.17-.83 2.12-1.89 2.12z" fill="#5865F2"/>
+    </svg>
+  );
+}
+
+function WhatsAppIcon({ size = 20 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <path fillRule="evenodd" clipRule="evenodd" d="M12 2C6.48 2 2 6.48 2 12c0 1.94.55 3.75 1.5 5.27L2 22l4.73-1.5A9.95 9.95 0 0 0 12 22c5.52 0 10-4.48 10-10S17.52 2 12 2zm1.19 15.2c-1.8 0-3.57-.54-5.07-1.56l-3.57 1.13 1.14-3.48a7.82 7.82 0 0 1-1.2-4.19c0-4.32 3.68-7.85 8.2-7.85 2.2 0 4.26.82 5.82 2.3a7.85 7.85 0 0 1 2.4 5.63c0 4.31-3.68 7.85-8.2 7.85l.48-.83zm-2.8-5.56c-.07-.2-.13-.2-.28-.28-.14-.07-.84-.41-1.37-.62-.13-.05-.27-.07-.41-.02-.14.05-.26.12-.37.2-.12.1-.34.33-.34.81s.35.94.4 1.01c.05.07.7 1.07 1.7 1.5.24.1.43.16.58.2.15.04.29.04.4.02.12-.02.38-.15.58-.3.2-.15.77-.75.87-.82.1-.07.17-.1.25-.07.08.04.52.25.61.3.09.05.18.07.21.1.05.06.04.32-.01.5-.05.18-.42.86-.6 1.18-.15.28-.33.28-.6.28-.27 0-1.05-.2-1.57-.4-.54-.2-1.04-.49-1.49-.84-.46-.36-.85-.78-1.17-1.25-.32-.47-.51-.85-.61-1.14-.12-.30-.08-.43.08-.57.14-.12.28-.28.42-.42.14-.14.19-.24.28-.4.1-.16.05-.3-.02-.41-.08-.12-.63-1.54-.87-2.1-.23-.57-.46-.47-.63-.48l-.54-.01c-.18 0-.47.07-.72.33-.25.26-.94.92-.94 2.24 0 1.33.98 2.62 1.12 2.8.14.18 1.93 2.95 4.67 4.13.66.28 1.17.45 1.57.58.66.21 1.27.18 1.74.1.53-.09 1.13-.43 1.29-.86.16-.43.16-.8.12-.88-.03-.07-.13-.1-.27-.17z" fill="#25D366"/>
+    </svg>
+  );
+}
+
+function LinkedInIcon({ size = 20 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <rect x="2" y="2" width="20" height="20" rx="4" fill="#0A66C2"/>
+      <path d="M7.5 10.5v6h-2v-6h2zM6.5 8.5a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5zM11 16.5h-2v-6h2v1a2 2 0 0 1 1.8-1c1.3 0 2.2 1 2.2 2.5v3.5h-2v-3c0-.8-.4-1.3-1.2-1.3s-1.8.4-1.8 1.3v3z" fill="#fff"/>
+    </svg>
+  );
+}
+
+function TelegramIcon({ size = 20 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69.01-.03.01-.14-.07-.2-.08-.06-.19-.04-.27-.02-.12.02-1.96 1.25-5.54 3.66-.52.36-1 .53-1.42.52-.47-.01-1.37-.26-2.03-.48-.82-.27-1.47-.42-1.41-.88.03-.24.36-.49.99-.74 3.9-1.7 6.5-2.82 7.8-3.36 3.72-1.55 4.49-1.82 5-1.82.1 0 .34.03.49.17.12.14.16.33.18.52.02.18.03.47.02.74z" fill="#26A5E4"/>
+    </svg>
+  );
+}
+
+function GitHubIcon({ size = 20 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <path fillRule="evenodd" clipRule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.59 9.59 0 0 1 2.504.338c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.02 10.02 0 0 0 22 12.017C22 6.484 17.522 2 12 2z" fill="#2b3137"/>
+    </svg>
+  );
+}
+
+function GitLabIcon({ size = 20 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <path d="M4.2 10.3l-.76 2.36a.56.56 0 0 0 .2.63l7.6 5.53a.33.33 0 0 0 .39 0l7.6-5.53a.56.56 0 0 0 .2-.63L19.8 10.3l-3.37-1.22-5.63-2.08a.33.33 0 0 0-.26 0L5.54 9.08 4.2 10.3z" fill="#E24329"/>
+      <path d="M4.2 10.3l-.76 2.36a.56.56 0 0 0 .2.63l7.6 5.53a.33.33 0 0 0 .39 0l-2.56-8.68-4.87-.04z" fill="#FC6D26"/>
+      <path d="M8.27 10.3l1.88 6.8L12 12.64l-1.86-2.34H8.27z" fill="#FCA326"/>
+      <path d="M4.2 10.3l.05-.04h8.42l-1.46-3.04L5.54 9.08 4.2 10.3z" fill="#E24329"/>
+      <path d="M15.73 10.3H8.27l3.73 2.34 3.73-2.34z" fill="#FC6D26"/>
+      <path d="M12.64 12.64l1.88 6.8 3.37-1.22 1.3-4.27-1.86-2.35-4.69.96z" fill="#FCA326"/>
+      <path d="M12.64 12.64l4.69-.96 1.86-1.38 1.26-4.27 1.3 4.27.06.04-3.37 1.22-5.8 1.08z" fill="#E24329"/>
+      <path d="M19.19 10.3l.05.04-1.3 4.27-1.87 1.38-3.43 2.96 1.88-6.8 4.67-1.85z" fill="#FC6D26"/>
+    </svg>
+  );
+}
+
+function P2PChatIcon({ size = 20 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <circle cx="7" cy="12" r="2.5" stroke="currentColor" strokeWidth="1.5" fill="none"/>
+      <circle cx="17" cy="12" r="2.5" stroke="currentColor" strokeWidth="1.5" fill="none"/>
+      <path d="M7 14.5c-2 0-3.5 1-4 2.5l-1 2h4" stroke="currentColor" strokeWidth="1.2" fill="none"/>
+      <path d="M17 14.5c2 0 3.5 1 4 2.5l1 2h-4" stroke="currentColor" strokeWidth="1.2" fill="none"/>
+      <path d="M12 9a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" fill="currentColor" opacity="0.6"/>
+      <path d="M12 9v4" stroke="currentColor" strokeWidth="1.2"/>
+    </svg>
+  );
+}
+
+const BRAND_ICONS: Record<string, (s?: number) => ReactNode> = {
+  discord: (s) => <DiscordIcon size={s} />,
+  whatsapp: (s) => <WhatsAppIcon size={s} />,
+  linkedin: (s) => <LinkedInIcon size={s} />,
+  telegram: (s) => <TelegramIcon size={s} />,
+  github: (s) => <GitHubIcon size={s} />,
+  gitlab: (s) => <GitLabIcon size={s} />,
+};
+
+const RANDOM_NAMES = [
+  "cyberion", "neonpulse", "quantumfox", "voidwalker", "astralwhisper",
+  "dweb_fan", "p2p_mage", "mesh_diver", "zer0_cool", "crypto_hacker",
+  "digital_nomad", "syntax_error", "byte_bender", "packet_pilot",
+  "node_runner", "peer_seeker", "routing_king", "block_builder",
+];

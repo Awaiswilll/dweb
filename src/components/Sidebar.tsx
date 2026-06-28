@@ -1,4 +1,4 @@
-import { Globe, Gauge, Bot, Settings, Menu, Network, Zap, FolderGit2, MessageCircle, BookOpen } from "lucide-react";
+import { Globe, Gauge, Bot, Settings, Menu, Network, Zap, BookOpen } from "lucide-react";
 import { useState } from "react";
 import type { View } from "../types";
 
@@ -12,8 +12,6 @@ const navItems: { id: View; label: string; icon: React.ReactNode; badge?: string
   { id: "browser", label: "Browser", icon: <Globe size={20} /> },
   { id: "ai-agent", label: "AI Agent", icon: <Bot size={20} />, badge: "NEW" },
   { id: "domains", label: "Domains", icon: <Network size={20} /> },
-  { id: "integrations", label: "Integrations", icon: <MessageCircle size={20} /> },
-  { id: "repositories", label: "Repositories", icon: <FolderGit2 size={20} /> },
   { id: "docs", label: "Docs", icon: <BookOpen size={20} /> },
   { id: "settings", label: "Settings", icon: <Settings size={20} /> },
 ];

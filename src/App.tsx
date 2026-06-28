@@ -22,6 +22,16 @@ function App() {
     setCurrentView("browser");
   }, []);
 
+  /** Navigation handler for sidebar - clears pending external URL when switching to Browser */
+  const handleNavigate = useCallback((view: View) => {
+    if (view === "browser") {
+      // Clear any pending external URL so BrowserView doesn't re-add a stale tab
+      setBrowserUrl("");
+      setBrowserNavId(0);
+    }
+    setCurrentView(view);
+  }, []);
+
   const renderView = () => {
     switch (currentView) {
       case "dashboard": return <Dashboard onOpenInBrowser={handleOpenInBrowser} />;
@@ -37,7 +47,7 @@ function App() {
 
   return (
     <div className="app-layout">
-      <Sidebar currentView={currentView} onNavigate={setCurrentView} />
+      <Sidebar currentView={currentView} onNavigate={handleNavigate} />
       <main className="main-content">
         {renderView()}
       </main>

@@ -68,6 +68,299 @@ function saveServices() {
   }
 }
 
+// ── Domain Registry ────────────────────────────────────────────
+// Domains map: name -> DomainRecord
+// Persisted to ~/.dweb/domains.json
+const DOMAINS_FILE = path.join(os.homedir(), ".dweb", "domains.json");
+const domainRegistry = new Map(); // name -> DomainRecord
+const domainCache = new Map();    // name -> { result, expiresAt }  (in-memory TTL cache)
+
+const DOMAIN_TIERS = {
+  free:     { label: "Free",     price: 0,    ttlDays: 90,  permanent: false, customDomain: false, ssl: false, description: "Basic .dweb domain with 90-day renewal" },
+  premium:  { label: "Premium",  price: 499,  ttlDays: 0,   permanent: true,  customDomain: false, ssl: false, description: "Permanent .dweb domain, never expires" },
+  business: { label: "Business", price: 1999, ttlDays: 0,   permanent: true,  customDomain: true,  ssl: true,  description: "Custom domain (bring your own) + SSL + analytics" },
+};
+
+function loadDomains() {
+  try {
+    if (!fs.existsSync(DOMAINS_FILE)) return 0;
+    const data = JSON.parse(fs.readFileSync(DOMAINS_FILE, "utf8"));
+    if (!Array.isArray(data)) return 0;
+    domainRegistry.clear();
+    for (const d of data) {
+      domainRegistry.set(d.name, d);
+      // Pre-warm cache for active domains
+      if (d.active) {
+        domainCache.set(d.name, { result: d, expiresAt: Date.now() + 300000 });
+      }
+    }
+    return domainRegistry.size;
+  } catch (e) {
+    console.error("  [domains] Failed to load domains:", e.message);
+    return 0;
+  }
+}
+
+function saveDomains() {
+  try {
+    const dir = path.dirname(DOMAINS_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const data = Array.from(domainRegistry.values());
+    fs.writeFileSync(DOMAINS_FILE, JSON.stringify(data, null, 2));
+  } catch (e) {
+    console.error("  [domains] Failed to save domains:", e.message);
+  }
+}
+
+function generateDomainKey() {
+  return "dweb_" + crypto.randomBytes(16).toString("hex");
+}
+
+function getDomainTTL(tier) {
+  const t = DOMAIN_TIERS[tier] || DOMAIN_TIERS.free;
+  if (t.permanent) return null; // never expires
+  return t.ttlDays * 86400000;
+}
+
+function resolveDomainFromRegistry(name) {
+  // Check in-memory cache first (5 min TTL)
+  const cached = domainCache.get(name);
+  if (cached && cached.expiresAt > Date.now()) return cached.result;
+
+  // Lookup from registry
+  const record = domainRegistry.get(name);
+  if (!record) return null;
+
+  // Check expiry
+  if (!record.tierInfo.permanent && record.expires_at && new Date(record.expires_at).getTime() < Date.now()) {
+    record.active = false;
+    saveDomains();
+    return null;
+  }
+
+  // Update cache
+  domainCache.set(name, { result: record, expiresAt: Date.now() + 300000 });
+  return record;
+}
+
+function invalidateDomainCache(name) {
+  domainCache.delete(name);
+}
+
+// ── Domain API Route Handler ───────────────────────────────────
+function handleDomainAPI(req, res, url, body) {
+  const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS", "Access-Control-Allow-Headers": "Content-Type" };
+
+  // ── POST /api/domain/register ──
+  if (url.pathname === "/api/domain/register" && req.method === "POST") {
+    const { name, tier } = body || {};
+    if (!name || !/^[a-z0-9-]{3,63}$/.test(name)) {
+      return jsonResponse(res, 400, { error: "Domain name must be 3-63 chars: lowercase, numbers, hyphens" });
+    }
+    if (tier && !DOMAIN_TIERS[tier]) {
+      return jsonResponse(res, 400, { error: "Invalid tier. Choose: free, premium, or business" });
+    }
+    const finalTier = tier || "free";
+    const tierInfo = DOMAIN_TIERS[finalTier];
+
+    if (domainRegistry.has(name)) {
+      return jsonResponse(res, 409, { error: "Domain already registered" });
+    }
+
+    const now = Date.now();
+    const record = {
+      name,
+      owner_key: generateDomainKey(),
+      address: null,   // set when bound to a service
+      tier: finalTier,
+      tierInfo,
+      service_name: null,
+      port: null,
+      custom_domain: null,
+      registered_at: new Date(now).toISOString(),
+      expires_at: tierInfo.permanent ? null : new Date(now + tierInfo.ttlDays * 86400000).toISOString(),
+      auto_renew: finalTier !== "free",
+      active: true,
+      paid_until: tierInfo.price > 0 ? new Date(now + 365 * 86400000).toISOString() : null,
+    };
+
+    domainRegistry.set(name, record);
+    saveDomains();
+    invalidateDomainCache(name);
+    console.log(`  [domains] Registered "${name}" (${finalTier})`);
+    return jsonResponse(res, 200, record);
+  }
+
+  // ── POST /api/domain/bind ──
+  if (url.pathname === "/api/domain/bind" && req.method === "POST") {
+    const { name, service_name, port, custom_domain } = body || {};
+    if (!name || !domainRegistry.has(name)) {
+      return jsonResponse(res, 404, { error: "Domain not found" });
+    }
+    if (!port) {
+      return jsonResponse(res, 400, { error: "Port is required" });
+    }
+
+    const record = domainRegistry.get(name);
+
+    // Custom domain only for Business tier
+    if (custom_domain && record.tier !== "business") {
+      return jsonResponse(res, 403, { error: "Custom domains require Business tier" });
+    }
+
+    // Check if port is in use by another domain
+    for (const [d, r] of domainRegistry) {
+      if (r.port === port && r.name !== name && r.active) {
+        return jsonResponse(res, 409, { error: `Port ${port} is already bound to domain "${d}"` });
+      }
+    }
+
+    record.service_name = service_name || null;
+    record.port = port;
+    record.address = port ? `${os.hostname()}:${port}` : null;
+    record.custom_domain = custom_domain || null;
+    record.active = true;
+
+    domainRegistry.set(name, record);
+    saveDomains();
+    invalidateDomainCache(name);
+    console.log(`  [domains] Bound "${name}" → ${service_name || "port " + port}`);
+    return jsonResponse(res, 200, record);
+  }
+
+  // ── POST /api/domain/unbind ──
+  if (url.pathname === "/api/domain/unbind" && req.method === "POST") {
+    const { name } = body || {};
+    if (!name || !domainRegistry.has(name)) {
+      return jsonResponse(res, 404, { error: "Domain not found" });
+    }
+    const record = domainRegistry.get(name);
+    record.service_name = null;
+    record.port = null;
+    record.address = null;
+    domainRegistry.set(name, record);
+    saveDomains();
+    invalidateDomainCache(name);
+    return jsonResponse(res, 200, record);
+  }
+
+  // ── GET /api/domain/resolve?name=xxx ──
+  if (url.pathname === "/api/domain/resolve" && req.method === "GET") {
+    const name = url.searchParams.get("name");
+    if (!name) return jsonResponse(res, 400, { error: "name query parameter required" });
+
+    const record = resolveDomainFromRegistry(name);
+    if (!record) {
+      return jsonResponse(res, 404, { error: "Domain not found or expired" });
+    }
+    return jsonResponse(res, 200, record);
+  }
+
+  // ── GET /api/domain/list ──
+  if (url.pathname === "/api/domain/list" && req.method === "GET") {
+    const list = Array.from(domainRegistry.values());
+    return jsonResponse(res, 200, list);
+  }
+
+  // ── POST /api/domain/renew ──
+  if (url.pathname === "/api/domain/renew" && req.method === "POST") {
+    const { name } = body || {};
+    if (!name || !domainRegistry.has(name)) {
+      return jsonResponse(res, 404, { error: "Domain not found" });
+    }
+    const record = domainRegistry.get(name);
+    const now = Date.now();
+    const tierInfo = DOMAIN_TIERS[record.tier] || DOMAIN_TIERS.free;
+
+    if (tierInfo.permanent) {
+      return jsonResponse(res, 200, { ...record, message: "Permanent domain — no renewal needed" });
+    }
+
+    record.expires_at = new Date(now + tierInfo.ttlDays * 86400000).toISOString();
+    record.active = true;
+    domainRegistry.set(name, record);
+    saveDomains();
+    invalidateDomainCache(name);
+    return jsonResponse(res, 200, record);
+  }
+
+  // ── POST /api/domain/upgrade ──
+  if (url.pathname === "/api/domain/upgrade" && req.method === "POST") {
+    const { name, new_tier } = body || {};
+    if (!name || !domainRegistry.has(name)) {
+      return jsonResponse(res, 404, { error: "Domain not found" });
+    }
+    if (!new_tier || !DOMAIN_TIERS[new_tier]) {
+      return jsonResponse(res, 400, { error: "Invalid tier" });
+    }
+    const record = domainRegistry.get(name);
+    const oldTier = record.tier;
+    const tierInfo = DOMAIN_TIERS[new_tier];
+
+    // If upgrading to a paid tier, simulate payment
+    if (tierInfo.price > 0) {
+      const { payment_method } = body || {};
+      if (!payment_method) {
+        return jsonResponse(res, 402, { error: "Payment required", tier: new_tier, amount: tierInfo.price, currency: "USD" });
+      }
+    }
+
+    record.tier = new_tier;
+    record.tierInfo = tierInfo;
+    if (tierInfo.permanent) {
+      record.expires_at = null;
+    }
+    if (tierInfo.price > 0) {
+      record.paid_until = new Date(Date.now() + 365 * 86400000).toISOString();
+    }
+    record.auto_renew = new_tier !== "free";
+    record.active = true;
+    domainRegistry.set(name, record);
+    saveDomains();
+    invalidateDomainCache(name);
+    console.log(`  [domains] Upgraded "${name}" from ${oldTier} → ${new_tier}`);
+    return jsonResponse(res, 200, record);
+  }
+
+  // ── GET /api/domain/pricing ──
+  if (url.pathname === "/api/domain/pricing" && req.method === "GET") {
+    return jsonResponse(res, 200, { tiers: DOMAIN_TIERS });
+  }
+
+  // ── DELETE /api/domain/remove ──
+  if (url.pathname === "/api/domain/remove" && req.method === "DELETE") {
+    const { name } = body || {};
+    if (!name || !domainRegistry.has(name)) {
+      return jsonResponse(res, 404, { error: "Domain not found" });
+    }
+    domainRegistry.delete(name);
+    saveDomains();
+    invalidateDomainCache(name);
+    return jsonResponse(res, 200, { ok: true, message: `Domain "${name}" removed` });
+  }
+
+  // ── GET /api/domain/services (list available services for binding) ──
+  if (url.pathname === "/api/domain/services" && req.method === "GET") {
+    const services = [];
+    for (const [name, svc] of runningServices) {
+      services.push({ name, port: svc.port, type: svc.type });
+    }
+    return jsonResponse(res, 200, services);
+  }
+
+  // ── GET /api/domain/cache/status ──
+  if (url.pathname === "/api/domain/cache/status" && req.method === "GET") {
+    return jsonResponse(res, 200, {
+      registrySize: domainRegistry.size,
+      cacheSize: domainCache.size,
+      cacheEntries: Array.from(domainCache.keys()),
+      tiers: DOMAIN_TIERS,
+    });
+  }
+
+  return null; // not a domain route
+}
+
 function restoreServices() {
   try {
     if (!fs.existsSync(SERVICES_FILE)) return 0;
@@ -137,8 +430,17 @@ function restoreServices() {
           svcReq.on("end", function() {
             try {
               var data = JSON.parse(body);
+              // mkdir support: { name: "foldername", dir: "sub/path" }
+              if (data.mkdir || (data.name && !data.file && data.content === undefined)) {
+                var folderName = data.name || "new-folder";
+                var targetFolder = data.dir ? path.resolve(baseDir, data.dir, folderName) : path.join(resolved, folderName);
+                if (!targetFolder.startsWith(path.resolve(baseDir))) { svcRes.writeHead(403); return svcRes.end(JSON.stringify({ error: "Forbidden" })); }
+                fs.mkdirSync(targetFolder, { recursive: true });
+                svcRes.writeHead(200, { ...cors, "Content-Type": "application/json" });
+                return svcRes.end(JSON.stringify({ ok: true, folder: folderName }));
+              }
               var fname = data.file || data.name || "untitled.txt";
-              var targetFile = _u.searchParams.get("dir") ? path.resolve(baseDir, _u.searchParams.get("dir"), fname) : path.resolve(baseDir, fname);
+              var targetFile = data.dir ? path.resolve(baseDir, data.dir, fname) : path.resolve(baseDir, fname);
               if (!targetFile.startsWith(path.resolve(baseDir))) { svcRes.writeHead(403); return svcRes.end(JSON.stringify({ error: "Forbidden" })); }
               fs.writeFileSync(targetFile, data.content || "");
               svcRes.writeHead(200, { ...cors, "Content-Type": "application/json" });
@@ -165,16 +467,27 @@ function restoreServices() {
               return;
             }
             var ip = path.join(resolved, "index.html");
-            if (fs.existsSync(ip)) { svcRes.writeHead(302, { ...cors, "Location": _u.pathname.replace(/\/?$/, "/") + "index.html" }); return svcRes.end(); }
+            if (fs.existsSync(ip) && entry.type !== "File Browser") { svcRes.writeHead(302, { ...cors, "Location": _u.pathname.replace(/\/?$/, "/") + "index.html" }); return svcRes.end(); }
             var fl = fs.readdirSync(resolved, { withFileTypes: true });
-            var h = "<!DOCTYPE html><html><head><meta charset=utf-8><title>" + entry.name + "</title><style>body{font-family:system-ui,sans-serif;background:#0f0f13;color:#e2e8f0;padding:20px}a{color:#3b82f6;text-decoration:none}td{padding:6px 12px}</style></head><body><h2>" + entry.name + "</h2><table>";
+            var isFB = entry.type === "File Browser";
+            var h = isFB ? '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+escHtml(entry.name)+' — File Browser</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,sans-serif;background:#0f0f13;color:#e2e8f0;min-height:100vh}.header{background:#1a1a2e;border-bottom:1px solid rgba(255,255,255,0.06);padding:12px 20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}.header h1{font-size:16px;font-weight:600;color:#22c55e}.header .info{font-size:11px;color:#6b7280}.toolbar{padding:10px 20px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}.toolbar button,.toolbar label{padding:6px 14px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.04);color:#e2e8f0;font-size:12px;cursor:pointer;transition:all 0.15s;font-family:system-ui,sans-serif}.toolbar button:hover,.toolbar label:hover{background:rgba(59,130,246,0.15);border-color:rgba(59,130,246,0.3)}.new-folder input{padding:5px 8px;border-radius:4px;border:1px solid rgba(255,255,255,0.1);background:rgba(0,0,0,0.3);color:#e2e8f0;font-size:12px;width:140px}table{width:100%;border-collapse:collapse}th{text-align:left;padding:8px 12px;font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid rgba(255,255,255,0.06)}td{padding:8px 12px;font-size:13px;border-bottom:1px solid rgba(255,255,255,0.03)}tr:hover td{background:rgba(59,130,246,0.04)}.icon{width:28px;font-size:16px;text-align:center}.name a{color:#e2e8f0;text-decoration:none;font-weight:500}.name a:hover{color:#3b82f6}.size{width:80px;color:#6b7280;font-size:12px;font-family:monospace}.date{width:160px;color:#6b7280;font-size:11px}.actions{width:60px;text-align:right}.dl-btn{background:none;border:none;cursor:pointer;font-size:14px;padding:2px 4px;border-radius:4px;opacity:0.4;transition:opacity 0.15s;font-family:system-ui,sans-serif}.dl-btn:hover{opacity:1;background:rgba(239,68,68,0.15)}.empty-state{padding:40px;text-align:center;color:#6b7280;font-size:14px}.upload-progress{font-size:11px;color:#22c55e;padding:4px 0;display:none}#file-input{display:none}.toast{position:fixed;bottom:20px;right:20px;padding:8px 16px;border-radius:6px;font-size:13px;z-index:999;transition:all 0.3s}.toast.success{background:rgba(34,197,94,0.15);border:1px solid rgba(34,197,94,0.3);color:#22c55e}.toast.error{background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.3);color:#ef4444}@media(max-width:600px){.header,.toolbar{padding:8px 12px}td,th{padding:6px 8px}.date{display:none}}</style></head><body><div class="header"><h1>📁 '+escHtml(entry.name)+'</h1><span class="info">'+escHtml(entry.dir||baseDir)+' · '+fl.length+' item(s)</span></div><div class="toolbar"><label for="file-input">📤 Upload Files</label><input type="file" id="file-input" multiple onchange="uploadFiles(this.files)"><button onclick="newFolder()">📁 New Folder</button><span class="new-folder" id="new-folder-input" style="display:none"><input type="text" id="folder-name" placeholder="folder name" onkeydown="if(event.key===\'Enter\')createFolder()"><button class="dl-btn" onclick="createFolder()" style="opacity:1">✓</button><button class="dl-btn" onclick="cancelNewFolder()" style="opacity:1;color:#ef4444">✕</button></span><span class="upload-progress" id="upload-progress"></span></div><div id="dropzone" style="min-height:200px">'+(fl.length===0?'<div class="empty-state">📭 This folder is empty<br><span style="font-size:12px">Upload files using the button above</span></div>':'<table><thead><tr><th></th><th>Name</th><th>Size</th><th>Modified</th><th></th></tr></thead><tbody>') : "<!DOCTYPE html><html><head><meta charset=utf-8><title>"+escHtml(entry.name)+"</title><style>body{font-family:system-ui,sans-serif;background:#0f0f13;color:#e2e8f0;padding:20px}a{color:#3b82f6;text-decoration:none}td{padding:6px 12px}</style></head><body><h2>"+escHtml(entry.name)+"</h2><table>";
             for (var fi = 0; fi < fl.length; fi++) {
               var fn = fl[fi].name;
               var icon = fl[fi].isDirectory() ? "\uD83D\uDCC1" : "\uD83D\uDCC4";
               var href = _u.pathname.replace(/\/?$/, "/") + encodeURIComponent(fn);
-              h += "<tr><td>" + icon + "</td><td><a href='" + href + "'>" + fn.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;") + "</a></td></tr>";
+              var s = null; try { s = fs.statSync(path.join(resolved, fn)); } catch(e){}
+              var sz = s ? formatBytes(s.size) : "—";
+              var mt = s ? s.mtime.toLocaleString() : "—";
+              if (isFB) {
+                h += "<tr><td class='icon'>"+icon+"</td><td class='name'><a href='"+href+"'>"+escHtml(fn)+"</a></td><td class='size'>"+sz+"</td><td class='date'>"+mt+"</td><td class='actions'>"+(fl[fi].isDirectory()?"<button class='dl-btn' onclick=\"if(prompt('Delete folder: "+escHtml(fn)+"?'))fetch('"+href+"',{method:'DELETE'}).then(()=>location.reload())\" title='Delete'>\uD83D\uDDD1</button>":"<button class='dl-btn' onclick=\"fetch('"+href+"',{method:'DELETE'}).then(()=>location.reload())\" title='Delete'>\uD83D\uDDD1</button>")+"</td></tr>";
+              } else {
+                h += "<tr><td>"+icon+"</td><td><a href='"+href+"'>"+escHtml(fn)+"</a></td></tr>";
+              }
             }
-            h += "</table></body></html>";
+            h += isFB ? "</tbody></table></div>" : "</table></body></html>";
+            if (isFB) {
+              h += '<script>var cp='+JSON.stringify(_u.pathname==="/"?"":_u.pathname)+';function uploadFiles(fs){if(!fs.length)return;var p=document.getElementById("upload-progress"),d=0;for(var f of fs){var fd=new FormData();fd.append("dir",cp);fd.append("file",f);p.style.display="inline";p.textContent="Uploading "+f.name+"...";fetch("",{method:"POST",body:fd}).then(r=>r.json()).then(()=>{d++;if(d===fs.length)location.reload()}).catch(e=>{p.textContent="Error: "+e.message})}}function newFolder(){document.getElementById("new-folder-input").style.display="inline";document.getElementById("folder-name").focus()}function cancelNewFolder(){document.getElementById("new-folder-input").style.display="none";document.getElementById("folder-name").value=""}function createFolder(){var n=document.getElementById("folder-name").value.trim();if(!n)return;fetch("",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:n,dir:cp})}).then(r=>r.json()).then(()=>location.reload()).catch(e=>alert(e.message))}var dz=document.getElementById("dropzone");dz.addEventListener("dragover",function(e){e.preventDefault();dz.style.outline="2px dashed #3b82f6"});dz.addEventListener("dragleave",function(){dz.style.outline=""});dz.addEventListener("drop",function(e){e.preventDefault();dz.style.outline="";uploadFiles(e.dataTransfer.files)});<\/script></body></html>';
+            }
             svcRes.writeHead(200, { ...cors, "Content-Type": "text/html; charset=utf-8" });
             svcRes.end(h);
             return;
@@ -2069,6 +2382,31 @@ if (window.name !== "dweb-browser") setTimeout(() => location.reload(), 30000);
       openai: !!process.env.OPENAI_API_KEY,
       anthropic: !!process.env.ANTHROPIC_API_KEY,
     });
+  }
+
+  // ── DOMAIN MANAGEMENT ────────────────────────────────────────
+  // All /api/domain/* routes
+  if (pathname.startsWith("/api/domain/")) {
+    // Parse body for POST/DELETE
+    if (req.method === "POST" || req.method === "DELETE") {
+      let body = "";
+      req.on("data", c => body += c);
+      req.on("end", () => {
+        let parsed = {};
+        try { if (body) parsed = JSON.parse(body); } catch {}
+        const result = handleDomainAPI(req, res, url, parsed);
+        if (result === null) {
+          jsonResponse(res, 404, { error: "Unknown domain API route" });
+        }
+      });
+      return;
+    }
+    // GET requests (no body)
+    const result = handleDomainAPI(req, res, url, {});
+    if (result === null) {
+      jsonResponse(res, 404, { error: "Unknown domain API route" });
+    }
+    return;
   }
 
   // ── Static files ────────────────────────────────────────────

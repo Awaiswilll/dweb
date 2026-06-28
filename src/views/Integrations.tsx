@@ -13,6 +13,8 @@ const DEFAULTS: IntegrationConfig[] = [
   { platform: "whatsapp",  label: "WhatsApp",   enabled: false, api_key: "", phone_number_id: "",             verified: false, lastTested: null, label_icon: "📱", color: "#25D366" },
   { platform: "linkedin",  label: "LinkedIn",   enabled: false, access_token: "", company_id: "",             verified: false, lastTested: null, label_icon: "💼", color: "#0A66C2" },
   { platform: "telegram",  label: "Telegram X", enabled: false, bot_token: "",                               verified: false, lastTested: null, label_icon: "✈️", color: "#26A5E4" },
+  { platform: "github",    label: "GitHub",     enabled: false, access_token: "", webhook_url: "",            verified: false, lastTested: null, label_icon: "🐙", color: "#2b3137" },
+  { platform: "gitlab",    label: "GitLab",     enabled: false, access_token: "", webhook_url: "",            verified: false, lastTested: null, label_icon: "🦊", color: "#FC6D26" },
 ];
 
 function validate(config: IntegrationConfig): { ok: boolean; msg: string } {
@@ -34,6 +36,12 @@ function validate(config: IntegrationConfig): { ok: boolean; msg: string } {
       if (!/^\d+:[-_a-zA-Z0-9]+$/.test(config.bot_token))
         return { ok: false, msg: "Invalid bot token format (expected: 123456:ABC-def)" };
       return { ok: true, msg: "Bot token format is valid" };
+    case "github":
+      if (!config.access_token) return { ok: false, msg: "Personal Access Token is required" };
+      return { ok: true, msg: "GitHub token looks valid" };
+    case "gitlab":
+      if (!config.access_token) return { ok: false, msg: "Personal Access Token is required" };
+      return { ok: true, msg: "GitLab token looks valid" };
   }
 }
 
