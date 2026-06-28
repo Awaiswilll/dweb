@@ -2384,6 +2384,142 @@ if (window.name !== "dweb-browser") setTimeout(() => location.reload(), 30000);
     });
   }
 
+  // ── OLLAMA MANAGEMENT ─────────────────────────────────────
+  const ollamaCp = require("child_process");
+  let ollamaProcess = null;
+  let ollamaInstallPid = null;
+
+  // GET /api/ollama/status
+  if (pathname === "/api/ollama/status" && req.method === "GET") {
+    let installed = false;
+    let running = false;
+    let version = null;
+    let models = [];
+
+    try {
+      const v = ollamaCp.execSync("ollama --version", { timeout: 5000, encoding: "utf8" });
+      installed = true;
+      version = v.replace("ollama version ", "").trim();
+    } catch {}
+
+    if (installed) {
+      try {
+        const listOut = ollamaCp.execSync("ollama list", { timeout: 10000, encoding: "utf8" });
+        running = true;
+        const lines = listOut.trim().split("\n");
+        for (let i = 1; i < lines.length; i++) {
+          const parts = lines[i].trim().split(/\s{2,}/);
+          if (parts.length >= 3) {
+            models.push({ name: parts[0], size: parts[1], modified: parts.slice(2).join(" ") });
+          }
+        }
+      } catch {
+        if (ollamaProcess && ollamaProcess.pid) {
+          try {
+            process.kill(ollamaProcess.pid, 0);
+            running = true;
+          } catch {
+            ollamaProcess = null;
+          }
+        }
+      }
+    }
+
+    return jsonResponse(res, 200, { installed, running, version, models, port: 11434 });
+  }
+
+  // POST /api/ollama/install
+  if (pathname === "/api/ollama/install" && req.method === "POST") {
+    const child = ollamaCp.spawn("sh", ["-c", "curl -fsSL https://ollama.com/install.sh | sh"], {
+      stdio: "ignore",
+      detached: true,
+    });
+    ollamaInstallPid = child.pid;
+    child.on("exit", () => {
+      ollamaInstallPid = null;
+      const start = ollamaCp.spawn("ollama", ["serve"], { stdio: "ignore", detached: true });
+      ollamaProcess = start;
+    });
+    child.on("error", () => { ollamaInstallPid = null; });
+    return jsonResponse(res, 200, { status: "installing", pid: child.pid });
+  }
+
+  // POST /api/ollama/start
+  if (pathname === "/api/ollama/start" && req.method === "POST") {
+    try {
+      const child = ollamaCp.spawn("ollama", ["serve"], {
+        stdio: "ignore",
+        detached: true,
+      });
+      ollamaProcess = child;
+      child.on("error", (err) => { console.error("  [ollama] Start error:", err.message); });
+      return jsonResponse(res, 200, { status: "started", pid: child.pid });
+    } catch (e) {
+      return jsonResponse(res, 500, { error: e.message });
+    }
+  }
+
+  // POST /api/ollama/stop
+  if (pathname === "/api/ollama/stop" && req.method === "POST") {
+    try {
+      ollamaCp.execSync("pkill ollama", { timeout: 5000 });
+    } catch {}
+    ollamaProcess = null;
+    return jsonResponse(res, 200, { status: "stopped" });
+  }
+
+  // POST /api/ollama/pull
+  if (pathname === "/api/ollama/pull" && req.method === "POST") {
+    let body = "";
+    req.on("data", c => body += c);
+    req.on("end", () => {
+      try {
+        const { model } = JSON.parse(body);
+        if (!model) {
+          return jsonResponse(res, 400, { error: "model name required" });
+        }
+        const child = ollamaCp.spawn("ollama", ["pull", model], {
+          stdio: "inherit",
+          detached: true,
+        });
+        return jsonResponse(res, 200, { status: "pulling", model, pid: child.pid });
+      } catch (e) {
+        return jsonResponse(res, 400, { error: e.message });
+      }
+    });
+    return;
+  }
+
+  // GET /api/ollama/models
+  if (pathname === "/api/ollama/models" && req.method === "GET") {
+    try {
+      const listOut = ollamaCp.execSync("ollama list", { timeout: 10000, encoding: "utf8" });
+      const lines = listOut.trim().split("\n");
+      const models = [];
+      for (let i = 1; i < lines.length; i++) {
+        const parts = lines[i].trim().split(/\s{2,}/);
+        if (parts.length >= 3) {
+          models.push({ name: parts[0], size: parts[1], modified: parts.slice(2).join(" ") });
+        }
+      }
+      return jsonResponse(res, 200, { models });
+    } catch (e) {
+      return jsonResponse(res, 200, { models: [] });
+    }
+  }
+
+  // DELETE /api/ollama/models/:name
+  const modelRemoveMatch = pathname.match(/^\/api\/ollama\/models\/(.+)$/);
+  if (modelRemoveMatch && req.method === "DELETE") {
+    const modelName = decodeURIComponent(modelRemoveMatch[1]);
+    try {
+      ollamaCp.execSync(`ollama rm ${modelName}`, { timeout: 30000, encoding: "utf8" });
+      return jsonResponse(res, 200, { status: "removed", model: modelName });
+    } catch (e) {
+      return jsonResponse(res, 500, { error: e.message });
+    }
+  }
+
   // ── DOMAIN MANAGEMENT ────────────────────────────────────────
   // All /api/domain/* routes
   if (pathname.startsWith("/api/domain/")) {
