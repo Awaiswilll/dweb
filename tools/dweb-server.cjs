@@ -2384,6 +2384,144 @@ if (window.name !== "dweb-browser") setTimeout(() => location.reload(), 30000);
     });
   }
 
+  // ── OPENCODE TERMINAL ─────────────────────────────────────
+  const opencodeSessions = new Map();
+
+  // GET /api/opencode/status
+  if (pathname === "/api/opencode/status" && req.method === "GET") {
+    let installed = false;
+    let binPath = null;
+    let version = null;
+    try {
+      const which = require("child_process").execSync("command -v opencode", { timeout: 5000, encoding: "utf8" }).trim();
+      if (which) {
+        installed = true;
+        binPath = which;
+        try {
+          const v = require("child_process").execSync("opencode --version", { timeout: 5000, encoding: "utf8" }).trim();
+          version = v;
+        } catch {}
+      }
+    } catch {}
+    return jsonResponse(res, 200, { installed, path: binPath, version });
+  }
+
+  // POST /api/opencode/install
+  if (pathname === "/api/opencode/install" && req.method === "POST") {
+    const child = require("child_process").spawn("npm", ["install", "-g", "@opencode/cli"], {
+      stdio: "ignore",
+      detached: true,
+    });
+    return jsonResponse(res, 200, { status: "installing", pid: child.pid });
+  }
+
+  // POST /api/opencode/session
+  if (pathname === "/api/opencode/session" && req.method === "POST") {
+    let body = "";
+    req.on("data", c => body += c);
+    req.on("end", () => {
+      try {
+        const { directory, prompt } = JSON.parse(body);
+        if (!directory) {
+          return jsonResponse(res, 400, { error: "directory is required" });
+        }
+        try {
+          fs.mkdirSync(directory, { recursive: true });
+        } catch (e) {
+          return jsonResponse(res, 500, { error: "Failed to create directory: " + e.message });
+        }
+        const sessionId = crypto.randomUUID();
+        const args = prompt ? ["--prompt", prompt, directory] : [directory];
+        const child = require("child_process").spawn("opencode", args, {
+          cwd: directory,
+          stdio: ["pipe", "pipe", "pipe"],
+          detached: true,
+        });
+        const session = {
+          pid: child.pid,
+          directory,
+          startedAt: new Date().toISOString(),
+          status: "started",
+          process: child,
+          stdout: "",
+          stderr: "",
+        };
+        child.stdout.on("data", (data) => {
+          session.stdout += data.toString();
+          if (session.stdout.length > 102400) session.stdout = session.stdout.slice(-102400);
+        });
+        child.stderr.on("data", (data) => {
+          session.stderr += data.toString();
+          if (session.stderr.length > 102400) session.stderr = session.stderr.slice(-102400);
+        });
+        child.on("exit", () => { session.status = "exited"; });
+        opencodeSessions.set(sessionId, session);
+        return jsonResponse(res, 200, { session_id: sessionId, pid: child.pid, directory, status: "started" });
+      } catch (e) {
+        return jsonResponse(res, 400, { error: e.message });
+      }
+    });
+    return;
+  }
+
+  // GET /api/opencode/sessions
+  if (pathname === "/api/opencode/sessions" && req.method === "GET") {
+    const sessions = [];
+    for (const [id, s] of opencodeSessions) {
+      sessions.push({
+        session_id: id,
+        pid: s.pid,
+        directory: s.directory,
+        started_at: s.startedAt,
+        status: s.status,
+      });
+    }
+    return jsonResponse(res, 200, { sessions });
+  }
+
+  // POST /api/opencode/session/:id/stop
+  const sessionStopMatch = pathname.match(/^\/api\/opencode\/session\/([^/]+)\/stop$/);
+  if (sessionStopMatch && req.method === "POST") {
+    const sessionId = sessionStopMatch[1];
+    const session = opencodeSessions.get(sessionId);
+    if (!session) {
+      return jsonResponse(res, 404, { error: "Session not found" });
+    }
+    try {
+      process.kill(session.pid);
+    } catch {}
+    session.status = "stopped";
+    return jsonResponse(res, 200, { status: "stopped", session_id: sessionId });
+  }
+
+  // POST /api/opencode/session/:id/input
+  const sessionInputMatch = pathname.match(/^\/api\/opencode\/session\/([^/]+)\/input$/);
+  if (sessionInputMatch && req.method === "POST") {
+    const sessionId = sessionInputMatch[1];
+    const session = opencodeSessions.get(sessionId);
+    if (!session) {
+      return jsonResponse(res, 404, { error: "Session not found" });
+    }
+    let body = "";
+    req.on("data", c => body += c);
+    req.on("end", () => {
+      try {
+        const { input } = JSON.parse(body);
+        if (input === undefined) {
+          return jsonResponse(res, 400, { error: "input is required" });
+        }
+        if (session.process && session.process.stdin && session.process.stdin.writable) {
+          session.process.stdin.write(input + "\n");
+          return jsonResponse(res, 200, { status: "sent" });
+        }
+        return jsonResponse(res, 400, { error: "Session process is not running or stdin is not available" });
+      } catch (e) {
+        return jsonResponse(res, 400, { error: e.message });
+      }
+    });
+    return;
+  }
+
   // ── OLLAMA MANAGEMENT ─────────────────────────────────────
   const ollamaCp = require("child_process");
   let ollamaProcess = null;
