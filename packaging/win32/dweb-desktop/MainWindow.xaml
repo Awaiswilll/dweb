@@ -1,0 +1,82 @@
+<Window
+    x:Class="DwebDesktop.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+    mc:Ignorable="d"
+    Title="dweb Desktop"
+    Width="1280"
+    Height="800"
+    WindowStartupLocation="CenterScreen"
+    Closing="OnClosing">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- Loading overlay shown while WebView2 initializes -->
+        <Border
+            x:Name="LoadingOverlay"
+            Grid.RowSpan="2"
+            Background="#F5F5F5"
+            Visibility="Visible">
+            <StackPanel
+                VerticalAlignment="Center"
+                HorizontalAlignment="Center">
+                <TextBlock
+                    x:Name="LoadingText"
+                    Text="Starting dweb..."
+                    FontSize="18"
+                    FontWeight="SemiBold"
+                    Foreground="#333333"
+                    HorizontalAlignment="Center"
+                    Margin="0,0,0,12" />
+                <ProgressBar
+                    IsIndeterminate="True"
+                    Width="200"
+                    Height="4"
+                    Foreground="#0078D4"
+                    Background="#E0E0E0" />
+                <TextBlock
+                    Text="Launching WebView2 environment"
+                    FontSize="12"
+                    Foreground="#888888"
+                    HorizontalAlignment="Center"
+                    Margin="0,12,0,0" />
+            </StackPanel>
+        </Border>
+
+        <!-- WebView2 fills the window -->
+        <wv2:WebView2
+            x:Name="DwebWebView"
+            Grid.Row="1"
+            Source="http://localhost:49737"
+            CoreWebView2InitializationCompleted="OnWebView2Initialized"
+            NavigationStarting="OnNavigationStarting"
+            NavigationCompleted="OnNavigationCompleted"
+            SourceChanged="OnSourceChanged"
+            KeyDown="OnWebViewKeyDown" />
+
+        <!-- Status bar -->
+        <StatusBar
+            x:Name="StatusBarPanel"
+            Grid.Row="2"
+            Visibility="Collapsed"
+            Background="#F0F0F0"
+            BorderBrush="#D0D0D0"
+            BorderThickness="0,1,0,0">
+            <StatusBarItem>
+                <TextBlock x:Name="StatusText" FontSize="11" Foreground="#666666" />
+            </StatusBarItem>
+        </StatusBar>
+    </Grid>
+
+    <Window.InputBindings>
+        <KeyBinding Key="R" Modifiers="Ctrl" Command="{Binding ReloadCommand}" />
+        <KeyBinding Key="F5" Command="{Binding ReloadCommand}" />
+        <KeyBinding Key="F12" Command="{Binding ToggleDevToolsCommand}" />
+    </Window.InputBindings>
+</Window>

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<DistroConfiguration>
+    <Name>dweb</Name>
+    <Version>0.1.0</Version>
+    <DefaultUid>1000</DefaultUid>
+    <DefaultUser>dweb</DefaultUser>
+    <AutoStart>true</AutoStart>
+    <Flags>
+        <Flag>Default</Flag>
+    </Flags>
+</DistroConfiguration>
