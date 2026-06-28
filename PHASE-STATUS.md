@@ -1,6 +1,6 @@
 # dweb OS — Phase Status & Next Actions
 
-**Last Updated:** June 28, 2026
+**Last Updated:** June 28, 2026 (Final)
 **Branch:** `main` — [github.com/Awaiswilll/dweb](https://github.com/Awaiswilll/dweb)
 
 ---
@@ -129,7 +129,7 @@ npx tauri build
 
 ---
 
-## Open Source Launch Checklist (Phase 6) — ✅ COMPLETE
+## Open Source Launch Checklist (Phase 6) — ✅ ALL FILES CREATED
 
 - [x] Create GitHub issue templates (bug report, feature request, good first issue, security)
 - [x] Set up PULL_REQUEST_TEMPLATE.md with security checklist
@@ -138,12 +138,17 @@ npx tauri build
 - [x] Update `CONTRIBUTING.md` with full open source guide
 - [x] Update `LICENSE` with proper copyright (Dr Awais Javed / Cyberion) and trademark policy
 - [x] Add licensing summary table for all components
-- [ ] Set up GitHub Project board for roadmap tracking (manual step)
-- [ ] Add `good-first-issue` labels to 3-5 beginner-friendly tasks (manual step)
-- [ ] Set up GitHub Discussions for community (manual step)
-- [ ] Write announcement post (Hacker News, Reddit r/selfhosted, dev.to)
-- [ ] Create first release tag (`v0.1.0`)
-- [ ] Add release notes with changelog
+- [x] Create `ROADMAP.md` with v0.1.0-v0.5.0 development plan
+- [x] Create `PRIVACY-POLICY.md` for Microsoft Store requirement
+- [x] Create `ANNOUNCEMENTS.md` with 6 ready-to-publish posts (HN, Reddit x3, dev.to, X)
+- [x] Create `GITHUB-ISSUES-TO-CREATE.md` with 8 ready-to-create issues
+- [x] Create git tag `v0.1.0` with release notes
+- [x] Push tag to GitHub (`git push origin v0.1.0`)
+- [ ] Create GitHub Project board for roadmap tracking (manual — GitHub UI)
+- [ ] Create 8 GitHub issues from `GITHUB-ISSUES-TO-CREATE.md` (manual — GitHub UI)
+- [ ] Enable GitHub Discussions (manual — GitHub repo Settings)
+- [ ] Publish announcement posts from `ANNOUNCEMENTS.md` (manual — copy-paste)
+- [ ] Create GitHub Release from tag v0.1.0 (manual — GitHub UI)
 
 ---
 
