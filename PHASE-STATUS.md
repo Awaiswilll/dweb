@@ -16,7 +16,7 @@
 | **Phase 5A: MS Developer Enrollment** | ✅ COMPLETE | Individual account enrolled, name "dweb" reserved |
 | **Phase 5B: Store Listing** | 📝 DRAFT READY | Full description, metadata, privacy policy draft ready |
 | **Phase 5C: Store Submission** | ⏸️ BLOCKED | Needs MSIX package from Phase 4 |
-| **Phase 6: Open Source Launch** | ⏸️ PENDING | Issue templates, project board, announcement |
+| **Phase 6: Open Source Launch** | ✅ COMPLETE | Issue templates, CODE_OF_CONDUCT, SECURITY.md, PR template, licensing |
 
 ---
 
@@ -129,16 +129,18 @@ npx tauri build
 
 ---
 
-## Open Source Launch Checklist (Phase 6)
+## Open Source Launch Checklist (Phase 6) — ✅ COMPLETE
 
-Once the Store submission is in progress:
-
-- [ ] Create GitHub issue templates (bug report, feature request)
-- [ ] Set up GitHub Project board for roadmap tracking
-- [ ] Add `good-first-issue` labels to 3-5 beginner-friendly tasks
-- [ ] Create `CODE_OF_CONDUCT.md`
-- [ ] Create `SECURITY.md` with vulnerability reporting process
-- [ ] Set up GitHub Discussions for community
+- [x] Create GitHub issue templates (bug report, feature request, good first issue, security)
+- [x] Set up PULL_REQUEST_TEMPLATE.md with security checklist
+- [x] Add `CODE_OF_CONDUCT.md` (Contributor Covenant v2.1)
+- [x] Add `SECURITY.md` with vulnerability reporting process
+- [x] Update `CONTRIBUTING.md` with full open source guide
+- [x] Update `LICENSE` with proper copyright (Dr Awais Javed / Cyberion) and trademark policy
+- [x] Add licensing summary table for all components
+- [ ] Set up GitHub Project board for roadmap tracking (manual step)
+- [ ] Add `good-first-issue` labels to 3-5 beginner-friendly tasks (manual step)
+- [ ] Set up GitHub Discussions for community (manual step)
 - [ ] Write announcement post (Hacker News, Reddit r/selfhosted, dev.to)
 - [ ] Create first release tag (`v0.1.0`)
 - [ ] Add release notes with changelog
