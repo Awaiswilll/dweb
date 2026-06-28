@@ -125,7 +125,7 @@ export default function Settings() {
       }
     }, [expanded]);
 
-    const providerTypes = ["ollama", "openai", "anthropic", "google", "together", "groq", "openrouter"];
+    const providerTypes = ["ollama", "openai", "anthropic", "google", "together", "groq", "openrouter", "huggingface", "mistral", "deepseek", "fireworks", "cohere", "nvidia", "cerebras", "xai", "hyperbolic"];
 
     return (
       <div className="settings-section">

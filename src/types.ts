@@ -139,6 +139,15 @@ export const AI_PROVIDER_LABELS: Record<string, string> = {
   together: 'Together AI',
   groq: 'Groq',
   openrouter: 'OpenRouter',
+  huggingface: 'Hugging Face',
+  mistral: 'Mistral AI',
+  deepseek: 'DeepSeek',
+  fireworks: 'Fireworks AI',
+  cohere: 'Cohere',
+  nvidia: 'NVIDIA NIM',
+  cerebras: 'Cerebras',
+  xai: 'xAI Grok',
+  hyperbolic: 'Hyperbolic',
 };
 
 export const AI_PROVIDER_COLORS: Record<string, string> = {
@@ -149,6 +158,15 @@ export const AI_PROVIDER_COLORS: Record<string, string> = {
   together: '#4A90D9',
   groq: '#F97316',
   openrouter: '#8B5CF6',
+  huggingface: '#FFD21E',
+  mistral: '#FF6633',
+  deepseek: '#4D6BFE',
+  fireworks: '#FF4444',
+  cohere: '#395999',
+  nvidia: '#76B900',
+  cerebras: '#2D9CDB',
+  xai: '#1DA1F2',
+  hyperbolic: '#A855F7',
 };
 
 export const AI_PROVIDER_ICONS: Record<string, string> = {
@@ -159,6 +177,15 @@ export const AI_PROVIDER_ICONS: Record<string, string> = {
   together: '🤝',
   groq: '⚡',
   openrouter: '🔀',
+  huggingface: '🤗',
+  mistral: '🌬️',
+  deepseek: '🔍',
+  fireworks: '🎆',
+  cohere: '🧠',
+  nvidia: '💚',
+  cerebras: '🧬',
+  xai: '✖️',
+  hyperbolic: '🌀',
 };
 
 /* ─── Version Control / Repo Types ─────────────────────────── */
