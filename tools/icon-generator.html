@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>dweb OS — Microsoft Store Icon Generator</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #0a0a0a;
+    color: #e0e0e0;
+    padding: 40px 20px;
+  }
+  h1 {
+    text-align: center;
+    font-size: 28px;
+    margin-bottom: 8px;
+    background: linear-gradient(135deg, #7C3AED, #4285F4, #22c55e);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .subtitle {
+    text-align: center;
+    color: #888;
+    margin-bottom: 40px;
+    font-size: 14px;
+  }
+  .icon-preview {
+    display: flex;
+    justify-content: center;
+    gap: 40px;
+    margin-bottom: 50px;
+    flex-wrap: wrap;
+  }
+  .preview-item {
+    text-align: center;
+  }
+  .preview-item canvas {
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(124, 58, 237, 0.3);
+  }
+  .preview-item span {
+    display: block;
+    margin-top: 8px;
+    font-size: 12px;
+    color: #888;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 16px;
+    max-width: 1200px;
+    margin: 0 auto 40px;
+  }
+  .card {
+    background: #1a1a1a;
+    border: 1px solid #333;
+    border-radius: 12px;
+    padding: 20px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    transition: border-color 0.2s;
+  }
+  .card:hover { border-color: #7C3AED; }
+  .card canvas {
+    border-radius: 8px;
+    flex-shrink: 0;
+  }
+  .card-info { flex: 1; }
+  .card-info h3 { font-size: 14px; margin-bottom: 4px; }
+  .card-info p { font-size: 12px; color: #888; margin-bottom: 12px; }
+  .btn {
+    display: inline-block;
+    padding: 8px 16px;
+    background: #7C3AED;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    text-decoration: none;
+    transition: background 0.2s;
+  }
+  .btn:hover { background: #6D28D9; }
+  .btn-all {
+    display: block;
+    width: fit-content;
+    margin: 0 auto 40px;
+    padding: 14px 32px;
+    background: linear-gradient(135deg, #7C3AED, #4285F4);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .btn-all:hover { opacity: 0.9; }
+  .instructions {
+    max-width: 800px;
+    margin: 0 auto;
+    background: #1a1a1a;
+    border: 1px solid #333;
+    border-radius: 12px;
+    padding: 24px;
+  }
+  .instructions h2 { font-size: 18px; margin-bottom: 16px; }
+  .instructions ol { padding-left: 20px; }
+  .instructions li { margin-bottom: 8px; font-size: 14px; color: #ccc; }
+  .instructions code {
+    background: #2a2a2a;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 13px;
+    color: #7C3AED;
+  }
+</style>
+</head>
+<body>
+
+<h1>dweb OS — Microsoft Store Icon Generator</h1>
+<p class="subtitle">All required icon sizes generated from a single SVG design</p>
+
+<!-- Large Preview -->
+<div class="icon-preview">
+  <div class="preview-item">
+    <canvas id="preview-480" width="480" height="480"></canvas>
+    <span>480×480 (Store Logo)</span>
+  </div>
+  <div class="preview-item">
+    <canvas id="preview-150" width="150" height="150"></canvas>
+    <span>150×150 (Square150)</span>
+  </div>
+  <div class="preview-item">
+    <canvas id="preview-50" width="50" height="50"></canvas>
+    <span>50×50 (Small Logo)</span>
+  </div>
+</div>
+
+<button class="btn-all" onclick="downloadAll()">⬇ Download All Icons</button>
+
+<!-- Icon Grid -->
+<div class="grid" id="icon-grid"></div>
+
+<!-- Instructions -->
+<div class="instructions">
+  <h2>📋 How to Use These Icons for Microsoft Store</h2>
+  <ol>
+    <li>Click <strong>"Download All Icons"</strong> above to save all PNG files</li>
+    <li>Go to <a href="https://aka.ms/submitwindowsapp" style="color:#7C3AED">Partner Center</a> → Select your "dweb" app</li>
+    <li>Go to <strong>App icons</strong> section in the store listing</li>
+    <li>Upload each icon to its corresponding slot:
+      <ul style="margin-top:8px; padding-left:20px;">
+        <li><code>StoreLogo.png</code> → 50×50</li>
+        <li><code>Square44x44Logo.png</code> → 44×44</li>
+        <li><code>Square71x71Logo.png</code> → 71×71</li>
+        <li><code>Square150x150Logo.png</code> → 150×150</li>
+        <li><code>Wide310x150Logo.png</code> → 310×150</li>
+        <li><code>Square310x310Logo.png</code> → 310×310</li>
+        <li><code>LargeTile.png</code> → 284×284</li>
+        <li><code>SplashScreen.png</code> → 620×300</li>
+      </ul>
+    </li>
+    <li>For <strong>Tauri app icons</strong>, replace files in <code>src-tauri/icons/</code> with the generated sizes</li>
+  </ol>
+</div>
+
+<script>
+// ─── Icon Design Configuration ──────────────────────────────────────
+const COLORS = {
+  bg: '#0F0F23',
+  bgGradient: '#1a1a3e',
+  primary: '#7C3AED',
+  secondary: '#4285F4',
+  accent: '#22c55e',
+  text: '#ffffff',
+  node: '#7C3AED',
+  nodeGlow: 'rgba(124, 58, 237, 0.4)',
+  line: 'rgba(124, 58, 237, 0.6)',
+};
+
+// ─── Draw dweb OS Icon on Canvas ────────────────────────────────────
+function drawIcon(canvas, size) {
+  const ctx = canvas.getContext('2d');
+  const s = size;
+  const cx = s / 2;
+  const cy = s / 2;
+
+  // Background gradient
+  const bgGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, s * 0.7);
+  bgGrad.addColorStop(0, COLORS.bgGradient);
+  bgGrad.addColorStop(1, COLORS.bg);
+  ctx.fillStyle = bgGrad;
+
+  // Rounded rect background
+  const r = s * 0.15;
+  ctx.beginPath();
+  ctx.moveTo(r, 0);
+  ctx.lineTo(s - r, 0);
+  ctx.quadraticCurveTo(s, 0, s, r);
+  ctx.lineTo(s, s - r);
+  ctx.quadraticCurveTo(s, s, s - r, s);
+  ctx.lineTo(r, s);
+  ctx.quadraticCurveTo(0, s, 0, s - r);
+  ctx.lineTo(0, r);
+  ctx.quadraticCurveTo(0, 0, r, 0);
+  ctx.closePath();
+  ctx.fill();
+
+  // Subtle border
+  ctx.strokeStyle = 'rgba(124, 58, 237, 0.3)';
+  ctx.lineWidth = Math.max(1, s * 0.005);
+  ctx.stroke();
+
+  // ─── Network Node Design ──────────────────────────────────────────
+  const nodeRadius = s * 0.06;
+  const centerRadius = s * 0.1;
+
+  // Node positions (hexagonal pattern)
+  const nodes = [
+    { x: cx, y: cy - s * 0.22 },       // top
+    { x: cx + s * 0.19, y: cy - s * 0.11 }, // top-right
+    { x: cx + s * 0.19, y: cy + s * 0.11 }, // bottom-right
+    { x: cx, y: cy + s * 0.22 },       // bottom
+    { x: cx - s * 0.19, y: cy + s * 0.11 }, // bottom-left
+    { x: cx - s * 0.19, y: cy - s * 0.11 }, // top-left
+  ];
+
+  // Draw connection lines
+  ctx.strokeStyle = COLORS.line;
+  ctx.lineWidth = Math.max(1, s * 0.008);
+  ctx.lineCap = 'round';
+
+  // Connect all nodes to center
+  nodes.forEach(node => {
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(node.x, node.y);
+    ctx.stroke();
+  });
+
+  // Connect adjacent nodes (hexagon edges)
+  for (let i = 0; i < nodes.length; i++) {
+    const next = (i + 1) % nodes.length;
+    ctx.beginPath();
+    ctx.moveTo(nodes[i].x, nodes[i].y);
+    ctx.lineTo(nodes[next].x, nodes[next].y);
+    ctx.stroke();
+  }
+
+  // Draw outer nodes
+  nodes.forEach(node => {
+    // Glow
+    ctx.beginPath();
+    ctx.arc(node.x, node.y, nodeRadius * 2, 0, Math.PI * 2);
+    ctx.fillStyle = COLORS.nodeGlow;
+    ctx.fill();
+
+    // Node
+    ctx.beginPath();
+    ctx.arc(node.x, node.y, nodeRadius, 0, Math.PI * 2);
+    ctx.fillStyle = COLORS.node;
+    ctx.fill();
+
+    // Inner highlight
+    ctx.beginPath();
+    ctx.arc(node.x - nodeRadius * 0.2, node.y - nodeRadius * 0.2, nodeRadius * 0.4, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+    ctx.fill();
+  });
+
+  // Center node (larger, with "d")
+  // Glow
+  ctx.beginPath();
+  ctx.arc(cx, cy, centerRadius * 2.5, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(124, 58, 237, 0.2)';
+  ctx.fill();
+
+  // Center circle
+  ctx.beginPath();
+  ctx.arc(cx, cy, centerRadius, 0, Math.PI * 2);
+  const centerGrad = ctx.createRadialGradient(cx - centerRadius * 0.3, cy - centerRadius * 0.3, 0, cx, cy, centerRadius);
+  centerGrad.addColorStop(0, '#9333EA');
+  centerGrad.addColorStop(1, '#7C3AED');
+  ctx.fillStyle = centerGrad;
+  ctx.fill();
+
+  // "d" letter in center
+  const fontSize = centerRadius * 1.2;
+  ctx.font = `bold ${fontSize}px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText('d', cx, cy + fontSize * 0.05);
+
+  // ─── "web" text below ─────────────────────────────────────────────
+  if (size >= 100) {
+    const webFontSize = s * 0.12;
+    ctx.font = `600 ${webFontSize}px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    // "web" with gradient
+    const textGrad = ctx.createLinearGradient(cx - s * 0.15, cy + s * 0.35, cx + s * 0.15, cy + s * 0.35);
+    textGrad.addColorStop(0, COLORS.secondary);
+    textGrad.addColorStop(1, COLORS.accent);
+    ctx.fillStyle = textGrad;
+    ctx.fillText('web', cx, cy + s * 0.35);
+  }
+}
+
+// ─── Icon Definitions ───────────────────────────────────────────────
+const ICONS = [
+  { name: 'StoreLogo', size: 50, label: '50×50', desc: 'Microsoft Store listing icon' },
+  { name: 'Square44x44Logo', size: 44, label: '44×44', desc: 'Taskbar / Start menu' },
+  { name: 'Square71x71Logo', size: 71, label: '71×71', desc: 'Small tile' },
+  { name: 'Square150x150Logo', size: 150, label: '150×150', desc: 'Medium tile (default)' },
+  { name: 'Wide310x150Logo', size: 310, label: '310×150', desc: 'Wide tile (rectangular)', wide: true },
+  { name: 'Square310x310Logo', size: 310, label: '310×310', desc: 'Large tile' },
+  { name: 'LargeTile', size: 284, label: '284×284', desc: 'Extra large tile' },
+  { name: 'SplashScreen', size: 620, label: '620×300', desc: 'Splash screen (rectangular)', wide: true },
+  { name: 'favicon', size: 32, label: '32×32', desc: 'Browser favicon' },
+  { name: 'apple-touch-icon', size: 180, label: '180×180', desc: 'iOS home screen' },
+  { name: 'android-chrome-192', size: 192, label: '192×192', desc: 'Android Chrome' },
+  { name: 'android-chrome-512', size: 512, label: '512×512', desc: 'Android Chrome large' },
+];
+
+// ─── Generate All Icons ─────────────────────────────────────────────
+const grid = document.getElementById('icon-grid');
+
+ICONS.forEach(icon => {
+  const canvas = document.createElement('canvas');
+  canvas.width = icon.wide ? icon.size : icon.size;
+  canvas.height = icon.wide ? Math.round(icon.size * 0.48) : icon.size;
+  canvas.id = `icon-${icon.name}`;
+
+  // For wide icons, we need to adjust the drawing
+  drawIcon(canvas, Math.min(canvas.width, canvas.height));
+
+  // Card
+  const card = document.createElement('div');
+  card.className = 'card';
+
+  const previewCanvas = document.createElement('canvas');
+  previewCanvas.width = Math.min(80, icon.size);
+  previewCanvas.height = icon.wide ? Math.round(previewCanvas.width * 0.48) : Math.min(80, icon.size);
+  previewCanvas.style.width = previewCanvas.width + 'px';
+  previewCanvas.style.height = previewCanvas.height + 'px';
+  drawIcon(previewCanvas, Math.min(previewCanvas.width, previewCanvas.height));
+
+  const info = document.createElement('div');
+  info.className = 'card-info';
+  info.innerHTML = `
+    <h3>${icon.name}.png</h3>
+    <p>${icon.label} — ${icon.desc}</p>
+  `;
+
+  const btn = document.createElement('a');
+  btn.className = 'btn';
+  btn.textContent = '⬇ Download';
+  btn.href = canvas.toDataURL('image/png');
+  btn.download = `${icon.name}.png`;
+
+  info.appendChild(btn);
+  card.appendChild(previewCanvas);
+  card.appendChild(info);
+  grid.appendChild(card);
+});
+
+// ─── Preview Updates ────────────────────────────────────────────────
+drawIcon(document.getElementById('preview-480'), 480);
+drawIcon(document.getElementById('preview-150'), 150);
+drawIcon(document.getElementById('preview-50'), 50);
+
+// ─── Download All ───────────────────────────────────────────────────
+function downloadAll() {
+  ICONS.forEach(icon => {
+    const canvas = document.getElementById(`icon-${icon.name}`);
+    if (!canvas) return;
+    const link = document.createElement('a');
+    link.download = `${icon.name}.png`;
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+  });
+  alert(`Downloading ${ICONS.length} icons...\n\nIf your browser blocks multiple downloads, right-click each icon and "Save image as..."`);
+}
+</script>
+</body>
+</html>
