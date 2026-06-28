@@ -58,12 +58,12 @@ foreach ($name in $prereqs.Keys) {
     try {
         $version = & $prereqs[$name]
         if ($version) {
-            Write-Success "$name: $version"
+            Write-Success "${name}: ${version}"
         } else {
-            Write-Error2 "$name: NOT FOUND"
+            Write-Error2 "${name}: NOT FOUND"
         }
     } catch {
-        Write-Error2 "$name: NOT FOUND"
+        Write-Error2 "${name}: NOT FOUND"
     }
 }
 
@@ -202,7 +202,7 @@ Write-Host "     Run $OutputDir\dweb_x64-setup.exe`n" -ForegroundColor Gray
 
 Write-Host "  3. Submit to Microsoft Store:" -ForegroundColor Yellow
 Write-Host "     Go to https://aka.ms/submitwindowsapp" -ForegroundColor Gray
-Write-Host "     Select 'dweb' → Upload $OutputDir\dweb.msix`n" -ForegroundColor Gray
+Write-Host "     Select 'dweb' -> Upload ${OutputDir}\dweb.msix`n" -ForegroundColor Gray
 
 Write-Host "  4. Push Docker Image:" -ForegroundColor Yellow
 Write-Host "     docker login && docker push dweb/dweb:latest`n" -ForegroundColor Gray
