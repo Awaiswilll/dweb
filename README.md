@@ -12,6 +12,9 @@ dweb OS is a **minimalist Linux-based operating system** designed for peer-to-pe
 [![Rust](https://img.shields.io/badge/rust-tauri%20v2-dea584)]()
 [![AI Models](https://img.shields.io/badge/AI-15%2B%20providers%20%7C%20100%2B%20free%20models-7C3AED)]()
 [![Microsoft Store](https://img.shields.io/badge/Microsoft%20Store-Name%20Reserved-0078D4)]()
+[![GitHub Release](https://img.shields.io/github/v/release/Awaiswilll/dweb?include_prereleases&label=release)]()
+[![GitHub Issues](https://img.shields.io/github/issues/Awaiswilll/dweb)]()
+[![GitHub Discussions](https://img.shields.io/github/discussions/Awaiswilll/dweb)]()
 
 ---
 
@@ -519,7 +522,17 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
 
 ### Good First Issues
 
-Look for issues labeled `good-first-issue` on our [GitHub Issues](https://github.com/Awaiswilll/dweb/issues) page.
+Look for issues labeled `good-first-issue` on our [GitHub Issues](https://github.com/Awaiswilll/dweb/issues) page. We currently have **5 good-first-issue** tasks ready for community contributions:
+
+- [Theme toggle](https://github.com/Awaiswilll/dweb/issues/1) — Add dark/light mode to Settings
+- [Mobile responsive design](https://github.com/Awaiswilll/dweb/issues/2) — Make dashboard work on phones
+- [Service health monitoring](https://github.com/Awaiswilll/dweb/issues/3) — Health indicators on Dashboard
+- [P2P status indicator](https://github.com/Awaiswilll/dweb/issues/4) — Peer connection status in navbar
+- [Keyboard shortcuts](https://github.com/Awaiswilll/dweb/issues/5) — Productivity hotkeys
+
+### Testing
+
+See [WINDOWS-TESTING.md](WINDOWS-TESTING.md) for instructions on testing the WSL distro, Windows portable, and desktop app on Windows.
 
 ---
 

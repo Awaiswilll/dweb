@@ -128,6 +128,11 @@ install_pkgs() {
   # Copy DNS config from host so apk can resolve URLs inside chroot
   cp /etc/resolv.conf "$rootfs/etc/resolv.conf" 2>/dev/null || true
 
+  # CRITICAL: Mount /proc for chroot to work reliably (apk needs /proc)
+  mount -t proc none "$rootfs/proc" 2>/dev/null || true
+  mount -t devtmpfs none "$rootfs/dev" 2>/dev/null || true
+  trap "umount '$rootfs/proc' '$rootfs/dev' 2>/dev/null || true" EXIT
+
   if [ "$USE_DOCKER" = true ]; then
     # For Docker-built rootfs, apk is already available
     chroot "$rootfs" /bin/sh -c '
@@ -135,15 +140,37 @@ install_pkgs() {
       apk add --no-cache \
         nodejs npm git curl bash sudo openssh \
         ca-certificates openssl htop tmux \
+        libstdc++ libgcc \
         --repository https://dl-cdn.alpinelinux.org/alpine/v3.20/main/ \
         --repository https://dl-cdn.alpinelinux.org/alpine/v3.20/community/
-    '
+    ' || {
+      warn "Package install via chroot failed — trying apk --root fallback"
+      apk add --no-cache --root "$rootfs" \
+        nodejs npm git curl bash sudo openssh ca-certificates openssl \
+        libstdc++ libgcc \
+        --repository "$MIRROR/v$RELEASE/main/" \
+        --repository "$MIRROR/v$RELEASE/community/"
+    }
   else
     # Direct apk --root approach
     apk add --no-cache --root "$rootfs" \
       nodejs npm git curl bash sudo openssh ca-certificates openssl \
+      libstdc++ libgcc \
       --repository "$MIRROR/v$RELEASE/main/" \
       --repository "$MIRROR/v$RELEASE/community/"
+  fi
+
+  # Verify nodejs is installed and is a MUSL build
+  if [ -f "$rootfs/usr/bin/node" ]; then
+    NODE_INTERP=$(readelf -l "$rootfs/usr/bin/node" 2>/dev/null | grep -o '/lib/ld-musl' || true)
+    if [ -z "$NODE_INTERP" ]; then
+      warn "Node.js binary is NOT musl-linked (interpreter: $(readelf -l "$rootfs/usr/bin/node" 2>/dev/null | grep interpreter))"
+      warn "This will NOT work in Alpine WSL. Manual fix required."
+    else
+      info "Node.js is musl-linked ✓"
+    fi
+  else
+    warn "Node.js binary not found at /usr/bin/node"
   fi
 
   info "Packages installed successfully"
@@ -356,22 +383,40 @@ chroot "$ROOTFS" /bin/sh -c '
   rc-update add sshd default 2>/dev/null || true
 ' || warn "Some services could not be enabled (runlevel config may need manual setup)"
 
-# If openrc isn't fully initialized, create a .profile that starts services
-cat >> "$ROOTFS/home/dweb/.profile" <<'DOTPROFILE'
-# dweb — auto-start services on WSL boot
+# ── /home/dweb/.profile — login shell auto-start ──────────────────────
+cat > "$ROOTFS/home/dweb/.profile" <<'DOTPROFILE'
+# dweb — auto-start services on WSL boot (login shell)
+# .profile is sourced for login shells; .bashrc is sourced for interactive non-login shells.
+# WSL typically starts a login shell, but some launchers use non-login.
+
+# Source .bashrc if this is a login shell
+if [ -f "$HOME/.bashrc" ]; then
+  . "$HOME/.bashrc"
+fi
+DOTPROFILE
+
+# ── /home/dweb/.bashrc — interactive non-login shell auto-start ──────
+cat > "$ROOTFS/home/dweb/.bashrc" <<'BASHRC'
+# dweb — auto-start services on WSL boot (interactive shell)
+# Also sourced from .profile for consistency.
+
 if [ -z "$DWEB_STARTED" ]; then
   export DWEB_STARTED=1
-  # Give networking a moment
-  sleep 1
+
+  # Ensure log directory exists
+  sudo mkdir -p /var/log 2>/dev/null
 
   # Start dweb if not already running
   if ! curl -sf http://localhost:49737/ping &>/dev/null; then
-    sudo rc-service dweb start 2>/dev/null || \
+    # Start in background, redirect logs
     node /opt/dweb/dweb.cjs &>/var/log/dweb.log &
     echo "  dweb-server starting on http://localhost:49737"
+    echo "  (logs: tail -f /var/log/dweb.log)"
   fi
 fi
-DOTPROFILE
+BASHRC
+chown dweb:dweb "$ROOTFS/home/dweb/.bashrc"
+chmod 644 "$ROOTFS/home/dweb/.bashrc"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  STEP 9: Clean up to minimize size

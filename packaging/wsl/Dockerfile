@@ -53,8 +53,14 @@ RUN apk add --no-cache \
     sudo \
     htop \
     tmux \
+    libstdc++ \
+    libgcc \
   && rm -rf /var/cache/apk/* \
-  && rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/info/*
+  && rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/info/* \
+  && echo "Verifying Node.js is musl-linked..." \
+  && readelf -l /usr/bin/node 2>/dev/null | grep -q '/lib/ld-musl' \
+    && echo "✓ musl-linked" \
+    || echo "⚠ WARNING: Node.js is NOT musl-linked — will fail in WSL"
 
 # ── Create dweb user ──────────────────────────────────────────────────────────
 RUN addgroup -g 1000 dweb \
@@ -155,20 +161,27 @@ alias dweb-logs='tail -f /var/log/dweb.log'
 alias dweb-status='curl -s http://localhost:49737/ping | python3 -m json.tool 2>/dev/null || curl -s http://localhost:49737/ping'
 PROFILE
 
-# User .profile for auto-start
+# User .profile (login shell) and .bashrc (interactive non-login shell) for auto-start
 RUN mkdir -p /home/dweb && chown dweb:dweb /home/dweb
 COPY <<'DOTPROFILE' /home/dweb/.profile
-# dweb — auto-start on WSL boot
-if [ -z "$DWEB_STARTED" ]; then
-  export DWEB_STARTED=1
-  sleep 1
-  if ! curl -sf http://localhost:49737/ping &>/dev/null; then
-    sudo rc-service dweb start 2>/dev/null || \
-    node /opt/dweb/dweb.cjs &>/var/log/dweb.log &
-    echo "  dweb-server starting on http://localhost:49737"
-  fi
+# dweb — auto-start on WSL boot (login shell)
+if [ -f "$HOME/.bashrc" ]; then
+  . "$HOME/.bashrc"
 fi
 DOTPROFILE
+
+COPY <<'BASHRC' /home/dweb/.bashrc
+# dweb — auto-start services on WSL boot (interactive shell)
+if [ -z "$DWEB_STARTED" ]; then
+  export DWEB_STARTED=1
+  sudo mkdir -p /var/log 2>/dev/null
+  if ! curl -sf http://localhost:49737/ping &>/dev/null; then
+    node /opt/dweb/dweb.cjs &>/var/log/dweb.log &
+    echo "  dweb-server starting on http://localhost:49737"
+    echo "  (logs: tail -f /var/log/dweb.log)"
+  fi
+fi
+BASHRC
 
 # Enable boot services
 RUN rc-update add dweb default 2>/dev/null || true \

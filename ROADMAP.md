@@ -28,23 +28,26 @@ This roadmap tracks the development of dweb OS. Items are organized by priority 
 **Target:** Q3 2026
 
 ### High Priority
-- [ ] Build and publish WSL distro tarball
+- [x] Build and publish WSL distro tarball (57.6MB, musl-linked Node.js)
+- [x] Create GitHub Release v0.1.0 with WSL + Windows assets
+- [x] Create 8 good-first-issue tasks for community contributions
 - [ ] Build and publish Windows MSIX package
 - [ ] Submit to Microsoft Store
-- [ ] Add Docker Hub image
+- [ ] Add Docker Hub CI/CD publishing
 - [ ] Create privacy policy page
 
 ### Medium Priority
-- [ ] Add theme toggle (dark/light/system)
-- [ ] Add responsive design for mobile browsers
-- [ ] Add service health monitoring
-- [ ] Add P2P connection status indicator
-- [ ] Improve AI agent prompt templates
+- [ ] Add theme toggle (dark/light/system) — [#1](https://github.com/Awaiswilll/dweb/issues/1)
+- [ ] Add responsive design for mobile browsers — [#2](https://github.com/Awaiswilll/dweb/issues/2)
+- [ ] Add service health monitoring — [#3](https://github.com/Awaiswilll/dweb/issues/3)
+- [ ] Add P2P connection status indicator — [#4](https://github.com/Awaiswilll/dweb/issues/4)
+- [ ] Add keyboard shortcuts — [#5](https://github.com/Awaiswilll/dweb/issues/5)
+- [ ] Improve AI agent prompt templates — [#8](https://github.com/Awaiswilll/dweb/issues/8)
 
 ### Low Priority
 - [ ] Add i18n/internationalization support
-- [ ] Add keyboard shortcuts
-- [ ] Add export/import configuration
+- [ ] Add export/import configuration — [#7](https://github.com/Awaiswilll/dweb/issues/7)
+- [ ] Add Docker Hub CI/CD — [#6](https://github.com/Awaiswilll/dweb/issues/6)
 - [ ] Add activity log viewer
 
 ---
@@ -126,7 +129,7 @@ This roadmap tracks the development of dweb OS. Items are organized by priority 
 | Version | Status | Progress |
 |---------|--------|----------|
 | v0.1.0 | ✅ Released | 100% |
-| v0.2.0 | 🔄 In Progress | ~20% |
+| v0.2.0 | 🔄 In Progress | ~30% |
 | v0.3.0 | 📋 Planned | 0% |
 | v0.4.0 | 📋 Planned | 0% |
 | v0.5.0 | 📋 Planned | 0% |
