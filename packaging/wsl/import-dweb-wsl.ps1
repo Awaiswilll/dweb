@@ -17,7 +17,7 @@
 #>
 
 param(
-  [string]$TarballUrl = "https://github.com/Awaiswilll/dweb/releases/latest/download/dweb-wsl-rootfs.tar.gz",
+  [string]$TarballUrl = "https://github.com/Awaiswilll/dweb/releases/download/v0.1.0/dweb-wsl-rootfs.tar.gz",
   [string]$DistroName = "dweb",
   [string]$InstallDir = "./dweb-wsl",
   [string]$TarballPath = ""
