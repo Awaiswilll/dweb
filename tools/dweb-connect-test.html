@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>dweb Connectivity Test</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f0f1a; color: #e0e0e0; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+  .card { background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 16px; padding: 32px; max-width: 640px; width: 100%; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
+  h1 { font-size: 22px; font-weight: 700; margin-bottom: 4px; display: flex; align-items: center; gap: 10px; }
+  h1 span { background: linear-gradient(135deg, #6366f1, #8b5cf6); font-size: 12px; padding: 2px 10px; border-radius: 20px; font-weight: 600; }
+  .subtitle { font-size: 13px; color: #888; margin-bottom: 20px; }
+  .section { margin-bottom: 16px; }
+  .section-title { font-size: 13px; font-weight: 600; color: #aaa; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .ip-box { background: #12121e; border: 1px solid #2a2a3e; border-radius: 10px; padding: 12px 16px; font-family: 'Courier New', monospace; font-size: 13px; margin-bottom: 8px; }
+  .ip-item { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; }
+  .ip-item .tag { font-size: 10px; background: #2a2a4a; padding: 1px 8px; border-radius: 10px; color: #888; }
+  label { font-size: 13px; font-weight: 500; display: block; margin-bottom: 4px; }
+  .input-row { display: flex; gap: 8px; }
+  input[type="text"] { flex: 1; background: #12121e; border: 1px solid #2a2a3e; border-radius: 8px; padding: 10px 14px; color: #e0e0e0; font-size: 14px; outline: none; font-family: 'Courier New', monospace; }
+  input[type="text"]:focus { border-color: #6366f1; }
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 10px 20px; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s; white-space: nowrap; }
+  .btn-primary { background: #6366f1; color: #fff; }
+  .btn-primary:hover { background: #5558e6; transform: translateY(-1px); }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+  .btn-secondary { background: #2a2a4a; color: #ccc; }
+  .btn-secondary:hover { background: #3a3a5a; }
+  .btn-success { background: #22c55e; color: #fff; }
+  .btn-danger { background: #ef4444; color: #fff; }
+
+  .result-box { background: #12121e; border: 1px solid #2a2a3e; border-radius: 10px; padding: 16px; margin-top: 16px; min-height: 60px; }
+  .result-item { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #1a1a2e; font-size: 13px; }
+  .result-item:last-child { border-bottom: none; }
+  .result-label { color: #888; }
+  .result-value { font-weight: 500; font-family: 'Courier New', monospace; }
+  .pass { color: #22c55e; }
+  .fail { color: #ef4444; }
+  .pending { color: #eab308; }
+
+  .ping-display { font-size: 32px; font-weight: 800; font-family: 'Courier New', monospace; text-align: center; padding: 16px; }
+  .ping-display .unit { font-size: 14px; font-weight: 400; color: #888; }
+  .ping-bar { height: 4px; background: #2a2a3e; border-radius: 2px; margin-top: 8px; overflow: hidden; }
+  .ping-bar-fill { height: 100%; border-radius: 2px; transition: width 0.3s, background 0.3s; }
+
+  .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+  .dot-green { background: #22c55e; box-shadow: 0 0 8px rgba(34,197,94,0.4); }
+  .dot-red { background: #ef4444; }
+  .dot-yellow { background: #eab308; }
+
+  .tabs { display: flex; gap: 4px; margin-bottom: 16px; background: #12121e; border-radius: 10px; padding: 4px; }
+  .tab { flex: 1; padding: 8px 16px; border: none; background: transparent; color: #888; font-size: 12px; font-weight: 600; cursor: pointer; border-radius: 8px; transition: all 0.15s; }
+  .tab.active { background: #2a2a4a; color: #e0e0e0; }
+  .tab:hover:not(.active) { color: #aaa; }
+
+  .log-box { background: #0a0a12; border: 1px solid #1a1a2a; border-radius: 8px; padding: 12px; font-family: 'Courier New', monospace; font-size: 11px; height: 150px; overflow-y: auto; margin-top: 12px; line-height: 1.6; }
+  .log-box .time { color: #555; }
+  .log-box .info { color: #88aaff; }
+  .log-box .ok { color: #22c55e; }
+  .log-box .err { color: #ef4444; }
+
+  .hidden { display: none; }
+  .flex { display: flex; }
+  .gap-8 { gap: 8px; }
+  .mt-8 { margin-top: 8px; }
+  .mb-8 { margin-bottom: 8px; }
+  .text-center { text-align: center; }
+  .text-sm { font-size: 12px; color: #666; }
+</style>
+</head>
+<body>
+<div class="card" id="app">
+  <h1>
+    ⚡ dweb
+    <span>Connectivity Test</span>
+  </h1>
+  <p class="subtitle">Test network connectivity between dweb instances</p>
+
+  <!-- Tabs -->
+  <div class="tabs">
+    <button class="tab active" data-tab="local" onclick="switchTab('local')">🖥️ This Machine</button>
+    <button class="tab" data-tab="remote" onclick="switchTab('remote')">🔗 Remote Test</button>
+    <button class="tab" data-tab="continuous" onclick="switchTab('continuous')">📊 Live Ping</button>
+  </div>
+
+  <!-- TAB 1: Local Machine Info -->
+  <div id="tab-local" class="tab-content">
+    <div class="section">
+      <div class="section-title">Local IP Addresses</div>
+      <div class="ip-box" id="local-info">
+        <div class="ip-item"><span>Loading...</span></div>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-title">Quick Actions</div>
+      <div class="flex gap-8">
+        <button class="btn btn-secondary" onclick="copyIPs()">📋 Copy IPs</button>
+        <button class="btn btn-secondary" onclick="window.open('http://localhost:5173','_blank')">🚀 Open dweb</button>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-title">On the other machine, run:</div>
+      <div class="ip-box" style="font-size:12px; line-height:1.8" id="setup-instructions">
+        Loading instructions...
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 2: Remote Connectivity Test -->
+  <div id="tab-remote" class="tab-content hidden">
+    <div class="section">
+      <label for="remote-addr">Remote dweb instance address</label>
+      <div class="input-row">
+        <input type="text" id="remote-addr" placeholder="192.168.1.100:49737" onkeydown="if(event.key==='Enter') testConnectivity()" />
+        <button class="btn btn-primary" id="connect-btn" onclick="testConnectivity()">🔗 Test</button>
+      </div>
+      <p class="text-sm mt-8">Enter the IP and port of the remote dweb instance's connectivity test server.</p>
+    </div>
+    <div id="remote-result" class="result-box hidden">
+      <div id="remote-status"></div>
+    </div>
+    <div class="log-box" id="remote-log">
+      <div><span class="time">──</span> <span class="info">Ready. Enter an address and click Test.</span></div>
+    </div>
+  </div>
+
+  <!-- TAB 3: Continuous Ping -->
+  <div id="tab-continuous" class="tab-content hidden">
+    <div class="section">
+      <label for="ping-addr">Target address for live ping</label>
+      <div class="input-row">
+        <input type="text" id="ping-addr" placeholder="192.168.1.100:49737" />
+        <button class="btn btn-success" id="ping-btn" onclick="togglePing()">▶ Start</button>
+      </div>
+    </div>
+    <div id="ping-result" class="result-box text-center" style="padding:24px">
+      <div class="ping-display" id="ping-value">— <span class="unit">ms</span></div>
+      <div class="ping-bar"><div class="ping-bar-fill" id="ping-bar-fill" style="width:0%"></div></div>
+      <div style="margin-top:12px; font-size:13px; display:flex; justify-content:center; gap:24px">
+        <span><span class="status-dot dot-green"></span> <span id="ping-success">0</span></span>
+        <span><span class="status-dot dot-red"></span> <span id="ping-fail">0</span></span>
+        <span>Min: <span id="ping-min">—</span>ms</span>
+        <span>Max: <span id="ping-max">—</span>ms</span>
+        <span>Avg: <span id="ping-avg">—</span>ms</span>
+      </div>
+      <div class="log-box" id="ping-log" style="height:120px; margin-top:16px">
+        <div><span class="time">──</span> <span class="info">Press Start to begin live ping.</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─── Local Info ──────────────────────────────────────────
+function getLocalIPs() {
+  return new Promise((resolve) => {
+    // Use RTCPeerConnection to discover local IPs
+    const ips = [];
+    const done = () => resolve(ips);
+
+    try {
+      const pc = new RTCPeerConnection({ iceServers: [] });
+      pc.createDataChannel('');
+      pc.createOffer().then(offer => pc.setLocalDescription(offer));
+      
+      pc.onicecandidate = (e) => {
+        if (!e.candidate) { pc.close(); done(); return; }
+        const match = e.candidate.candidate.match(/([0-9]{1,3}\.){3}[0-9]{1,3}/g);
+        if (match) match.forEach(ip => { if (!ips.includes(ip)) ips.push(ip); });
+      };
+      setTimeout(() => { pc.close(); done(); }, 2000);
+    } catch {
+      // Fallback: try fetch
+      fetch('/api/local-ips').catch(() => {});
+      setTimeout(done, 500);
+    }
+  });
+}
+
+function getIPsFromHostname() {
+  // Simple heuristic: try common local IPs
+  const common = ['192.168.', '10.', '172.'];
+  return [];
+}
+
+async function loadLocalInfo() {
+  const infoDiv = document.getElementById('local-info');
+  const setupDiv = document.getElementById('setup-instructions');
+  
+  let ips = [];
+  try {
+    ips = await getLocalIPs();
+  } catch {}
+  
+  // Also try fetching /dweb-status from localhost
+  let hostname = 'this-machine';
+  try {
+    const resp = await fetch('http://localhost:49737/ping');
+    const data = await resp.json();
+    hostname = data.server?.hostname || hostname;
+  } catch {}
+
+  if (ips.length === 0) {
+    // Show browser-based network info
+    infoDiv.innerHTML = `
+      <div class="ip-item"><span>⚠️ Could not detect IP via WebRTC</span></div>
+      <div class="ip-item" style="margin-top:8px; color:#888; font-size:12px;">
+        Your machine's IP can be found by running <strong>ipconfig</strong> in Command Prompt.
+      </div>
+    `;
+    setupDiv.innerHTML = `
+      <pre style="margin:0">node connectivity-test.js --client YOUR_IP:49737</pre>
+      <div style="color:#888; font-size:11px; margin-top:4px">
+        Replace YOUR_IP with this machine's IP address.
+      </div>
+    `;
+    return;
+  }
+
+  // Filter to private IPs only
+  const privateIPs = ips.filter(ip => {
+    return ip.startsWith('192.168.') || ip.startsWith('10.') || ip.startsWith('172.');
+  });
+  
+  const displayIPs = privateIPs.length > 0 ? privateIPs : ips;
+
+  infoDiv.innerHTML = displayIPs.map(ip => `
+    <div class="ip-item">
+      <span>${ip}</span>
+      <span class="tag">LAN</span>
+    </div>
+  `).join('') + (ips.length > displayIPs.length ? `
+    <div class="ip-item" style="color:#888; font-size:11px; border-top:1px solid #1a1a2e; padding-top:6px; margin-top:4px">
+      + ${ips.length - displayIPs.length} other IPs
+    </div>
+  ` : '');
+
+  // Some machines may not have private IPs detected via WebRTC
+  if (displayIPs.length === 0) {
+    infoDiv.innerHTML = `
+      <div class="ip-item"><span>⚠️ No LAN IPs detected via browser</span></div>
+      <div class="ip-item" style="margin-top:8px; color:#888; font-size:12px;">
+        Run <strong>ipconfig</strong> in Command Prompt to find your IP.
+      </div>
+    `;
+  }
+
+  // Generate setup instructions
+  const firstIP = displayIPs[0] || 'YOUR_IP';
+  setupDiv.innerHTML = `
+    <pre style="margin:0">node tools\\connectivity-test.js --server --port=49737</pre>
+    <div style="color:#888; font-size:11px; margin-top:4px">
+      From the dweb project folder on the <strong>other machine</strong>.
+    </div>
+    <div style="margin-top:8px; padding-top:8px; border-top:1px solid #1a1a2e; font-size:12px; color:#888">
+      Then on this machine, run:
+    </div>
+    <pre style="margin:4px 0 0">node tools\\connectivity-test.js --client ${firstIP}:49737</pre>
+  `;
+}
+
+function copyIPs() {
+  const items = document.querySelectorAll('#local-info .ip-item span:first-child');
+  const ips = Array.from(items).map(s => s.textContent).filter(t => t && !t.startsWith('+') && !t.startsWith('⚠'));
+  if (ips.length > 0) {
+    navigator.clipboard.writeText(ips.join('\n'));
+    alert('IPs copied to clipboard:\n' + ips.join('\n'));
+  } else {
+    alert('No IPs to copy. Run ipconfig to find your IP.');
+  }
+}
+
+// ─── Tab Switching ───────────────────────────────────────
+function switchTab(tabId) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelector(`.tab[data-tab="${tabId}"]`).classList.add('active');
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.add('hidden'));
+  document.getElementById(`tab-${tabId}`).classList.remove('hidden');
+}
+
+// ─── Remote Connectivity Test ────────────────────────────
+async function testConnectivity() {
+  const addr = document.getElementById('remote-addr').value.trim();
+  if (!addr) return;
+
+  const btn = document.getElementById('connect-btn');
+  const resultDiv = document.getElementById('remote-result');
+  const statusDiv = document.getElementById('remote-status');
+  const logDiv = document.getElementById('remote-log');
+
+  btn.disabled = true;
+  btn.textContent = '⏳ Testing...';
+  resultDiv.classList.remove('hidden');
+
+  const log = (msg, cls = 'info') => {
+    const time = new Date().toLocaleTimeString();
+    logDiv.innerHTML += `<div><span class="time">[${time}]</span> <span class="${cls}">${msg}</span></div>`;
+    logDiv.scrollTop = logDiv.scrollHeight;
+  };
+
+  log(`Starting connectivity tests to ${addr}...`);
+
+  // Test 1: TCP connectivity (ping)
+  log('Test 1/3: HTTP Ping...');
+  let test1Pass = false;
+  let test1Data = null;
+  try {
+    const start = Date.now();
+    const resp = await fetch(`http://${addr}/ping`, { signal: AbortSignal.timeout(5000) });
+    const latency = Date.now() - start;
+    test1Data = await resp.json();
+    test1Pass = resp.ok && test1Data.status === 'ok';
+    log(`PASS (${latency}ms) — Server: ${test1Data.server?.hostname || 'unknown'}`, 'ok');
+  } catch (err) {
+    log(`FAIL — ${err.message || err.code || err}`, 'err');
+    if (err.code === 'ECONNREFUSED') log('  → Connection refused. Is the test server running?', 'err');
+    else if (err.name === 'TimeoutError') log('  → Timed out. Firewall blocking port?', 'err');
+    else if (err.message?.includes('Failed to fetch')) log('  → CORS or network error. Check address.', 'err');
+  }
+
+  // Test 2: dweb status endpoint
+  log('Test 2/3: dweb Status...');
+  let test2Pass = false;
+  let test2Data = null;
+  try {
+    const resp = await fetch(`http://${addr}/dweb-status`, { signal: AbortSignal.timeout(5000) });
+    test2Data = await resp.json();
+    test2Pass = resp.ok && test2Data.status === 'ok';
+    log(`PASS — Peer: ${test2Data.peer_id || 'unknown'}`, 'ok');
+  } catch (err) {
+    log(`FAIL — ${err.message || err.code || err}`, 'err');
+  }
+
+  // Test 3: Try connecting via dweb's own API (if running)
+  log('Test 3/3: dweb App API...');
+  let test3Pass = false;
+  try {
+    const resp = await fetch(`http://${addr.replace(/:.*$/, ':5173')}/`, { signal: AbortSignal.timeout(3000) });
+    test3Pass = resp.ok;
+    log(`PASS — dweb app reachable at port 5173`, 'ok');
+  } catch {
+    log(`SKIP — dweb dev server not running on port 5173 (optional)`, 'info');
+  }
+
+  // Summary
+  const passed = [test1Pass, test2Pass, test3Pass].filter(Boolean).length;
+  const total = 3;
+  const allPassed = test1Pass && test2Pass;
+  
+  statusDiv.innerHTML = `
+    <div style="text-align:center; margin-bottom:12px">
+      <span style="font-size:36px">${allPassed ? '✅' : '❌'}</span>
+      <div style="font-size:18px; font-weight:700; margin-top:4px">
+        ${allPassed ? 'Connectivity OK!' : 'Connectivity Issues'}
+      </div>
+      <div style="font-size:13px; color:#888">${passed}/${total} tests passed</div>
+    </div>
+    <div class="result-item">
+      <span class="result-label">1. HTTP Ping</span>
+      <span class="result-value ${test1Pass ? 'pass' : 'fail'}">${test1Pass ? '✓ Pass' : '✗ Fail'}</span>
+    </div>
+    <div class="result-item">
+      <span class="result-label">2. dweb Status</span>
+      <span class="result-value ${test2Pass ? 'pass' : 'fail'}">${test2Pass ? '✓ Pass' : '✗ Fail'}</span>
+    </div>
+    <div class="result-item">
+      <span class="result-label">3. dweb App (5173)</span>
+      <span class="result-value ${test3Pass ? 'pass' : 'pending'}">${test3Pass ? '✓ Pass' : '— Skipped'}</span>
+    </div>
+    ${test1Data ? `
+    <div class="result-item" style="border-top:1px solid #2a2a3e; padding-top:8px; margin-top:4px">
+      <span class="result-label">Remote Hostname</span>
+      <span class="result-value">${test1Data.server?.hostname || test1Data.hostname || '?'}</span>
+    </div>
+    <div class="result-item">
+      <span class="result-label">Remote Platform</span>
+      <span class="result-value">${test1Data.server?.platform || '?'}</span>
+    </div>
+    ` : ''}
+    ${!allPassed ? `
+    <div style="margin-top:12px; padding:12px; background:#2a1a1a; border-radius:8px; font-size:12px; line-height:1.6">
+      <strong style="color:#ef4444">Troubleshooting:</strong><br>
+      • Make sure the test server is running on the remote machine:<br>
+      &nbsp;&nbsp;<code style="background:#1a1a2e; padding:1px 6px; border-radius:4px">node tools\\connectivity-test.js --server</code><br>
+      • Check that port ${addr.split(':')[1] || '49737'} is open in the firewall<br>
+      • Are both machines on the same network?<br>
+      • Try pinging the remote IP: <code style="background:#1a1a2e; padding:1px 6px; border-radius:4px">ping ${addr.split(':')[0]}</code>
+    </div>
+    ` : ''}
+  `;
+
+  btn.disabled = false;
+  btn.textContent = '🔗 Test Again';
+  log('Tests complete.', 'info');
+}
+
+// ─── Continuous Ping ──────────────────────────────────────
+let pingInterval = null;
+let pingData = { successes: 0, failures: 0, times: [] };
+
+function togglePing() {
+  const btn = document.getElementById('ping-btn');
+  const addr = document.getElementById('ping-addr').value.trim();
+  
+  if (pingInterval) {
+    clearInterval(pingInterval);
+    pingInterval = null;
+    btn.textContent = '▶ Start';
+    btn.className = 'btn btn-success';
+    addPingLog('Stopped.', 'info');
+    return;
+  }
+
+  if (!addr) {
+    alert('Enter a target address first.');
+    return;
+  }
+
+  pingData = { successes: 0, failures: 0, times: [] };
+  btn.textContent = '⏹ Stop';
+  btn.className = 'btn btn-danger';
+  addPingLog(`Starting continuous ping to ${addr}...`, 'info');
+
+  const doPing = async () => {
+    try {
+      const start = Date.now();
+      const resp = await fetch(`http://${addr}/ping`, { signal: AbortSignal.timeout(3000) });
+      const latency = Date.now() - start;
+      
+      if (resp.ok) {
+        pingData.successes++;
+        pingData.times.push(latency);
+        if (pingData.times.length > 100) pingData.times.shift();
+        
+        const min = Math.min(...pingData.times);
+        const max = Math.max(...pingData.times);
+        const avg = Math.round(pingData.times.reduce((a, b) => a + b, 0) / pingData.times.length);
+        const pktLoss = Math.round((pingData.failures / (pingData.successes + pingData.failures)) * 100);
+
+        document.getElementById('ping-value').innerHTML = `${latency} <span class="unit">ms</span>`;
+        document.getElementById('ping-success').textContent = pingData.successes;
+        document.getElementById('ping-fail').textContent = pingData.failures;
+        document.getElementById('ping-min').textContent = min;
+        document.getElementById('ping-max').textContent = max;
+        document.getElementById('ping-avg').textContent = avg;
+
+        // Ping bar
+        const pct = Math.min((latency / 200) * 100, 100);
+        document.getElementById('ping-bar-fill').style.width = `${pct}%`;
+        document.getElementById('ping-bar-fill').style.background = latency < 30 ? '#22c55e' : latency < 80 ? '#eab308' : '#ef4444';
+        
+        addPingLog(`Pong ${latency}ms — ${pingData.successes}ok/${pingData.failures}fail (${pktLoss}% loss)`, 'ok');
+      } else {
+        throw new Error('Bad response');
+      }
+    } catch (err) {
+      pingData.failures++;
+      document.getElementById('ping-value').innerHTML = `FAIL`;
+      document.getElementById('ping-fail').textContent = pingData.failures;
+      addPingLog(`Request failed`, 'err');
+    }
+  };
+
+  doPing();
+  pingInterval = setInterval(doPing, 2000);
+}
+
+function addPingLog(msg, cls = 'info') {
+  const logDiv = document.getElementById('ping-log');
+  const time = new Date().toLocaleTimeString();
+  logDiv.innerHTML += `<div><span class="time">[${time}]</span> <span class="${cls}">${msg}</span></div>`;
+  logDiv.scrollTop = logDiv.scrollHeight;
+}
+
+// ─── Init ────────────────────────────────────────────────
+loadLocalInfo();
+</script>
+</body>
+</html>

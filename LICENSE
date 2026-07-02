@@ -1,0 +1,54 @@
+MIT License
+
+Copyright (c) 2026 Dr Awais Javed (Cyberion) and dweb contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+## Licensing Summary
+
+| Component | License | Copyright |
+|-----------|---------|-----------|
+| **dweb OS Core** (frontend, server, Rust backend) | MIT | Copyright (c) 2026 Dr Awais Javed (Cyberion) |
+| **dweb Brand & Trademark** | Reserved | "dweb" and the dweb logo are trademarks of Cyberion |
+| **Third-Party Dependencies** | Various | See `package.json` and `src-tauri/Cargo.toml` for full list |
+| **AI Model Weights** | Provider-specific | Models (Ollama, Nemotron, etc.) are subject to their respective licenses |
+| **Alpine Linux Base** | MIT | Copyright (c) Alpine Linux contributors |
+| **HyperDHT** | MIT | Copyright (c) Hypercore Protocol contributors |
+
+## Commercial Use
+
+dweb OS is free and open source under the MIT License. You may:
+- Use it commercially
+- Modify and redistribute it
+- Sell services based on it
+- Use it in proprietary products
+
+You must:
+- Include the MIT license and copyright notice in copies
+- Not use the "dweb" trademark without permission
+
+## Trademark Policy
+
+The "dweb" name and logo are trademarks of Cyberion (Dr Awais Javed).
+You may not use the dweb trademark to endorse or promote products derived
+from this software without explicit written permission.
+
+For trademark inquiries, contact: awais@dweb.dev
