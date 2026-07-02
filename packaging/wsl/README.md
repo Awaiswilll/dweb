@@ -1,6 +1,6 @@
 # dweb WSL Distro
 
-**dweb** packaged as an Alpine Linux-based WSL (Windows Subsystem for Linux) distribution. Includes dweb-server, opencode CLI, and Ollama for local AI — all pre-configured and ready to use.
+**dweb** packaged as an Alpine Linux-based WSL (Windows Subsystem for Linux) distribution. Includes dweb-server, dweb CLI, MOTD (welcome banner), auto-update, and Ollama for local AI — all pre-configured and ready to use.
 
 ## Requirements
 
@@ -64,21 +64,56 @@ http://localhost:49737
 | Component | Description |
 |-----------|-------------|
 | **dweb-server** | P2P Dev + Hosting Platform — serves the React frontend on port 49737 |
-| **opencode CLI** | AI-assisted coding in your terminal |
+| **dweb CLI** | `dweb status`, `logs`, `start`, `stop`, `restart`, `ping`, `update`, `help` |
+| **MOTD Banner** | Welcome screen with server status, Node.js version, memory, uptime on login |
+| **Auto-Update** | Checks GitHub releases for newer distro versions, applies in-place with backup |
 | **Ollama** | Local AI model runner (download models with `ollama pull <model>`) |
-| **Alpine Linux** | Lightweight, secure base operating system |
+| **Alpine Linux** | Lightweight, secure base operating system (46MB compressed) |
 
 ## Usage
+
+### dweb CLI (Primary Interface)
+
+```bash
+dweb status      # Server health, PID, memory, disk usage
+dweb logs -f     # Tail server logs
+dweb start       # Start dweb-server
+dweb stop        # Stop dweb-server
+dweb restart     # Restart the server
+dweb ping        # Quick health check
+dweb update      # Check GitHub for newer releases, apply update
+dweb help        # Show all commands
+```
+
+### MOTD Banner
+
+On every login, you'll see the dweb welcome screen:
+```
+╔══════════════════════════════════════════════╗
+║              dweb OS  v0.1.0                 ║
+║     Self-Hosted Dev Portal + P2P Network     ║
+╚══════════════════════════════════════════════╝
+
+🌐 Server:    http://localhost:49737
+📡 Status:    ✅ Running
+🟢 Node.js:   v22.14.0
+💻 Memory:    42M / 1982M
+⏱️  Uptime:    up 2 hours
+📊 Load:      0.15 / 0.20 / 0.25
+
+Commands:  dweb status   dweb logs   dweb restart
+          dweb update   dweb help
+```
 
 ### Starting/Stopping dweb
 
 ```bash
-# Inside WSL:
-dweb-start          # Start dweb-server
-dweb-stop           # Stop dweb-server
-dweb-restart        # Restart dweb-server
-dweb-status         # Check if running
-dweb-logs           # View server logs
+# Using the dweb CLI:
+dweb start          # Start dweb-server
+dweb stop           # Stop dweb-server
+dweb restart        # Restart dweb-server
+dweb status         # Check if running
+dweb logs -f        # View server logs
 ```
 
 Or using service commands directly:
@@ -120,6 +155,9 @@ ollama list
 | `/opt/dweb/` | dweb code (server + frontend) |
 | `/var/log/dweb.log` | Server logs |
 | `/etc/init.d/dweb` | OpenRC service script |
+| `/etc/profile.d/dweb-motd.sh` | MOTD banner script |
+| `/usr/bin/dweb` | dweb CLI |
+| `/opt/dweb/tools/dweb-update.sh` | Auto-update script |
 | `/home/dweb/` | Default user home |
 
 ## Building the Distro Yourself
@@ -174,13 +212,13 @@ PORT=49738 node /opt/dweb/dweb.cjs
 
 ```bash
 # Check logs
-dweb-logs
+dweb logs
 
 # Check if Node.js is installed
 node --version
 
 # Restart the service
-dweb-restart
+dweb restart
 ```
 
 ### WSL import fails
@@ -224,12 +262,16 @@ wsl -d dweb
 ## Updating
 
 ```bash
+# Automatic update (checks GitHub releases):
+dweb update
+
+# Manual update (from source):
 # Inside WSL:
 cd /opt/dweb
 git pull
 npm install
 npm run build
-dweb-restart
+dweb restart
 ```
 
 ## Uninstall
