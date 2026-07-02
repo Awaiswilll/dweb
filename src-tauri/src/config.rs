@@ -10,6 +10,7 @@
 
 use crate::ai::ProviderConfig;
 use serde::{Deserialize, Serialize};
+use sha2::Digest;
 use std::path::PathBuf;
 
 // ─── Encryption helpers ─────────────────────────────────────────────────────
@@ -176,7 +177,7 @@ impl AppConfig {
             .get_mut("cloud_providers")
             .and_then(|v| v.as_object_mut())
         {
-            for field in &[
+            for field in [
                 "aws_access_key",
                 "aws_secret_key",
                 "netlify_token",

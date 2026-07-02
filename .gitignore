@@ -42,3 +42,4 @@ tools/dweb-launcher.exe
 
 # Test output
 coverage/
+.claude/

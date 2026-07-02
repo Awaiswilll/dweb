@@ -49,7 +49,7 @@ static P2P_MANAGER: Lazy<Arc<Mutex<Option<P2PManager>>>> =
 pub async fn init(data_dir: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     // Shut down any existing manager first to kill orphaned tasks
     let mut guard = P2P_MANAGER.lock().await;
-    if let Some(old) = guard.take() {
+    if let Some(mut old) = guard.take() {
         old.shutdown().await;
         log::info!("P2P previous manager shut down");
     }
@@ -131,9 +131,15 @@ impl P2PManager {
 
         log::info!("P2P node connected and driving DHT events");
 
+        // Use the persisted per-instance identity so the DHT keypair (and therefore
+        // this node's public key / domain ownership) survives restarts instead of
+        // being re-randomized on every launch.
+        let identity = crate::sandbox::InstanceIdentity::load_or_create(data_dir);
+        let keypair = identity.derive_keypair().unwrap_or_default();
+
         Ok(Self {
             dht: dht_arc,
-            keypair: Keypair::default(),
+            keypair,
             started_at: chrono::Utc::now(),
             resolved_count: std::sync::atomic::AtomicU64::new(0),
             data_dir: data_dir.clone(),
@@ -143,15 +149,16 @@ impl P2PManager {
 
     /// Abort all tracked background tasks. Call before dropping to prevent
     /// orphaned-task panics in the Tokio runtime.
-    pub async fn shutdown(&self) {
+    pub async fn shutdown(&mut self) {
         for handle in &self.task_handles {
             handle.abort();
         }
         // Wait briefly for tasks to actually stop
-        for handle in &self.task_handles {
+        let count = self.task_handles.len();
+        for handle in self.task_handles.drain(..) {
             let _ = handle.await;
         }
-        log::info!("P2P manager: {} background task(s) aborted", self.task_handles.len());
+        log::info!("P2P manager: {} background task(s) aborted", count);
     }
 
     /// Hex-encoded public key of this node.

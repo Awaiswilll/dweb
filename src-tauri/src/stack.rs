@@ -181,7 +181,7 @@ pub async fn start_service(name: &str) -> Result<(), Box<dyn std::error::Error>>
         }
     };
 
-    let (pid, child) = spawned?;
+    let (pid, mut child) = spawned?;
 
     let service_name = svc_name.clone();
     let health_task = tokio::spawn(async move {
@@ -272,7 +272,7 @@ async fn try_start_process(svc: &ManagedService) -> Result<SpawnedProcess, Box<d
                 ])
                 .spawn()
                 .map_err(|e| format!("Failed to spawn Node.js: {}", e))?;
-            let pid = child.id();
+            let pid = child.id().ok_or("Node.js process exited before PID could be read")?;
             Ok(SpawnedProcess { pid, child })
         }
         "Python" => {
@@ -288,7 +288,7 @@ async fn try_start_process(svc: &ManagedService) -> Result<SpawnedProcess, Box<d
                 .args(["-m", "http.server", &port.to_string()])
                 .spawn()
                 .map_err(|e| format!("Failed to spawn Python: {}", e))?;
-            let pid = child.id();
+            let pid = child.id().ok_or("Python process exited before PID could be read")?;
             Ok(SpawnedProcess { pid, child })
         }
         "PHP" => {
@@ -301,7 +301,7 @@ async fn try_start_process(svc: &ManagedService) -> Result<SpawnedProcess, Box<d
                 .args(["-S", &format!("0.0.0.0:{}", port)])
                 .spawn()
                 .map_err(|e| format!("Failed to spawn PHP: {}", e))?;
-            let pid = child.id();
+            let pid = child.id().ok_or("PHP process exited before PID could be read")?;
             Ok(SpawnedProcess { pid, child })
         }
         "Ruby" => {
@@ -314,7 +314,7 @@ async fn try_start_process(svc: &ManagedService) -> Result<SpawnedProcess, Box<d
                 .args(["-run", "-e", "httpd", "--", "-p", &port.to_string()])
                 .spawn()
                 .map_err(|e| format!("Failed to spawn Ruby: {}", e))?;
-            let pid = child.id();
+            let pid = child.id().ok_or("Ruby process exited before PID could be read")?;
             Ok(SpawnedProcess { pid, child })
         }
         _ => {

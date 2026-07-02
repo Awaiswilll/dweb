@@ -182,11 +182,12 @@ async fn deploy_netlify(domain: &str) -> Result<String, Box<dyn std::error::Erro
         let site_url = data["ssl_url"]
             .as_str()
             .or_else(|| data["url"].as_str())
-            .unwrap_or(&format!("https://{}.netlify.app", domain));
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| format!("https://{}.netlify.app", domain));
 
         let result = DeploymentResult {
             provider: "Netlify".to_string(),
-            url: site_url.to_string(),
+            url: site_url,
             success: true,
             message: "Site deployed to Netlify.".to_string(),
         };

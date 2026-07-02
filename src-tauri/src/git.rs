@@ -149,6 +149,19 @@ pub fn init_repo(path: &Path) -> Result<RepoInfo, String> {
 
 /// Clone a remote repository to a local path.
 pub fn clone_repo(url: &str, path: &Path) -> Result<RepoInfo, String> {
+    clone_repo_internal(url, path, None)
+}
+
+/// Clone a remote repository using a token supplied out-of-band as an HTTP
+/// credential, instead of embedded in the URL. Embedding a token in the URL
+/// (e.g. `https://x-access-token:TOKEN@...`) causes git to persist it in
+/// plaintext into the cloned repo's `.git/config`, where it leaks to anyone
+/// with filesystem access and outlives the token's intended lifetime.
+pub fn clone_repo_with_token(url: &str, path: &Path, token: &str) -> Result<RepoInfo, String> {
+    clone_repo_internal(url, path, Some(token))
+}
+
+fn clone_repo_internal(url: &str, path: &Path, token: Option<&str>) -> Result<RepoInfo, String> {
     if url.trim().is_empty() {
         return Err("URL cannot be empty".to_string());
     }
@@ -170,6 +183,13 @@ pub fn clone_repo(url: &str, path: &Path) -> Result<RepoInfo, String> {
         }
         true
     });
+
+    if let Some(token) = token {
+        let token = token.to_string();
+        cb.credentials(move |_url, _username_from_url, _allowed_types| {
+            git2::Cred::userpass_plaintext("x-access-token", &token)
+        });
+    }
 
     let mut fo = git2::FetchOptions::new();
     fo.remote_callbacks(cb);

@@ -471,10 +471,9 @@ pub async fn import_repo(
         .and_then(|v| v.as_str())
         .ok_or_else(|| "No clone URL found".to_string())?;
 
-    // Clone with auth (embed token in URL for HTTPS)
-    let auth_url = clone_url.replace("https://", &format!("https://x-access-token:{}@", token));
-
-    crate::git::clone_repo(&auth_url, dest_path)
+    // Auth via credential callback, not URL-embedding — otherwise git persists
+    // the token in plaintext into the cloned repo's .git/config.
+    crate::git::clone_repo_with_token(clone_url, dest_path, &token)
 }
 
 /// Detect VC provider from URL.

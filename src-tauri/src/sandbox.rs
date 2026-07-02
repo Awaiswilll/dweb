@@ -23,15 +23,13 @@ pub struct InstanceIdentity {
 
 impl InstanceIdentity {
     pub fn generate(label: &str) -> Self {
-        use rand::Rng;
-        let mut rng = rand::thread_rng();
-        let mut secret = [0u8; 32];
-        let mut public = [0u8; 32];
-        rng.fill(&mut secret);
-        rng.fill(&mut public);
+        use rand::RngCore;
+        let mut seed = [0u8; 32];
+        rand::thread_rng().fill_bytes(&mut seed);
+        let keypair = hyperdht::Keypair::from_seed(seed);
         Self {
-            public_key: hex::encode(public),
-            secret_key: hex::encode(secret),
+            public_key: hex::encode(&keypair.public[..]),
+            secret_key: hex::encode(seed),
             label: label.to_string(),
             created_at: chrono::Utc::now().to_rfc3339(),
         }
@@ -40,7 +38,17 @@ impl InstanceIdentity {
     pub fn load_or_create(data_dir: &PathBuf) -> Self {
         let path = data_dir.join("identity.json");
         if let Ok(content) = std::fs::read_to_string(&path) {
-            if let Ok(id) = serde_json::from_str(&content) {
+            if let Ok(mut id) = serde_json::from_str::<Self>(&content) {
+                // Self-heal identities saved before public_key was derived from
+                // secret_key (older builds generated the two independently, which
+                // meant the DHT keypair built from them wasn't a valid signing pair).
+                if let Some(keypair) = id.derive_keypair() {
+                    let derived_public = hex::encode(&keypair.public[..]);
+                    if derived_public != id.public_key {
+                        id.public_key = derived_public;
+                        let _ = id.save(data_dir);
+                    }
+                }
                 return id;
             }
         }
@@ -48,6 +56,14 @@ impl InstanceIdentity {
         let identity = Self::generate(&label);
         let _ = identity.save(data_dir);
         identity
+    }
+
+    /// Derive the real HyperDHT keypair from this identity's secret (used as an
+    /// ed25519 seed). This is the keypair the P2P layer signs announcements with.
+    pub fn derive_keypair(&self) -> Option<hyperdht::Keypair> {
+        let bytes = hex::decode(&self.secret_key).ok()?;
+        let seed: [u8; 32] = bytes.try_into().ok()?;
+        Some(hyperdht::Keypair::from_seed(seed))
     }
 
     pub fn save(&self, data_dir: &PathBuf) -> Result<(), String> {
