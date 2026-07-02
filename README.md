@@ -227,12 +227,24 @@ Open **http://localhost:49737** in your browser. Your dweb OS is running.
 
 ```powershell
 # Import the dweb OS distro
-wsl --import dweb C:\dweb dweb-distro.tar.gz --version 2
+wsl --import dweb C:\dweb .\dweb-wsl-rootfs.tar.gz --version 2
 
-# Start dweb OS
+# Start dweb OS — you'll see the dweb MOTD banner
 wsl -d dweb
+```
 
-# Or run the import script
+**What you get:** On every login, a dweb MOTD shows server status and system info. Use the `dweb` CLI to manage everything:
+
+```bash
+dweb status      # Server health, PID, memory, disk
+dweb logs -f     # Tail server logs
+dweb restart     # Restart the server
+dweb update      # Check for newer GitHub releases
+dweb help        # All commands
+```
+
+Or use the import script:
+```powershell
 .\packaging\wsl\import-dweb-wsl.ps1
 ```
 
@@ -387,6 +399,34 @@ Host a service on your dweb OS node and share it directly with other dweb users.
 ### 4. Self-Hosted Websites & Portfolios
 Deploy static sites, blogs, and portfolios on your own machine with a `.dweb` domain. Accessible via P2P network or local LAN.
 
+### 5. WSL Distro — Full Linux Dev Environment on Windows
+The dweb WSL distro is more than just a server — it's a complete **dweb OS experience** inside WSL:
+
+```
+╔══════════════════════════════════════════════╗
+║              dweb OS  v0.1.0                 ║
+║     Self-Hosted Dev Portal + P2P Network     ║
+╚══════════════════════════════════════════════╝
+
+🌐 Server:    http://localhost:49737
+📡 Status:    ✅ Running
+🟢 Node.js:   v22.14.0
+💻 Memory:    42M / 1982M
+⏱️  Uptime:    up 2 hours
+📊 Load:      0.15 / 0.20 / 0.25
+
+Commands:  dweb status   dweb logs   dweb restart
+          dweb update   dweb help
+```
+
+| Feature | What it does |
+|---------|-------------|
+| **MOTD Banner** | Server status, system info on every login |
+| **dweb CLI** | `dweb status`, `logs`, `start`, `stop`, `restart`, `ping`, `update` |
+| **Auto-Update** | Checks GitHub releases, downloads & applies updates |
+| **Node.js musl** | Proper Alpine compatibility (not glibc) |
+| **OpenRC Init** | Auto-starts dweb-server on boot |
+
 ### 5. Developer Demo & Portfolio Environment
 Showcase projects to clients or collaborators by giving them access to your dweb OS portal. Each project gets its own service, domain, and AI-assisted build pipeline.
 
@@ -456,7 +496,11 @@ dweb/
 │   └── connectivity-test.cjs
 ├── packaging/              # Distribution packages
 │   ├── wsl/                # WSL distro builder (Alpine Linux)
-│   │   ├── build-wsl-distro.sh
+│   │   ├── build-wsl-distro.sh    # Build script
+│   │   ├── overlay/               # dweb OS overlays (MOTD, CLI, update)
+│   │   │   ├── etc/profile.d/dweb-motd.sh
+│   │   │   ├── usr/bin/dweb
+│   │   │   └── opt/dweb/tools/dweb-update.sh
 │   │   ├── import-dweb-wsl.ps1
 │   │   └── Dockerfile
 │   └── win32/              # Windows packaging
