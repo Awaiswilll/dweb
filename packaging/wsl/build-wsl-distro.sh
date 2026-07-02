@@ -3,11 +3,14 @@
 #  build-wsl-distro.sh — Build a WSL-ready dweb distro tarball
 #
 #  Creates a minimal Alpine Linux rootfs with:
-#    - Node.js + npm
+#    - Node.js + npm (musl-linked for Alpine compatibility)
 #    - dweb-server (pre-built frontend + tools)
 #    - opencode CLI (global npm install)
 #    - Ollama (local AI, downloaded but not running during build)
 #    - WSL init scripts for auto-start
+#    - dweb CLI (/usr/bin/dweb — convenience tool)
+#    - dweb MOTD (welcome banner on login)
+#    - Auto-update script (checks GitHub releases)
 #
 #  Output: dweb-wsl-rootfs.tar.gz  (importable with `wsl --import`)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -367,6 +370,48 @@ appendWindowsPath = true
 WSLCONF
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  STEP 7.5: Install dweb overlays (MOTD, CLI, auto-update)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+info "Installing dweb OS overlays..."
+
+# ── MOTD (Message of the Day) ─────────────────────────────────────
+OVERLAY_DIR="$(cd "$(dirname "$0")" && pwd)/overlay"
+if [ -d "$OVERLAY_DIR" ]; then
+  info "Copying overlay files from $OVERLAY_DIR..."
+
+  # Copy MOTD
+  if [ -f "$OVERLAY_DIR/etc/profile.d/dweb-motd.sh" ]; then
+    mkdir -p "$ROOTFS/etc/profile.d"
+    cp "$OVERLAY_DIR/etc/profile.d/dweb-motd.sh" "$ROOTFS/etc/profile.d/dweb-motd.sh"
+    chmod 755 "$ROOTFS/etc/profile.d/dweb-motd.sh"
+    info "  MOTD installed: /etc/profile.d/dweb-motd.sh"
+  fi
+
+  # Copy dweb CLI
+  if [ -f "$OVERLAY_DIR/usr/bin/dweb" ]; then
+    mkdir -p "$ROOTFS/usr/bin"
+    cp "$OVERLAY_DIR/usr/bin/dweb" "$ROOTFS/usr/bin/dweb"
+    chmod 755 "$ROOTFS/usr/bin/dweb"
+    info "  CLI installed: /usr/bin/dweb"
+  fi
+
+  # Copy auto-update script
+  if [ -f "$OVERLAY_DIR/opt/dweb/tools/dweb-update.sh" ]; then
+    mkdir -p "$ROOTFS/opt/dweb/tools"
+    cp "$OVERLAY_DIR/opt/dweb/tools/dweb-update.sh" "$ROOTFS/opt/dweb/tools/dweb-update.sh"
+    chmod 755 "$ROOTFS/opt/dweb/tools/dweb-update.sh"
+    info "  Auto-update installed: /opt/dweb/tools/dweb-update.sh"
+  fi
+else
+  warn "Overlay directory not found at $OVERLAY_DIR — skipping overlay installation"
+  warn "Create overlay files at packaging/wsl/overlay/ for future builds"
+fi
+
+# Ensure proper ownership
+chroot "$ROOTFS" /bin/sh -c 'chown -R dweb:dweb /opt/dweb 2>/dev/null || true'
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  STEP 8: Enable services to start on boot
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -432,26 +477,31 @@ clean_rootfs() {
   rm -rf "$rootfs/var/cache/misc/"*
   rm -rf "$rootfs/tmp/"*
 
-  # Remove documentation and man pages
+  # Remove documentation, man pages, locales, timezones
   rm -rf "$rootfs/usr/share/doc/"*
   rm -rf "$rootfs/usr/share/man/"*
   rm -rf "$rootfs/usr/share/info/"*
   rm -rf "$rootfs/usr/share/gtk-doc/"*
-
-  # Remove unnecessary locales (keep en_US)
-  find "$rootfs/usr/share/locale" -maxdepth 1 -mindepth 1 -type d \
-    ! -name "en_US" ! -name "locale.alias" -exec rm -rf {} + 2>/dev/null || true
+  rm -rf "$rootfs/usr/share/locale/"
+  rm -rf "$rootfs/usr/share/zoneinfo/"
+  rm -rf "$rootfs/usr/share/i18n/"
 
   # Remove logs
   find "$rootfs/var/log" -type f -delete 2>/dev/null || true
 
-  # Remove npm cache
-  rm -rf "$rootfs/root/.npm/"*
-  rm -rf "$rootfs/home/dweb/.npm/"* 2>/dev/null || true
-  rm -rf "$rootfs/root/.cache/"* 2>/dev/null || true
+  # Remove npm/node caches
+  rm -rf "$rootfs/root/.npm/"* "$rootfs/root/.cache/"* "$rootfs/root/.node-gyp/"*
+  rm -rf "$rootfs/home/dweb/.npm/"* "$rootfs/home/dweb/.cache/"* 2>/dev/null || true
 
-  # Remove node-gyp cache
-  rm -rf "$rootfs/root/.node-gyp/"* 2>/dev/null || true
+  # Remove C headers, static libs, libtool archives
+  rm -rf "$rootfs/usr/include/"
+  find "$rootfs/usr/lib" -name "*.a" -delete 2>/dev/null || true
+  find "$rootfs/usr/lib" -name "*.la" -delete 2>/dev/null || true
+  find "$rootfs/usr/lib" -name "*.h" -delete 2>/dev/null || true
+
+  # Remove Python cache files
+  find "$rootfs" -name "*.pyc" -delete 2>/dev/null || true
+  find "$rootfs" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
 
   # Strip binaries where possible (skip if not on Alpine)
   if command -v strip &>/dev/null; then

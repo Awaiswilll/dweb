@@ -1,0 +1,219 @@
+#!/bin/sh
+# dweb — dweb OS CLI
+# Convenience tool for managing the dweb server and system
+
+set -e
+
+DWEB_PORT="${DWEB_PORT:-49737}"
+DWEB_SERVER="${DWEB_SERVER:-http://localhost:$DWEB_PORT}"
+VERSION="0.1.0"
+
+usage() {
+  cat <<USAGE
+dweb — dweb OS CLI v$VERSION
+
+Usage:  dweb <command> [options]
+
+Commands:
+  status         Show dweb server status and system info
+  logs [-f]      Show server logs (tail mode with -f)
+  start          Start dweb server if not running
+  stop           Stop dweb server
+  restart        Restart dweb server
+  ping           Quick health check
+  update         Check for updates on GitHub
+  help           Show this help message
+
+Examples:
+  dweb status
+  dweb logs -f
+  dweb update
+
+Environment:
+  DWEB_PORT      Server port (default: 49737)
+USAGE
+}
+
+status() {
+  echo "═══ dweb OS Status ═══════════════════════════"
+  echo ""
+
+  # Server health check
+  local ping_result
+  ping_result=$(curl -sf "$DWEB_SERVER/ping" 2>/dev/null || echo "offline")
+  local ok=$(echo "$ping_result" | grep -c '"ok"' 2>/dev/null || true)
+
+  if [ "$ok" -gt 0 ]; then
+    echo "  Server:      ✅ Running on $DWEB_SERVER"
+    echo "  Response:    $ping_result"
+  else
+    echo "  Server:      ❌ Not running or unreachable"
+  fi
+
+  # Process info
+  local node_pid
+  node_pid=$(pgrep -f "node.*dweb" 2>/dev/null | head -1 || true)
+  if [ -n "$node_pid" ]; then
+    local node_uptime
+    node_uptime=$(ps -o etime= -p "$node_pid" 2>/dev/null | tr -d ' ' || echo "?")
+    echo "  PID:         $node_pid (up $node_uptime)"
+  fi
+
+  echo ""
+
+  # System info
+  echo "  Node.js:     $(node --version 2>/dev/null || echo 'not installed')"
+  echo "  Uptime:      $(uptime -p 2>/dev/null | sed 's/up //' || echo '?')"
+  echo "  Memory:      $(free -h 2>/dev/null | awk '/Mem:/ {print $3 " / " $2}' || echo '?')"
+  echo "  Disk:        $(df -h / 2>/dev/null | awk 'NR==2{print $3 " / " $2 " (" $5 ")"}' || echo '?')"
+
+  # Ollama status
+  if command -v ollama &>/dev/null; then
+    echo "  Ollama:      $(pgrep -x ollama >/dev/null && echo 'running' || echo 'stopped')"
+  fi
+
+  echo ""
+  echo "═══════════════════════════════════════════════"
+}
+
+logs() {
+  local logfile="/var/log/dweb.log"
+  if [ ! -f "$logfile" ]; then
+    echo "Log file not found: $logfile"
+    echo "The server may not have been started yet."
+    exit 1
+  fi
+
+  if [ "$1" = "-f" ]; then
+    tail -f "$logfile"
+  else
+    tail -50 "$logfile"
+  fi
+}
+
+start_server() {
+  if curl -sf "$DWEB_SERVER/ping" &>/dev/null; then
+    echo "dweb server is already running on $DWEB_SERVER"
+    exit 0
+  fi
+
+  echo "Starting dweb server..."
+  mkdir -p /var/log
+  nohup node /opt/dweb/dweb.cjs &>/var/log/dweb.log &
+  echo "dweb server started (PID $!)"
+  echo "Logs: tail -f /var/log/dweb.log"
+}
+
+stop_server() {
+  local pid
+  pid=$(pgrep -f "node.*dweb" 2>/dev/null || true)
+  if [ -n "$pid" ]; then
+    echo "Stopping dweb server (PID $pid)..."
+    kill "$pid" 2>/dev/null || true
+    sleep 1
+    if kill -0 "$pid" 2>/dev/null; then
+      kill -9 "$pid" 2>/dev/null || true
+      echo "Force stopped."
+    else
+      echo "Stopped."
+    fi
+  else
+    echo "dweb server is not running."
+  fi
+}
+
+restart_server() {
+  stop_server
+  sleep 1
+  start_server
+}
+
+ping() {
+  local result
+  result=$(curl -sf "$DWEB_SERVER/ping" 2>/dev/null || echo '{"status":"error","message":"unreachable"}')
+  echo "$result" | python3 -m json.tool 2>/dev/null || echo "$result"
+}
+
+check_update() {
+  echo "Checking for updates..."
+  local api_url="https://api.github.com/repos/Awaiswilll/dweb/releases/latest"
+
+  local release_data
+  release_data=$(curl -sf "$api_url" 2>/dev/null || echo "")
+
+  if [ -z "$release_data" ]; then
+    echo "  Unable to check for updates (no network or GitHub unreachable)"
+    exit 1
+  fi
+
+  local latest_tag
+  latest_tag=$(echo "$release_data" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    print(d.get('tag_name', 'unknown'))
+except:
+    print('unknown')
+" 2>/dev/null || echo "unknown")
+
+  local latest_url
+  latest_url=$(echo "$release_data" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    for a in d.get('assets', []):
+        if 'dweb-wsl-rootfs' in a['name']:
+            print(a['browser_download_url'])
+            break
+except:
+    pass
+" 2>/dev/null || echo "")
+
+  echo ""
+  echo "  Current version: v$VERSION"
+  echo "  Latest release:  $latest_tag"
+
+  if [ "$latest_tag" = "v$VERSION" ] || [ "$latest_tag" = "unknown" ]; then
+    echo "  Status:         ✅ Up to date"
+  else
+    echo "  Status:         ⬆️ Update available"
+    if [ -n "$latest_url" ]; then
+      echo "  Download:       $latest_url"
+    fi
+  fi
+  echo ""
+}
+
+# ── Main ──────────────────────────────────────────────────────────
+
+case "${1:-help}" in
+  status|stat)
+    status
+    ;;
+  logs|log)
+    logs "$2"
+    ;;
+  start)
+    start_server
+    ;;
+  stop)
+    stop_server
+    ;;
+  restart)
+    restart_server
+    ;;
+  ping)
+    ping
+    ;;
+  update|upgrade|check)
+    check_update
+    ;;
+  help|--help|-h)
+    usage
+    ;;
+  *)
+    echo "Unknown command: $1"
+    echo "Run 'dweb help' for usage."
+    exit 1
+    ;;
+esac
