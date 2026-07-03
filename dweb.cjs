@@ -604,6 +604,18 @@ async function handleRequest(req, res) {
     //  OPENCODE STATUS
     // ────────────────────────────────────────────────────────────
 
+    // Repo context
+    if (pathname === "/api/repo/status" && method === "GET") {
+      let branch = "unknown", commit = "", files = 0, repoRoot = "";
+      try {
+        repoRoot = execSync("git rev-parse --show-toplevel 2>/dev/null", { timeout: 3000, encoding: "utf-8" }).trim();
+        branch = execSync("git rev-parse --abbrev-ref HEAD 2>/dev/null", { timeout: 3000, encoding: "utf-8" }).trim();
+        commit = execSync("git rev-parse --short HEAD 2>/dev/null", { timeout: 3000, encoding: "utf-8" }).trim();
+        files = parseInt(execSync("git ls-files 2>/dev/null | wc -l", { timeout: 3000, encoding: "utf-8" }).trim(), 10) || 0;
+      } catch {}
+      return json(res, 200, { status: "ok", repo: path.basename(repoRoot) || "dweb", branch, commit, files, path: repoRoot });
+    }
+
     if (pathname === "/api/opencode/status" && method === "GET") {
       let version = null;
       let available = false;
@@ -615,20 +627,30 @@ async function handleRequest(req, res) {
       return json(res, 200, { status: "ok", available, version, instance: INSTANCE_NAME });
     }
 
-    // Run opencode command
+    // Run opencode command (prompt mode — properly shell-escaped)
     if (pathname === "/api/opencode/run" && method === "POST") {
       const body = await parseBody(req);
       const { command } = body;
       if (!command) return json(res, 400, { error: "Missing command" });
+      // Expand common shorthand commands
+      let cmd = command.trim();
+      const shorthands = {
+        "build": "run npm run build in the dweb repo",
+        "test": "run npm test in the dweb repo and fix any failures",
+        "dev": "explain the current development setup and how to start developing",
+        "status": "show the current state of the dweb repo, its architecture, and what can be built next",
+        "help": "list available commands and how to use this opencode agent",
+      };
+      const expanded = shorthands[cmd.toLowerCase()] || cmd;
       try {
-        const output = execSync(`opencode ${command} 2>&1`, {
-          timeout: 60000,
+        const output = execSync(`opencode run -m opencode/deepseek-v4-flash-free ${JSON.stringify(expanded)} 2>&1`, {
+          timeout: 300000,
           encoding: "utf-8",
           maxBuffer: 1024 * 1024,
         });
-        return json(res, 200, { status: "ok", output, command });
+        return json(res, 200, { status: "ok", output, command: expanded });
       } catch (e) {
-        return json(res, 200, { status: "error", output: e.stderr || e.message, command });
+        return json(res, 200, { status: "error", output: (e.stderr || e.message || "").toString(), command: expanded });
       }
     }
 
