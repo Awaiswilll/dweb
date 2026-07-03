@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>dweb — P2P Self-Hosting OS</title>
+<style>
+  /* ── Matrix Digital Rain ── */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0e17;
+    color: #00ff41;
+    font-family: 'Courier New', 'Fira Code', monospace;
+    overflow: hidden;
+    height: 100vh;
+    position: relative;
+  }
+  canvas#matrix {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 0;
+    opacity: 0.35;
+  }
+  /* ── Overlay Content ── */
+  .overlay {
+    position: relative;
+    z-index: 1;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    text-align: center;
+    background: radial-gradient(ellipse at center, rgba(0,255,65,0.03) 0%, transparent 70%);
+  }
+  .terminal-box {
+    background: rgba(0, 10, 0, 0.85);
+    border: 1px solid rgba(0, 255, 65, 0.3);
+    border-radius: 8px;
+    padding: 32px 40px;
+    max-width: 680px;
+    width: 100%;
+    box-shadow: 0 0 60px rgba(0, 255, 65, 0.1), inset 0 0 60px rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(4px);
+  }
+  .terminal-box h1 {
+    font-size: 28px;
+    font-weight: 700;
+    color: #00ff41;
+    text-shadow: 0 0 20px rgba(0, 255, 65, 0.6);
+    letter-spacing: 2px;
+    margin-bottom: 4px;
+  }
+  .terminal-box .subtitle {
+    color: rgba(0, 255, 65, 0.6);
+    font-size: 13px;
+    margin-bottom: 24px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+  }
+  .terminal-box .info-line {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 0;
+    border-bottom: 1px solid rgba(0, 255, 65, 0.08);
+    font-size: 13px;
+  }
+  .terminal-box .info-line:last-child { border-bottom: none; }
+  .terminal-box .info-label { color: rgba(0, 255, 65, 0.5); }
+  .terminal-box .info-value { color: #00ff41; font-weight: 600; }
+  .terminal-box .info-value a {
+    color: #00ff41;
+    text-decoration: none;
+    border-bottom: 1px dashed rgba(0, 255, 65, 0.3);
+  }
+  .terminal-box .info-value a:hover {
+    text-shadow: 0 0 10px rgba(0, 255, 65, 0.5);
+    border-bottom-color: #00ff41;
+  }
+  .cursor-blink {
+    display: inline-block;
+    width: 10px;
+    height: 18px;
+    background: #00ff41;
+    margin-left: 6px;
+    vertical-align: middle;
+    animation: blink 1s step-end infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  .badge-row {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    margin-top: 20px;
+    flex-wrap: wrap;
+  }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 12px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border: 1px solid rgba(0, 255, 65, 0.2);
+    background: rgba(0, 255, 65, 0.05);
+    color: #00ff41;
+    text-decoration: none;
+    transition: all 0.2s;
+  }
+  .badge:hover {
+    background: rgba(0, 255, 65, 0.12);
+    border-color: rgba(0, 255, 65, 0.4);
+    box-shadow: 0 0 15px rgba(0, 255, 65, 0.15);
+  }
+  .badge-green { background: rgba(0, 255, 65, 0.1); border-color: rgba(0, 255, 65, 0.3); }
+  .badge-blue { background: rgba(59, 130, 246, 0.1); border-color: rgba(59, 130, 246, 0.3); color: #60a5fa; }
+  .badge-purple { background: rgba(139, 92, 246, 0.1); border-color: rgba(139, 92, 246, 0.3); color: #a78bfa; }
+  .badge-amber { background: rgba(245, 158, 11, 0.1); border-color: rgba(245, 158, 11, 0.3); color: #fbbf24; }
+
+  .terminal-prompt {
+    margin-top: 18px;
+    text-align: left;
+    font-size: 12px;
+    color: rgba(0, 255, 65, 0.4);
+    border-top: 1px solid rgba(0, 255, 65, 0.1);
+    padding-top: 16px;
+  }
+  .terminal-prompt .prompt { color: #00ff41; }
+
+  @media (max-width: 600px) {
+    .terminal-box { padding: 20px; margin: 10px; }
+    .terminal-box h1 { font-size: 20px; }
+    .terminal-box .info-line { font-size: 11px; flex-direction: column; align-items: flex-start; gap: 2px; }
+  }
+
+  /* scanline effect */
+  .scanline {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 2;
+    pointer-events: none;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0, 0, 0, 0.03) 2px,
+      rgba(0, 0, 0, 0.03) 4px
+    );
+  }
+</style>
+</head>
+<body>
+
+<canvas id="matrix"></canvas>
+<div class="scanline"></div>
+
+<div class="overlay">
+  <div class="terminal-box">
+    <h1>◈ DWEB v0.1.0 ◈</h1>
+    <div class="subtitle">⚡ Decentralized P2P Self-Hosting OS ⚡</div>
+
+    <div class="badge-row">
+      <span class="badge badge-green">● ONLINE</span>
+      <a class="badge badge-blue" href="#" onclick="fetch('/dweb-status').then(r=>r.json()).then(d=>alert(JSON.stringify(d,null,2)));return false">⚡ API</a>
+      <a class="badge badge-purple" href="/">⟳ Dashboard</a>
+      <a class="badge badge-amber" href="/welcome/source">✎ Edit HTML</a>
+    </div>
+
+    <div style="margin: 18px 0;">
+      <div class="info-line">
+        <span class="info-label">$ Instance</span>
+        <span class="info-value" id="hostname">dweb.local</span>
+      </div>
+      <div class="info-line">
+        <span class="info-label">$ Peer ID</span>
+        <span class="info-value" id="peerid">—</span>
+      </div>
+      <div class="info-line">
+        <span class="info-label">$ Uptime</span>
+        <span class="info-value" id="uptime">—</span>
+      </div>
+      <div class="info-line">
+        <span class="info-label">$ Mode</span>
+        <span class="info-value" id="mode">—</span>
+      </div>
+      <div class="info-line">
+        <span class="info-label">$ Web IDE</span>
+        <span class="info-value"><a href="/">→ Open Dashboard ←</a></span>
+      </div>
+      <div class="info-line">
+        <span class="info-label">$ P2P Network</span>
+        <span class="info-value" id="peers">0 peers online</span>
+      </div>
+      <div class="info-line">
+        <span class="info-label">$ File Share</span>
+        <span class="info-value"><a href="/fileshare">→ Browse Files ←</a></span>
+      </div>
+    </div>
+
+    <div class="badge-row">
+      <span class="badge">📁 File Share</span>
+      <span class="badge">🌐 Static Site</span>
+      <span class="badge">🤖 AI Agent</span>
+      <span class="badge">🔗 P2P Relay</span>
+    </div>
+
+    <div class="terminal-prompt">
+      <span class="prompt">visitor@dweb:~$</span> cat /etc/dweb/welcome<br>
+      <span style="color: rgba(0,255,65,0.6);">You are running dweb — a decentralized mini OS for P2P self-hosting.</span><br>
+      <span class="prompt">visitor@dweb:~$</span> <span class="cursor-blink"></span>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══ Matrix Digital Rain ═══
+const canvas = document.getElementById('matrix');
+const ctx = canvas.getContext('2d');
+
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+const chars = 'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン0123456789ABCDEF<>/{}[]|&^%$#@!';
+const fontSize = 14;
+const columns = Math.floor(canvas.width / fontSize);
+const drops = Array(columns).fill(1);
+
+function drawMatrix() {
+  ctx.fillStyle = 'rgba(10, 14, 23, 0.05)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  
+  ctx.fillStyle = '#00ff41';
+  ctx.font = fontSize + 'px monospace';
+  
+  for (let i = 0; i < drops.length; i++) {
+    const char = chars[Math.floor(Math.random() * chars.length)];
+    const x = i * fontSize;
+    const y = drops[i] * fontSize;
+    
+    ctx.fillStyle = Math.random() > 0.98 ? '#ffffff' : '#00ff41';
+    ctx.fillText(char, x, y);
+    
+    if (y > canvas.height && Math.random() > 0.975) {
+      drops[i] = 0;
+    }
+    drops[i]++;
+  }
+}
+
+setInterval(drawMatrix, 50);
+
+// ═══ Fetch dweb system info ═══
+async function loadSystemInfo() {
+  try {
+    const resp = await fetch('/dweb-status');
+    const data = await resp.json();
+    
+    if (data.status === 'ok') {
+      document.getElementById('hostname').textContent = data.hostname || 'dweb.local';
+      document.getElementById('peerid').textContent = data.peerId || '—';
+      document.getElementById('mode').textContent = data.mode || 'auto';
+      
+      const uptime = data.uptime || 0;
+      const days = Math.floor(uptime / 86400);
+      const hours = Math.floor((uptime % 86400) / 3600);
+      const mins = Math.floor((uptime % 3600) / 60);
+      document.getElementById('uptime').textContent = 
+        days + 'd ' + hours + 'h ' + mins + 'm';
+      
+      document.getElementById('peers').textContent = 
+        (data.peersOnline || 0) + ' peer(s) online' + 
+        (data.relayConnected ? ' · relay connected' : '');
+    }
+  } catch {
+    document.getElementById('hostname').textContent = 'dweb.local (offline)';
+  }
+}
+loadSystemInfo();
+setInterval(loadSystemInfo, 15000);
+</script>
+</body>
+</html>

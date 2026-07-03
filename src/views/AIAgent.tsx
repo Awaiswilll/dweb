@@ -4,7 +4,8 @@ import {
   Bot, Send, Code, Server, Database, Globe, CheckCircle2,
   Circle, Loader2, BookOpen, FolderOpen, Settings2,
   Sparkles, Trash2, Plus, ChevronLeft, ChevronRight,
-  Layers, Pencil, PanelLeftClose, PanelLeft,
+  Layers, Pencil, PanelLeftClose, PanelLeft, Terminal,
+  ExternalLink, Rocket,
 } from "lucide-react";
 import type { Template, AIProviderConfig, AIModelInfo, StreamToken, AISession } from "../types";
 import {
@@ -235,6 +236,18 @@ export default function AIAgent() {
     return null;
   }, []);
 
+  // ── Opencode integration ──
+  const [opencodeAvailable, setOpencodeAvailable] = useState<boolean | null>(null);
+  const [opencodeVersion, setOpencodeVersion] = useState("");
+  const [opencodeOutput, setOpencodeOutput] = useState("");
+  const [opencodeCmd, setOpencodeCmd] = useState("");
+  const [opencodeRunning, setOpencodeRunning] = useState(false);
+  const [showOpencode, setShowOpencode] = useState(false);
+
+  // ── Build & Host ──
+  const [publishedProjects, setPublishedProjects] = useState<{ name: string; url: string; route: string }[]>([]);
+  const [publishing, setPublishing] = useState(false);
+
   const [showCustomStack, setShowCustomStack] = useState(false);
   const [stackRuntime, setStackRuntime] = useState("node");
   const [stackFrontend, setStackFrontend] = useState("react");
@@ -246,6 +259,25 @@ export default function AIAgent() {
   const chatEnd = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
+
+  // On mount, check opencode availability
+  useEffect(() => {
+    fetch("/api/opencode/status")
+      .then(r => r.json())
+      .then(d => {
+        setOpencodeAvailable(d.available);
+        setOpencodeVersion(d.version || "");
+      })
+      .catch(() => setOpencodeAvailable(false));
+  }, []);
+
+  // Load published projects
+  useEffect(() => {
+    fetch("/api/projects")
+      .then(r => r.json())
+      .then(d => { if (d.status === "ok") setPublishedProjects(d.projects || []); })
+      .catch(() => {});
+  }, []);
 
   // On mount, load most recent session messages if stored sessions exist
   useEffect(() => {
@@ -795,6 +827,69 @@ export default function AIAgent() {
     runStreamingGeneration(prompt);
   };
 
+  /* ── Publish to dweb ── */
+  const handlePublish = async () => {
+    const lastMsg = messages.filter(m => m.role === "assistant" && m.content).slice(-1)[0];
+    if (!lastMsg || !lastMsg.content.trim()) {
+      addMessage({ role: "system", content: "⚠ No AI-generated content to publish. Generate code first.", timestamp: Date.now() });
+      return;
+    }
+    setPublishing(true);
+    // Extract code blocks and create project files
+    const codeBlocks = lastMsg.content.match(/```[\s\S]*?```/g) || [];
+    const files = codeBlocks.map((block, i) => {
+      const lines = block.split("\n");
+      const header = lines[0].replace("```", "").trim();
+      const lang = header.split(" ")[0] || "txt";
+      const content = lines.slice(1, -1).join("\n");
+      // Try to guess file path from header comment or use generic name
+      const fileName = `file_${i + 1}.${lang === "javascript" || lang === "js" ? "js" : lang === "typescript" || lang === "ts" ? "ts" : lang === "html" ? "html" : lang === "css" ? "css" : lang === "python" || lang === "py" ? "py" : lang}`;
+      return { path: fileName, content, language: lang };
+    });
+
+    if (files.length === 0) {
+      addMessage({ role: "system", content: "⚠ No code blocks found in the response. Ask the AI to generate code first.", timestamp: Date.now() });
+      setPublishing(false);
+      return;
+    }
+
+    try {
+      const projectName = `ai-built-${Date.now().toString(36)}`;
+      const resp = await fetch("/api/publish", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: projectName, type: "Web App", files }),
+      });
+      const data = await resp.json();
+      if (data.status === "ok") {
+        addMessage({ role: "system", content: `✅ **Published to dweb!**\n\nURL: ${data.url}\n\nOpen it in the Browser view or click the link above.`, timestamp: Date.now() });
+        setPublishedProjects(prev => [...prev, { name: projectName, url: data.url, route: data.project.route }]);
+      } else {
+        addMessage({ role: "system", content: `❌ Publish failed: ${data.error}`, timestamp: Date.now() });
+      }
+    } catch (e) {
+      addMessage({ role: "system", content: `❌ Publish error: ${e}`, timestamp: Date.now() });
+    }
+    setPublishing(false);
+  };
+
+  /* ── Run opencode ── */
+  const handleRunOpencode = async () => {
+    if (!opencodeCmd.trim()) return;
+    setOpencodeRunning(true);
+    setOpencodeOutput("");
+    try {
+      const resp = await fetch("/api/opencode/run", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command: opencodeCmd.trim() }),
+      });
+      const data = await resp.json();
+      setOpencodeOutput(data.output || "No output");
+    } catch (e) {
+      setOpencodeOutput(`Error: ${e}`);
+    }
+    setOpencodeRunning(false);
+  };
+
   const currentProviderInfo = providers.find(p => p.provider_type === activeProvider);
   const providerColor = AI_PROVIDER_COLORS[activeProvider] || "#7C3AED";
   const providerIcon = AI_PROVIDER_ICONS[activeProvider] || "🤖";
@@ -835,6 +930,102 @@ export default function AIAgent() {
           </button>
         </div>
       </div>
+
+      {/* ─── Opencode Integration Bar ──────────────────────── */}
+      <div className="glass-sm" style={{
+        marginBottom: 8, padding: "8px 14px", borderRadius: "var(--radius-sm)",
+        display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1 }}>
+          <Terminal size={16} style={{ color: opencodeAvailable ? "#22c55e" : "#6b7280" }} />
+          <span style={{ fontSize: 13, fontWeight: 600 }}>Opencode CLI</span>
+          {opencodeAvailable === null && <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Checking...</span>}
+          {opencodeAvailable === true && (
+            <span style={{ fontSize: 11, color: "#22c55e", display: "flex", alignItems: "center", gap: 4 }}>
+              <CheckCircle2 size={12} /> v{opencodeVersion || "ready"}
+            </span>
+          )}
+          {opencodeAvailable === false && (
+            <span style={{ fontSize: 11, color: "#6b7280" }}>Not installed</span>
+          )}
+        </div>
+        <button
+          className="btn btn-sm" style={{
+            padding: "4px 12px", fontSize: 11,
+            background: showOpencode ? "rgba(59,130,246,0.15)" : "rgba(255,255,255,0.05)",
+            color: showOpencode ? "var(--accent-blue)" : "var(--text-muted)",
+            border: `1px solid ${showOpencode ? "rgba(59,130,246,0.3)" : "transparent"}`,
+            borderRadius: "var(--radius-sm)", cursor: "pointer",
+          }}
+          onClick={() => setShowOpencode(!showOpencode)}
+        >
+          <Terminal size={12} /> {showOpencode ? "Hide Terminal" : "Opencode Terminal"}
+        </button>
+        {/* Published Projects link */}
+        {publishedProjects.length > 0 && (
+          <span style={{ fontSize: 11, color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 4 }}>
+            <Rocket size={12} /> {publishedProjects.length} project(s) hosted
+          </span>
+        )}
+        {/* Publish button */}
+        {messages.filter(m => m.role === "assistant" && m.content).length > 0 && (
+          <button className="btn btn-sm btn-primary" onClick={handlePublish} disabled={publishing} style={{ fontSize: 11, padding: "4px 10px", height: "auto" }}>
+            {publishing ? <Loader2 size={12} className="spin" /> : <Rocket size={12} />}
+            {publishing ? "Publishing..." : "Host on dweb"}
+          </button>
+        )}
+      </div>
+
+      {/* ─── Opencode Terminal ──────────────────────────────── */}
+      {showOpencode && (
+        <div className="glass-sm" style={{
+          marginBottom: 8, padding: 10, borderRadius: "var(--radius-sm)",
+          fontFamily: "'Courier New', monospace", fontSize: 12,
+        }}>
+          <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+            <input
+              type="text"
+              value={opencodeCmd}
+              onChange={e => setOpencodeCmd(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") handleRunOpencode(); }}
+              placeholder={opencodeAvailable ? "e.g. --help or a prompt..." : "Opencode CLI not available"}
+              disabled={!opencodeAvailable || opencodeRunning}
+              className="text-input"
+              style={{ flex: 1, fontSize: 12, padding: "6px 10px", fontFamily: "'Courier New', monospace" }}
+            />
+            <button className="btn btn-sm btn-secondary" onClick={handleRunOpencode}
+              disabled={!opencodeAvailable || opencodeRunning || !opencodeCmd.trim()}>
+              {opencodeRunning ? <Loader2 size={12} className="spin" /> : <Terminal size={12} />}
+            </button>
+          </div>
+          {opencodeOutput && (
+            <pre style={{
+              background: "rgba(0,0,0,0.3)", padding: 8, borderRadius: 4,
+              maxHeight: 200, overflow: "auto", margin: 0, whiteSpace: "pre-wrap",
+              color: opencodeOutput.includes("Error") ? "#ef4444" : "#22c55e",
+              fontSize: 11,
+            }}>{opencodeOutput}</pre>
+          )}
+        </div>
+      )}
+
+      {/* ─── Published Projects ─────────────────────────────── */}
+      {publishedProjects.length > 0 && (
+        <div style={{ marginBottom: 8, display: "flex", flexWrap: "wrap", gap: 4 }}>
+          {publishedProjects.map(p => (
+            <a key={p.name} href={p.url} target="_blank" rel="noopener"
+              className="glass-sm" style={{
+                display: "flex", alignItems: "center", gap: 6,
+                padding: "4px 10px", borderRadius: "var(--radius-sm)",
+                fontSize: 11, color: "#22c55e", textDecoration: "none",
+                border: "1px solid rgba(34,197,94,0.15)",
+              }}>
+              <Rocket size={12} /> {p.name.slice(0, 20)}
+              <ExternalLink size={10} />
+            </a>
+          ))}
+        </div>
+      )}
 
       {/* ─── Body: Session sidebar + main chat ────────────── */}
       <div style={{ display: "flex", flex: 1, minHeight: 0, gap: 0 }}>

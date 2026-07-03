@@ -13,7 +13,7 @@ import P2PDashboard from "./views/P2PDashboard";
 import type { View } from "./types";
 
 import {
-  Plus, Radio, Terminal, ExternalLink, RefreshCw, Globe, Wifi,
+  Plus, Radio, RefreshCw, Wifi,
 } from "lucide-react";
 
 function AppContent() {
@@ -72,7 +72,7 @@ function AppContent() {
 
   const renderView = () => {
     switch (currentView) {
-      case "dashboard": return <Dashboard onOpenInBrowser={handleOpenInBrowser} />;
+      case "dashboard": return <Dashboard />;
       case "browser": return <BrowserView initialUrl={browserUrl} navId={browserNavId} />;
       case "ai-agent": return <AIAgent />;
       case "domains": return <Domains onOpenInBrowser={handleOpenInBrowser} />;

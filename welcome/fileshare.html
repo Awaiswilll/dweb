@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>dweb File Share</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0e17;
+    color: #e2e8f0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    padding: 24px;
+    min-height: 100vh;
+  }
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+  .header h1 { font-size: 20px; font-weight: 700; color: #22c55e; display: flex; align-items: center; gap: 8px; }
+  .header .sub { color: #64748b; font-size: 13px; }
+  .header a { color: #3b82f6; text-decoration: none; font-size: 13px; }
+  .header a:hover { text-decoration: underline; }
+
+  .upload-area {
+    border: 2px dashed rgba(255,255,255,0.1);
+    border-radius: 8px;
+    padding: 40px 20px;
+    text-align: center;
+    margin-bottom: 20px;
+    cursor: pointer;
+    transition: all 0.2s;
+    background: rgba(255,255,255,0.02);
+  }
+  .upload-area:hover, .upload-area.dragover {
+    border-color: #22c55e;
+    background: rgba(34,197,94,0.05);
+  }
+  .upload-area .icon { font-size: 36px; margin-bottom: 8px; }
+  .upload-area .text { color: #94a3b8; font-size: 14px; }
+  .upload-area .hint { color: #64748b; font-size: 12px; margin-top: 4px; }
+  .upload-area input[type="file"] { display: none; }
+
+  .file-list { display: flex; flex-direction: column; gap: 4px; }
+  .file-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    border-radius: 6px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.04);
+    transition: background 0.15s;
+  }
+  .file-item:hover { background: rgba(255,255,255,0.06); }
+  .file-item .icon { font-size: 20px; }
+  .file-item .name { flex: 1; font-size: 14px; font-weight: 500; color: #e2e8f0; }
+  .file-item .size { color: #64748b; font-size: 12px; }
+  .file-item .date { color: #64748b; font-size: 12px; }
+  .file-item a { color: #3b82f6; text-decoration: none; font-size: 12px; padding: 4px 10px; border-radius: 4px; background: rgba(59,130,246,0.1); }
+  .file-item a:hover { background: rgba(59,130,246,0.2); }
+
+  .empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: #64748b;
+  }
+  .empty-state .icon { font-size: 48px; margin-bottom: 12px; opacity: 0.3; }
+  .empty-state .text { font-size: 14px; }
+  .empty-state .hint { font-size: 12px; margin-top: 4px; color: #475569; }
+
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    padding: 12px 20px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    background: rgba(34,197,94,0.15);
+    border: 1px solid rgba(34,197,94,0.3);
+    color: #22c55e;
+    display: none;
+    z-index: 100;
+  }
+  .toast.error { background: rgba(239,68,68,0.15); border-color: rgba(239,68,68,0.3); color: #ef4444; }
+
+  .info-bar {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+  .info-chip {
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-size: 11px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+    color: #94a3b8;
+  }
+  .info-chip strong { color: #e2e8f0; }
+
+  @media (max-width: 600px) {
+    body { padding: 12px; }
+    .file-item { flex-wrap: wrap; }
+    .file-item .date { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1>📁 dweb File Share</h1>
+    <div class="sub">P2P file sharing · Drag & drop to upload · Files stored locally</div>
+  </div>
+  <a href="/">← Back to Dashboard</a>
+</div>
+
+<div class="info-bar">
+  <span class="info-chip">📂 <strong id="fileCount">0</strong> files</span>
+  <span class="info-chip">📏 <strong id="totalSize">0 B</strong> total</span>
+  <span class="info-chip">🔗 <strong id="sharePath">/fileshare/</strong></span>
+</div>
+
+<div class="upload-area" id="dropZone">
+  <div class="icon">📤</div>
+  <div class="text">Drop files here or click to upload</div>
+  <div class="hint">Max 50MB per file · All file types supported</div>
+  <input type="file" id="fileInput" multiple>
+</div>
+
+<div id="fileListContainer">
+  <div class="empty-state" id="emptyState">
+    <div class="icon">📂</div>
+    <div class="text">No files shared yet</div>
+    <div class="hint">Drag and drop files above to start sharing</div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+const fileListContainer = document.getElementById('fileListContainer');
+const emptyState = document.getElementById('emptyState');
+const toast = document.getElementById('toast');
+
+let toastTimer = null;
+
+function showToast(msg, isError = false) {
+  toast.textContent = msg;
+  toast.className = 'toast' + (isError ? ' error' : '');
+  toast.style.display = 'block';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toast.style.display = 'none', 3000);
+}
+
+function formatSize(bytes) {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+function formatDate(ts) {
+  return new Date(ts).toLocaleDateString() + ' ' + new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function getFileIcon(name) {
+  const ext = name.split('.').pop().toLowerCase();
+  const icons = {
+    pdf: '📄', zip: '📦', gz: '📦', tar: '📦', rar: '📦',
+    js: '📜', ts: '📜', py: '🐍', java: '☕', go: '🔵', rs: '🦀',
+    html: '🌐', css: '🎨', json: '📋', xml: '📋', yml: '📋', yaml: '📋',
+    md: '📝', txt: '📄',
+    png: '🖼️', jpg: '🖼️', jpeg: '🖼️', gif: '🖼️', svg: '🖼️', webp: '🖼️',
+    mp3: '🎵', wav: '🎵', ogg: '🎵',
+    mp4: '🎬', mov: '🎬', webm: '🎬',
+    exe: '⚙️', dmg: '⚙️', deb: '⚙️', AppImage: '⚙️',
+  };
+  return icons[ext] || '📄';
+}
+
+async function loadFiles() {
+  try {
+    const resp = await fetch('/fileshare/api/list');
+    const data = await resp.json();
+    if (data.status !== 'ok') throw new Error(data.error || 'Failed');
+    
+    const files = data.files || [];
+    document.getElementById('fileCount').textContent = files.length;
+    const total = files.reduce((s, f) => s + (f.size || 0), 0);
+    document.getElementById('totalSize').textContent = formatSize(total);
+    
+    if (files.length === 0) {
+      fileListContainer.innerHTML = '<div class="empty-state" id="emptyState"><div class="icon">📂</div><div class="text">No files shared yet</div><div class="hint">Drag and drop files above to start sharing</div></div>';
+      return;
+    }
+    
+    document.getElementById('emptyState')?.remove();
+    
+    const list = document.createElement('div');
+    list.className = 'file-list';
+    
+    files.sort((a, b) => (b.added || 0) - (a.added || 0));
+    
+    for (const f of files) {
+      const item = document.createElement('div');
+      item.className = 'file-item';
+      item.innerHTML = `
+        <span class="icon">${getFileIcon(f.name)}</span>
+        <span class="name">${escapeHtml(f.name)}</span>
+        <span class="size">${formatSize(f.size || 0)}</span>
+        <span class="date">${f.added ? formatDate(f.added) : ''}</span>
+        <a href="/fileshare/api/download/${encodeURIComponent(f.name)}" download="${escapeHtml(f.name)}">Download</a>
+      `;
+      list.appendChild(item);
+    }
+    
+    fileListContainer.innerHTML = '';
+    fileListContainer.appendChild(list);
+  } catch (e) {
+    showToast('Error loading files: ' + e.message, true);
+  }
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// Upload file
+async function uploadFiles(files) {
+  for (const file of files) {
+    if (file.size > 50 * 1024 * 1024) {
+      showToast('File too large: ' + file.name + ' (max 50MB)', true);
+      continue;
+    }
+    
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    try {
+      const resp = await fetch('/fileshare/api/upload', { method: 'POST', body: formData });
+      const data = await resp.json();
+      if (data.status === 'ok') {
+        showToast('✓ Uploaded: ' + file.name);
+      } else {
+        showToast('Upload failed: ' + (data.error || file.name), true);
+      }
+    } catch (e) {
+      showToast('Upload error: ' + e.message, true);
+    }
+  }
+  loadFiles();
+}
+
+// Events
+dropZone.addEventListener('click', () => fileInput.click());
+
+dropZone.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  dropZone.classList.add('dragover');
+});
+
+dropZone.addEventListener('dragleave', () => {
+  dropZone.classList.remove('dragover');
+});
+
+dropZone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dropZone.classList.remove('dragover');
+  uploadFiles(e.dataTransfer.files);
+});
+
+fileInput.addEventListener('change', () => {
+  if (fileInput.files.length > 0) {
+    uploadFiles(fileInput.files);
+    fileInput.value = '';
+  }
+});
+
+// Initial load
+loadFiles();
+// Auto-refresh every 30s
+setInterval(loadFiles, 30000);
+</script>
+</body>
+</html>

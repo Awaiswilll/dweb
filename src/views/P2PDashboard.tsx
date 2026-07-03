@@ -1,9 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
-import { safeInvoke as invoke } from "../safe-invoke";
 import { useNotifications } from "../components/Notifications";
 import {
-  Globe, RefreshCw, Users, Server, Zap, Wifi, WifiOff,
-  Clock, Activity, ArrowUpRight, ArrowDownLeft, Info,
+  RefreshCw, Users, Server, Wifi, WifiOff,
+  Activity,
 } from "lucide-react";
 import type { P2PNetworkStatus, P2PPeer } from "../types";
 
@@ -27,8 +26,6 @@ export default function P2PDashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [peerCount, setPeerCount] = useState(0);
-  const [bandwidthUp] = useState("0 B/s");
-  const [bandwidthDown] = useState("0 B/s");
 
   const fetchData = useCallback(async (showRefreshIndicator = false) => {
     if (showRefreshIndicator) setRefreshing(true);

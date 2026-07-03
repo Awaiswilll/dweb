@@ -50,6 +50,13 @@ const UPSTREAM_RELAY = process.env.UPSTREAM || null;
 let relayConnected = false;
 let relayError = null;
 
+// Shared directory for file share
+const SHARE_DIR = path.resolve(__dirname, "shared-files");
+if (!fs.existsSync(SHARE_DIR)) {
+  fs.mkdirSync(SHARE_DIR, { recursive: true });
+  console.log(`  [fileshare] Created share directory: ${SHARE_DIR}`);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 //  STATE
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -418,6 +425,214 @@ async function handleRequest(req, res) {
     }
 
     // ────────────────────────────────────────────────────────────
+    //  WELCOME PAGE
+    // ────────────────────────────────────────────────────────────
+
+    if (pathname === "/welcome" && method === "GET") {
+      const welcomePath = path.join(__dirname, "welcome", "welcome.html");
+      return serveFile(res, welcomePath);
+    }
+    if (pathname === "/welcome/source" && method === "GET") {
+      const welcomePath = path.join(__dirname, "welcome", "welcome.html");
+      res.writeHead(200, {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Access-Control-Allow-Origin": "*",
+      });
+      res.end(fs.readFileSync(welcomePath));
+    }
+
+    // ────────────────────────────────────────────────────────────
+    //  FILE SHARE UI
+    // ────────────────────────────────────────────────────────────
+
+    if (pathname === "/fileshare" && method === "GET") {
+      const fsPath = path.join(__dirname, "welcome", "fileshare.html");
+      return serveFile(res, fsPath);
+    }
+
+    // File Share API — list files
+    if (pathname === "/fileshare/api/list" && method === "GET") {
+      try {
+        const files = fs.readdirSync(SHARE_DIR).map(name => {
+          const stat = fs.statSync(path.join(SHARE_DIR, name));
+          return { name, size: stat.size, added: stat.mtimeMs, isDir: stat.isDirectory() };
+        });
+        return json(res, 200, { status: "ok", count: files.length, files });
+      } catch (e) {
+        return json(res, 500, { error: e.message });
+      }
+    }
+
+    // File Share API — upload
+    if (pathname === "/fileshare/api/upload" && method === "POST") {
+      const ct = req.headers["content-type"] || "";
+      if (!ct.includes("multipart/form-data")) {
+        return json(res, 400, { error: "Expected multipart/form-data" });
+      }
+      let rawBody = [];
+      let totalBytes = 0;
+      const boundary = "--" + ct.split("boundary=")[1];
+      req.on("data", c => { rawBody.push(c); totalBytes += c.length; if (totalBytes > 100e6) req.destroy(); });
+      req.on("end", () => {
+        try {
+          const full = Buffer.concat(rawBody);
+          const parts = full.toString("latin1").split(boundary);
+          let saved = 0;
+          for (const part of parts) {
+            if (part.includes("filename=\"")) {
+              const fnMatch = part.match(/filename="(.+?)"/);
+              if (!fnMatch) continue;
+              const fileName = fnMatch[1];
+              const headerEnd = part.indexOf("\r\n\r\n") + 4;
+              const content = part.slice(headerEnd, part.lastIndexOf("\r\n--"));
+              const buf = Buffer.from(content, "latin1");
+              fs.writeFileSync(path.join(SHARE_DIR, fileName), buf);
+              saved++;
+            }
+          }
+          json(res, 200, { status: "ok", saved });
+        } catch (e) {
+          json(res, 500, { error: e.message });
+        }
+      });
+      return;
+    }
+
+    // File Share API — download
+    const downloadMatch = pathname.match(/^\/fileshare\/api\/download\/(.+)$/);
+    if (downloadMatch && method === "GET") {
+      const fileName = decodeURIComponent(downloadMatch[1]);
+      const filePath = path.join(SHARE_DIR, fileName);
+      if (!filePath.startsWith(SHARE_DIR)) return json(res, 403, { error: "Forbidden" });
+      if (!fs.existsSync(filePath)) return json(res, 404, { error: "File not found" });
+      const stat = fs.statSync(filePath);
+      res.writeHead(200, {
+        "Content-Type": "application/octet-stream",
+        "Content-Disposition": `attachment; filename="${fileName}"`,
+        "Content-Length": stat.size,
+        "Access-Control-Allow-Origin": "*",
+      });
+      fs.createReadStream(filePath).pipe(res);
+      return;
+    }
+
+    // File Share API — delete
+    if (pathname === "/fileshare/api/delete" && method === "POST") {
+      parseBody(req).then(body => {
+        const filePath = path.join(SHARE_DIR, body.name);
+        if (!filePath.startsWith(SHARE_DIR)) return json(res, 403, { error: "Forbidden" });
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+        json(res, 200, { status: "ok" });
+      }).catch(e => json(res, 500, { error: e.message }));
+      return;
+    }
+
+    // ────────────────────────────────────────────────────────────
+    //  BUILD & DEPLOY API — register a user-built project as a service
+    // ────────────────────────────────────────────────────────────
+
+    if (pathname === "/api/publish" && method === "POST") {
+      const body = await parseBody(req);
+      const { name, type, files } = body;
+      if (!name || !files || !Array.isArray(files)) {
+        return json(res, 400, { error: "Missing name or files array" });
+      }
+      // Create project directory
+      const projectDir = path.join(__dirname, "projects", name.replace(/[^a-zA-Z0-9-_]/g, "_"));
+      if (fs.existsSync(projectDir)) {
+        // Clean it
+        fs.rmSync(projectDir, { recursive: true, force: true });
+      }
+      fs.mkdirSync(projectDir, { recursive: true });
+      for (const f of files) {
+        const filePath = path.join(projectDir, f.path);
+        fs.mkdirSync(path.dirname(filePath), { recursive: true });
+        fs.writeFileSync(filePath, f.content, "utf-8");
+      }
+      // Determine port (increment from base)
+      const basePort = 49200;
+      const existingProjects = fs.readdirSync(path.join(__dirname, "projects")).length;
+      const appPort = basePort + existingProjects;
+      // Register as hosted service
+      addHostedService(name, type || "Web App", PORT, `http://localhost:${PORT}/project/${name.replace(/[^a-zA-Z0-9-_]/g, "_")}`);
+      // Create a simple symlink or serve from /project/:name route
+      const routeName = name.replace(/[^a-zA-Z0-9-_]/g, "_");
+      console.log(`  [deploy] Published "${name}" → /project/${routeName}`);
+      return json(res, 201, {
+        status: "ok", project: { name, route: `/project/${routeName}`, path: projectDir, port: appPort },
+        url: `http://localhost:${PORT}/project/${routeName}`,
+      });
+    }
+
+    // Serve published projects
+    const projectMatch = pathname.match(/^\/project\/([a-zA-Z0-9_-]+)(\/.*)?$/);
+    if (projectMatch && method === "GET") {
+      const projectName = projectMatch[1];
+      let subPath = projectMatch[2] || "/index.html";
+      const projectDir = path.join(__dirname, "projects", projectName);
+      if (!fs.existsSync(projectDir)) {
+        return json(res, 404, { error: "Project not found" });
+      }
+      let filePath = path.join(projectDir, subPath);
+      if (!filePath.startsWith(projectDir)) return json(res, 403, { error: "Forbidden" });
+      // If path is a directory, look for index.html
+      if (fs.existsSync(filePath) && fs.statSync(filePath).isDirectory()) {
+        subPath = path.join(subPath.replace(/\/$/, ""), "index.html");
+        filePath = path.join(projectDir, subPath);
+      }
+      if (!fs.existsSync(filePath)) {
+        // SPA fallback — serve index.html
+        const indexPath = path.join(projectDir, "index.html");
+        if (fs.existsSync(indexPath)) return serveFile(res, indexPath);
+        return json(res, 404, { error: "File not found" });
+      }
+      return serveFile(res, filePath);
+    }
+
+    // List published projects
+    if (pathname === "/api/projects" && method === "GET") {
+      const projectsDir = path.join(__dirname, "projects");
+      if (!fs.existsSync(projectsDir)) return json(res, 200, { status: "ok", projects: [] });
+      const projects = fs.readdirSync(projectsDir).map(name => {
+        const stats = fs.statSync(path.join(projectsDir, name));
+        return { name, added: stats.mtimeMs, route: `/project/${name}`, url: `http://localhost:${PORT}/project/${name}` };
+      });
+      return json(res, 200, { status: "ok", count: projects.length, projects });
+    }
+
+    // ────────────────────────────────────────────────────────────
+    //  OPENCODE STATUS
+    // ────────────────────────────────────────────────────────────
+
+    if (pathname === "/api/opencode/status" && method === "GET") {
+      let version = null;
+      let available = false;
+      try {
+        const v = execSync("opencode --version 2>/dev/null", { timeout: 3000, encoding: "utf-8" }).trim();
+        version = v;
+        available = true;
+      } catch {}
+      return json(res, 200, { status: "ok", available, version, instance: INSTANCE_NAME });
+    }
+
+    // Run opencode command
+    if (pathname === "/api/opencode/run" && method === "POST") {
+      const body = await parseBody(req);
+      const { command } = body;
+      if (!command) return json(res, 400, { error: "Missing command" });
+      try {
+        const output = execSync(`opencode ${command} 2>&1`, {
+          timeout: 60000,
+          encoding: "utf-8",
+          maxBuffer: 1024 * 1024,
+        });
+        return json(res, 200, { status: "ok", output, command });
+      } catch (e) {
+        return json(res, 200, { status: "error", output: e.stderr || e.message, command });
+      }
+    }
+
+    // ────────────────────────────────────────────────────────────
     //  STATIC FILES (frontend)
     // ────────────────────────────────────────────────────────────
 
@@ -576,6 +791,13 @@ function startServer() {
 
 const webServer = startServer();
 startTCPRelay();
+
+// Auto-register default services
+addHostedService("My Static Website", "Static Site", PORT, `http://localhost:${PORT}/welcome`);
+addHostedService("File Share", "File Browser", PORT, `http://localhost:${PORT}/fileshare`);
+console.log(`  [services] Auto-registered: "My Static Website" → /welcome`);
+console.log(`  [services] Auto-registered: "File Share" → /fileshare`);
+
 printBanner();
 
 // Register with upstream relay

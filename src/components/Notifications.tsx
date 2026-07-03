@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, createContext, useContext, type ReactNode } from "react";
+import { useState, useCallback, createContext, useContext, type ReactNode } from "react";
 import { X, Info, CheckCircle2, AlertTriangle, AlertCircle } from "lucide-react";
 import type { Notification } from "../types";
 

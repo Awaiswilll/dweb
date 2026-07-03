@@ -368,18 +368,45 @@ function AddServiceModal({ onClose, onAdd, initialData }: {
   );
 }
 
-/* ─── Main Dashboard ──────────────────────────────────────── */
-interface DashboardProps {
-  onOpenInBrowser?: (url: string) => void;
+/* ─── Default Services (always running) ──────────────────── */
+const DEFAULT_SERVICES: Service[] = [
+  { name: "My Static Website", type: "Static Site", port: 0, running: true, cpu: 0.1, memory: 2_000_000 },
+  { name: "File Share", type: "File Browser", port: 0, running: true, cpu: 0.2, memory: 4_000_000 },
+];
+
+/* ─── Service Access URLs ─────────────────────────────────── */
+function getServiceUrl(name: string): string {
+  const base = window.location.origin;
+  if (name === "My Static Website") return `${base}/welcome`;
+  if (name === "File Share") return `${base}/fileshare`;
+  return base;
 }
 
-export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
+function getServiceSourceUrl(name: string): string | null {
+  if (name === "My Static Website") return `${window.location.origin}/welcome/source`;
+  return null;
+}
+
+/* ─── Main Dashboard ──────────────────────────────────────── */
+interface DashboardProps {
+  // props available for future use
+}
+
+export default function Dashboard(_props: DashboardProps) {
   // Restore services from localStorage cache so pills appear immediately on tab switch
   const [services, setServices] = useState<Service[]>(() => {
     try {
       const raw = localStorage.getItem(SERVICES_STORAGE_KEY);
-      return raw ? JSON.parse(raw) : [];
-    } catch { return []; }
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        const merged = [...DEFAULT_SERVICES];
+        for (const s of parsed) {
+          if (!merged.find(m => m.name === s.name)) merged.push(s);
+        }
+        return merged;
+      }
+      return [...DEFAULT_SERVICES];
+    } catch { return [...DEFAULT_SERVICES]; }
   });
   const [runtimes, setRuntimes] = useState<RuntimeInfo[]>([]);
   const [loadingServices, setLoadingServices] = useState(true);
@@ -479,7 +506,16 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
     setConnectionMsg({ type: "success", text: `Service "${updated.name}" updated` });
   };
 
+  const isDefaultService = (name: string) =>
+    DEFAULT_SERVICES.some(d => d.name === name);
+
   const handleToggleService = async (name: string, running: boolean) => {
+    // Default services always run — clicking Stop just opens them
+    if (isDefaultService(name)) {
+      window.open(getServiceUrl(name), '_blank');
+      return;
+    }
+
     const svc = services.find(s => s.name === name);
     const apiBase = window.location.origin;
 
@@ -1149,14 +1185,25 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
               )}
               {svc.running ? (
                 <>
-                  <button className="pill-btn" title="Open in Browser"
-                    onClick={(e) => { e.stopPropagation(); onOpenInBrowser?.(`http://${window.location.hostname}:${svc.port}`); }}>
+                  {getServiceSourceUrl(svc.name) && (
+                    <button className="pill-btn" title="View HTML Source"
+                      onClick={(e) => { e.stopPropagation(); window.open(getServiceSourceUrl(svc.name)!, '_blank'); }}>
+                      <Code size={12} />
+                    </button>
+                  )}
+                  <a className="pill-btn pill-open" title="Open in Browser"
+                    href={getServiceUrl(svc.name)} target="_blank" rel="noopener"
+                    onClick={(e) => e.stopPropagation()}>
                     <ExternalLink size={12} />
-                  </button>
-                  <button className="pill-btn pill-stop" title="Stop"
-                    onClick={(e) => { e.stopPropagation(); handleToggleService(svc.name, true); }}>
-                    <Square size={12} />
-                  </button>
+                  </a>
+                  {isDefaultService(svc.name) ? (
+                    <span className="pill-badge">built-in</span>
+                  ) : (
+                    <button className="pill-btn pill-stop" title="Stop"
+                      onClick={(e) => { e.stopPropagation(); handleToggleService(svc.name, true); }}>
+                      <Square size={12} />
+                    </button>
+                  )}
                 </>
               ) : (
                 <button className="pill-btn pill-start" title="Start"
