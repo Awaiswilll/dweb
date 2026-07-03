@@ -47,6 +47,14 @@
   --radius-lg: 16px;
   --radius-xl: 20px;
 
+  /* Typography Scale */
+  --fs-xs: 11px;    /* tiny labels, badges */
+  --fs-sm: 12px;    /* secondary text, timestamps */
+  --fs-base: 14px;  /* body text */
+  --fs-md: 15px;    /* emphasized body */
+  --fs-lg: 18px;    /* subheadings */
+  --fs-xl: 24px;    /* headings */
+
   /* Shadows */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
@@ -76,7 +84,8 @@ body {
   background: var(--bg-base);
   color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
-  line-height: 1.5;
+  line-height: 1.6;
+  font-size: 15px;
 }
 
 /* ─── App Layout ─────────────────────────────────────────── */
@@ -196,7 +205,7 @@ body {
   background: var(--bg-glass);
   padding: 1px 6px;
   border-radius: 10px;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 /* ─── Sidebar Nav ────────────────────────────────────────── */
@@ -252,7 +261,7 @@ body {
 }
 
 .nav-badge {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
   padding: 1px 6px;
   border-radius: 10px;
@@ -264,7 +273,7 @@ body {
 .sidebar-footer {
   padding: 12px 16px;
   border-top: 1px solid var(--border-subtle);
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
 }
 
@@ -274,7 +283,7 @@ body {
 
 .sidebar-node-id {
   font-family: 'SF Mono', 'Fira Code', monospace;
-  font-size: 10px;
+  font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -325,7 +334,7 @@ body {
 }
 
 .text-muted-sm {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-muted);
 }
 
@@ -409,7 +418,7 @@ body {
   position: relative;
   padding-left: 16px;
   margin-bottom: 6px;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.6;
   color: var(--text-secondary);
 }
@@ -432,7 +441,7 @@ body {
 .doc-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .doc-table th {
@@ -466,7 +475,7 @@ body {
 }
 
 .text-muted {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-secondary);
 }
 
@@ -485,7 +494,7 @@ body {
   padding: 8px 16px;
   border: none;
   border-radius: var(--radius);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   cursor: pointer;
   transition: all var(--duration) var(--ease);
@@ -580,7 +589,7 @@ body {
 
 .btn-xs {
   padding: 2px 4px;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 /* ─── Stats Grid ─────────────────────────────────────────── */
@@ -645,7 +654,7 @@ body {
 }
 
 .stat-sub {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
 }
 
@@ -668,7 +677,7 @@ body {
   border: none;
   background: transparent;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   cursor: pointer;
   border-radius: 6px;
@@ -781,7 +790,7 @@ body {
 }
 
 .service-status-badge {
-  font-size: 11px;
+  font-size: 12px;
   padding: 1px 8px;
   border-radius: 10px;
 }
@@ -930,7 +939,7 @@ body {
 }
 
 .pill-type {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-muted);
   display: none;
 }
@@ -940,7 +949,7 @@ body {
 }
 
 .pill-port {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-muted);
   font-family: var(--font-mono, monospace);
 }
@@ -1027,7 +1036,7 @@ body {
 }
 
 .runtime-chip-ver {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--text-muted);
 }
 
@@ -1138,13 +1147,13 @@ body {
 }
 
 .peer-id {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   font-family: 'SF Mono', 'Fira Code', monospace;
 }
 
 .peer-addr {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
 }
 
@@ -1155,7 +1164,7 @@ body {
 }
 
 .peer-protocol {
-  font-size: 10px;
+  font-size: 12px;
   text-transform: uppercase;
   padding: 1px 6px;
   border-radius: 4px;
@@ -1220,12 +1229,12 @@ body {
 }
 
 .activity-msg {
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.4;
 }
 
 .activity-time {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
 }
 
@@ -1316,7 +1325,7 @@ body {
   border: none;
   background: transparent;
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: 14px;
   outline: none;
   font-family: 'SF Mono', 'Fira Code', monospace;
 }
@@ -1330,7 +1339,7 @@ body {
   align-items: center;
   gap: 4px;
   color: var(--success);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
 }
 
@@ -1351,7 +1360,7 @@ body {
 }
 
 .bookmarks-header h4 {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-secondary);
 }
 
@@ -1381,11 +1390,11 @@ body {
 }
 
 .bm-title {
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .bm-url {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
   font-family: 'SF Mono', monospace;
 }
@@ -1444,7 +1453,7 @@ body {
 .dweb-status-badge {
   padding: 2px 10px;
   border-radius: 12px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
 }
 
@@ -1465,7 +1474,7 @@ body {
   align-items: center;
   gap: 8px;
   margin-bottom: 8px;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .meta-row:last-child { margin-bottom: 0; }
@@ -1496,7 +1505,7 @@ body {
 }
 
 .dweb-proxy-info p {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-secondary);
   margin-bottom: 12px;
 }
@@ -1544,7 +1553,7 @@ body {
 }
 
 .chat-welcome p {
-  font-size: 13px;
+  font-size: 14px;
   max-width: 400px;
   line-height: 1.5;
 }
@@ -1630,7 +1639,7 @@ body {
   align-self: center;
   background: rgba(139, 92, 246, 0.06);
   border: 1px solid rgba(139, 92, 246, 0.1);
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-muted);
 }
 
@@ -1652,7 +1661,7 @@ body {
 }
 
 .msg-content {
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.5;
 }
 
@@ -1662,7 +1671,7 @@ body {
 }
 
 .template-gallery h4 {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-secondary);
   margin-bottom: 12px;
 }
@@ -1684,7 +1693,7 @@ body {
   cursor: pointer;
   text-align: left;
   transition: all var(--duration) var(--ease);
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .template-card:hover {
@@ -1704,13 +1713,13 @@ body {
 }
 
 .template-desc {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
   line-height: 1.4;
 }
 
 .template-stack {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--accent-blue);
   font-weight: 500;
 }
@@ -1736,7 +1745,7 @@ body {
   border-radius: var(--radius);
   padding: 10px 14px;
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: 14px;
   outline: none;
   transition: border-color var(--duration) var(--ease);
 }
@@ -1785,7 +1794,7 @@ body {
 }
 
 .register-body > p {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-muted);
   margin-bottom: 16px;
 }
@@ -1886,7 +1895,7 @@ body {
 }
 
 .domain-status {
-  font-size: 11px;
+  font-size: 12px;
   padding: 1px 8px;
   border-radius: 10px;
 }
@@ -1940,7 +1949,7 @@ body {
   border-radius: var(--radius);
   padding: 10px 14px 10px 38px;
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: 14px;
   outline: none;
   transition: border-color var(--duration) var(--ease);
 }
@@ -2004,7 +2013,7 @@ body {
   border: none;
   background: transparent;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   cursor: pointer;
   border-radius: var(--radius-sm);
@@ -2115,7 +2124,7 @@ body {
   border-radius: var(--radius-sm);
   padding: 8px 12px;
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: 14px;
   outline: none;
   font-family: 'SF Mono', monospace;
   transition: border-color var(--duration) var(--ease);
@@ -2136,7 +2145,7 @@ body {
   border-radius: var(--radius-sm);
   padding: 8px 12px;
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: 14px;
   outline: none;
   cursor: pointer;
   min-width: 180px;
@@ -2212,7 +2221,7 @@ body {
 .status-item {
   display: flex;
   justify-content: space-between;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-muted);
 }
 
@@ -2238,7 +2247,7 @@ body {
 .stat-item {
   display: flex;
   justify-content: space-between;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-muted);
 }
 
@@ -2252,7 +2261,7 @@ body {
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--success);
 }
 
@@ -2376,7 +2385,7 @@ body {
   font-weight: 600;
 }
 .provider-config-title .text-muted-sm {
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .provider-config-actions {
@@ -2435,7 +2444,7 @@ body {
   gap: 2px;
 }
 .selector-group label {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -2444,7 +2453,7 @@ body {
 .selector-group .select-input {
   min-width: 160px;
   padding: 6px 10px;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .selector-status {
@@ -2483,7 +2492,7 @@ body {
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
   padding: 4px 8px;
@@ -2547,7 +2556,7 @@ body {
   color: var(--text-primary);
   cursor: pointer;
   border-radius: 6px;
-  font-size: 13px;
+  font-size: 14px;
   text-align: left;
 }
 .mode-option:hover {
@@ -2566,7 +2575,7 @@ body {
   font-weight: 500;
 }
 .mode-option-desc {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
 }
 
@@ -2580,7 +2589,7 @@ body {
   align-items: center;
   gap: 6px;
   padding: 6px 10px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
   border-top: 1px solid var(--border-subtle);
   margin-top: 4px;
@@ -2639,12 +2648,12 @@ body {
 }
 .mode-radio-label {
   display: block;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
 }
 .mode-radio-desc {
   display: block;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
 }
 .online-toggle-card .card-footer {
@@ -2665,7 +2674,7 @@ body {
   background: rgba(139, 92, 246, 0.08);
   border: 1px solid rgba(139, 92, 246, 0.15);
   border-radius: 20px;
-  font-size: 11px;
+  font-size: 12px;
   font-family: 'SF Mono', monospace;
   color: var(--accent-purple);
   cursor: help;
@@ -2719,7 +2728,7 @@ body {
 }
 
 .security-info-header h4 {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   flex: 1;
 }
@@ -2737,7 +2746,7 @@ body {
 }
 
 .security-label {
-  font-size: 10px;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
   color: var(--text-muted);
@@ -2751,7 +2760,7 @@ body {
 }
 
 .security-badge {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   padding: 2px 8px;
   border-radius: 10px;
@@ -2778,7 +2787,7 @@ body {
   margin-top: 10px;
   padding-top: 10px;
   border-top: 1px solid var(--border-subtle);
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
 }
 
@@ -2897,7 +2906,7 @@ body {
 }
 
 .badge {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   padding: 3px 10px;
   border-radius: 12px;
@@ -2937,7 +2946,7 @@ body {
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
-  font-size: 13px;
+  font-size: 14px;
   border-radius: var(--radius);
   overflow: hidden;
   border: 1px solid var(--border-subtle);
@@ -2983,7 +2992,7 @@ body {
 }
 
 .welcome-footer-text p {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-muted);
   margin-bottom: 12px;
 }
@@ -3042,12 +3051,12 @@ body {
 }
 
 .tutorial-meta {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
 }
 
 .tutorial-desc {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-secondary);
   margin-bottom: 12px;
   line-height: 1.5;
@@ -3076,7 +3085,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--text-muted);
   flex-shrink: 0;
@@ -3086,7 +3095,7 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   color: var(--accent-blue);
 }
@@ -3124,7 +3133,7 @@ body {
 }
 
 .step-number {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -3140,7 +3149,7 @@ body {
 }
 
 .tutorial-step-card p {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-secondary);
   line-height: 1.6;
   margin-bottom: 12px;
@@ -3194,7 +3203,7 @@ body {
 }
 
 .dweb-error-card p {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-secondary);
   margin-bottom: 16px;
 }
@@ -3204,7 +3213,7 @@ body {
 }
 
 .dweb-recommendations h4 {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-secondary);
   margin-bottom: 8px;
 }
@@ -3218,7 +3227,7 @@ body {
 }
 
 .dweb-recommendations li {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-muted);
   padding: 6px 10px;
   background: var(--bg-glass);
@@ -3243,7 +3252,7 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 11px;
+  font-size: 12px;
   padding: 1px 8px;
   border-radius: 10px;
   border: 1px solid;
@@ -3251,7 +3260,7 @@ body {
 }
 .register-body > p .tier-badge {
   margin-right: 6px;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 /* ─── Register Tier Selector ──────────────────────────────── */
@@ -3299,7 +3308,7 @@ body {
 .tier-option-price {
   margin-left: auto;
   font-family: 'SF Mono', monospace;
-  font-size: 11px;
+  font-size: 12px;
   opacity: 0.8;
 }
 .tier-option-content {
@@ -3309,7 +3318,7 @@ body {
   width: 100%;
 }
 .tier-option-desc {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
 }
 
@@ -3323,7 +3332,7 @@ body {
   gap: 8px;
   padding: 10px 16px;
   border-radius: var(--radius);
-  font-size: 13px;
+  font-size: 14px;
   z-index: 10000;
   animation: toastIn 0.3s ease;
   background: var(--bg-elevated);
@@ -3417,7 +3426,7 @@ body {
 }
 .form-group label {
   display: block;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   color: var(--text-secondary);
   margin-bottom: 6px;
@@ -3431,7 +3440,7 @@ body {
   border-radius: var(--radius-sm);
   padding: 9px 12px;
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: 14px;
   outline: none;
   transition: border-color var(--duration) var(--ease);
 }
@@ -3448,7 +3457,7 @@ body {
   color: var(--text-primary);
 }
 .form-hint {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
   margin-top: 4px;
 }
@@ -3585,7 +3594,7 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
 }
 .quick-action-status .status-dot {

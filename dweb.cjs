@@ -26,15 +26,17 @@ const path = require("path");
 const os   = require("os");
 const crypto = require("crypto");
 const net   = require("net");
+const dgram = require("dgram");
 const { execSync } = require("child_process");
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CONFIG
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const PORT          = parseInt(process.env.PORT, 10) || 49737;     // Frontend + API
-const RELAY_PORT    = parseInt(process.env.RELAY_PORT, 10) || 49736;  // P2P relay
-const TCP_RELAY_PORT = parseInt(process.env.TCP_PORT, 10) || 49738;   // TCP proxy
+// Ports are tried dynamically — env vars set the preferred start value
+let PORT          = parseInt(process.env.PORT, 10) || 49737;
+let RELAY_PORT    = parseInt(process.env.RELAY_PORT, 10) || 49736;
+let TCP_RELAY_PORT = parseInt(process.env.TCP_PORT, 10) || 49738;
 const PEER_TTL_MS   = parseInt(process.env.PEER_TTL, 10) || 60000;
 const DIST_DIR      = path.resolve(__dirname, "dist");
 const MODE          = (process.env.MODE || "auto").toLowerCase();   // auto | relay | peer | isolated
@@ -67,6 +69,7 @@ const hostedServices = [];        // Services hosted on THIS instance
 const sharedSessions = [];        // Shared AI/code sessions
 const peerServices = new Map();   // peerId → services[]
 const tcpRelays   = new Map();    // peerId → TCP socket
+const localPeers  = new Map();    // peerId → discovered local peer info
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  PEER RECORD
@@ -135,6 +138,39 @@ function parseBody(req) {
   });
 }
 
+// Tracks ports already assigned by findFreePort to prevent collisions
+const _usedPorts = new Set();
+
+// Probe a single port — returns the port if free, false otherwise
+function probePort(port) {
+  return new Promise((resolve) => {
+    const s = net.createServer();
+    s.once("error", () => resolve(false));
+    s.once("listening", () => { s.close(); resolve(port); });
+    s.listen(port, "0.0.0.0");
+  });
+}
+
+// Find a free port starting from the preferred value, trying +1, +2, ... +maxAttempts
+// Falls back to OS-assigned port 0 if none of the sequential ports are free.
+// Tracks assigned ports to prevent multiple services claiming the same port.
+async function findFreePort(envVar, preferred, maxAttempts = 10) {
+  const envPort = parseInt(process.env[envVar], 10);
+  const startPort = envPort || preferred;
+  for (let i = 0; i < maxAttempts; i++) {
+    const port = startPort + i;
+    if (_usedPorts.has(port)) continue;
+    const free = await probePort(port);
+    if (free) { _usedPorts.add(free); return free; }
+  }
+  // Fallback: let the OS assign a free port (loop ensures uniqueness)
+  for (let i = 0; i < 100; i++) {
+    const free = await probePort(0);
+    if (free && !_usedPorts.has(free)) { _usedPorts.add(free); return free; }
+  }
+  return startPort; // last resort
+}
+
 const MIME = {
   ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
   ".js": "application/javascript; charset=utf-8", ".json": "application/json; charset=utf-8",
@@ -147,7 +183,6 @@ function serveFile(res, filePath) {
   const ext = path.extname(filePath).toLowerCase();
   const mime = MIME[ext] || "application/octet-stream";
   if (!fs.existsSync(filePath)) {
-    // SPA fallback
     const indexPath = path.join(DIST_DIR, "index.html");
     if (fs.existsSync(indexPath)) return serveFile(res, indexPath);
     return json(res, 404, { error: "Not found" });
@@ -230,7 +265,6 @@ function popSignals(targetId) {
 //  COLLABORATION APIS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// Add a hosted service (called internally or via API)
 function addHostedService(name, type, port, url) {
   const existing = hostedServices.findIndex(s => s.name === name);
   const svc = { name, type, port, url: url || `http://127.0.0.1:${port}`, added: Date.now() };
@@ -239,13 +273,11 @@ function addHostedService(name, type, port, url) {
   return svc;
 }
 
-// Share a session with connected peers
 function shareSession(sessionId, type, title, data) {
   const existing = sharedSessions.findIndex(s => s.id === sessionId);
   const session = { id: sessionId, type, title, data, peerId: PEER_ID, shared: Date.now() };
   if (existing >= 0) sharedSessions[existing] = session;
   else sharedSessions.push(session);
-  // Keep max 50 sessions
   if (sharedSessions.length > 50) sharedSessions.splice(0, sharedSessions.length - 50);
   return session;
 }
@@ -537,10 +569,8 @@ async function handleRequest(req, res) {
       if (!name || !files || !Array.isArray(files)) {
         return json(res, 400, { error: "Missing name or files array" });
       }
-      // Create project directory
       const projectDir = path.join(__dirname, "projects", name.replace(/[^a-zA-Z0-9-_]/g, "_"));
       if (fs.existsSync(projectDir)) {
-        // Clean it
         fs.rmSync(projectDir, { recursive: true, force: true });
       }
       fs.mkdirSync(projectDir, { recursive: true });
@@ -549,13 +579,10 @@ async function handleRequest(req, res) {
         fs.mkdirSync(path.dirname(filePath), { recursive: true });
         fs.writeFileSync(filePath, f.content, "utf-8");
       }
-      // Determine port (increment from base)
       const basePort = 49200;
       const existingProjects = fs.readdirSync(path.join(__dirname, "projects")).length;
       const appPort = basePort + existingProjects;
-      // Register as hosted service
       addHostedService(name, type || "Web App", PORT, `http://localhost:${PORT}/project/${name.replace(/[^a-zA-Z0-9-_]/g, "_")}`);
-      // Create a simple symlink or serve from /project/:name route
       const routeName = name.replace(/[^a-zA-Z0-9-_]/g, "_");
       console.log(`  [deploy] Published "${name}" → /project/${routeName}`);
       return json(res, 201, {
@@ -575,13 +602,11 @@ async function handleRequest(req, res) {
       }
       let filePath = path.join(projectDir, subPath);
       if (!filePath.startsWith(projectDir)) return json(res, 403, { error: "Forbidden" });
-      // If path is a directory, look for index.html
       if (fs.existsSync(filePath) && fs.statSync(filePath).isDirectory()) {
         subPath = path.join(subPath.replace(/\/$/, ""), "index.html");
         filePath = path.join(projectDir, subPath);
       }
       if (!fs.existsSync(filePath)) {
-        // SPA fallback — serve index.html
         const indexPath = path.join(projectDir, "index.html");
         if (fs.existsSync(indexPath)) return serveFile(res, indexPath);
         return json(res, 404, { error: "File not found" });
@@ -627,12 +652,32 @@ async function handleRequest(req, res) {
       return json(res, 200, { status: "ok", available, version, instance: INSTANCE_NAME });
     }
 
+    // List available opencode models
+    if (pathname === "/api/opencode/models" && method === "GET") {
+      try {
+        const raw = execSync("opencode models 2>/dev/null", { timeout: 10000, encoding: "utf-8" });
+        const lines = raw.split("\n").filter(l => l.startsWith("opencode/")).map(l => l.trim()).filter(Boolean);
+        const models = lines.map(id => {
+          const free = id.includes("free") || id.includes("nano") || id.includes("mini") || id.includes("flash");
+          const provider = id.split("/")[1]?.split("-")[0] || "unknown";
+          const label = id.replace("opencode/", "");
+          return { id, label, provider, free };
+        });
+        models.sort((a, b) => {
+          if (a.free !== b.free) return a.free ? -1 : 1;
+          return a.label.localeCompare(b.label);
+        });
+        return json(res, 200, { status: "ok", count: models.length, models, default: "opencode/deepseek-v4-flash-free" });
+      } catch (e) {
+        return json(res, 200, { status: "ok", count: 0, models: [], default: "opencode/deepseek-v4-flash-free" });
+      }
+    }
+
     // Run opencode command (prompt mode — properly shell-escaped)
     if (pathname === "/api/opencode/run" && method === "POST") {
       const body = await parseBody(req);
-      const { command } = body;
+      const { command, model, context } = body;
       if (!command) return json(res, 400, { error: "Missing command" });
-      // Expand common shorthand commands
       let cmd = command.trim();
       const shorthands = {
         "build": "run npm run build in the dweb repo",
@@ -642,16 +687,72 @@ async function handleRequest(req, res) {
         "help": "list available commands and how to use this opencode agent",
       };
       const expanded = shorthands[cmd.toLowerCase()] || cmd;
+      const useModel = model || "opencode/deepseek-v4-flash-free";
+
+      if (context === true) {
+        return json(res, 200, { status: "ok", context: true, message: "Context received" });
+      }
+
+      const serverContext = `You are inside dweb (http://localhost:${PORT}/). Tech: React+Vite+TS frontend, Node.js backend. Repo: /home/awais/dweb/. Build: npm run build. Test: npm test.`;
+      const fullCommand = `${serverContext}\n\nUser: ${expanded}`;
+
       try {
-        const output = execSync(`opencode run -m opencode/deepseek-v4-flash-free ${JSON.stringify(expanded)} 2>&1`, {
+        const output = execSync(`opencode run -m ${JSON.stringify(useModel)} ${JSON.stringify(fullCommand)} 2>&1`, {
           timeout: 300000,
           encoding: "utf-8",
           maxBuffer: 1024 * 1024,
         });
-        return json(res, 200, { status: "ok", output, command: expanded });
+        return json(res, 200, { status: "ok", output, command: expanded, model: useModel });
       } catch (e) {
-        return json(res, 200, { status: "error", output: (e.stderr || e.message || "").toString(), command: expanded });
+        return json(res, 200, { status: "error", output: (e.stderr || e.message || "").toString(), command: expanded, model: useModel });
       }
+    }
+
+    // ────────────────────────────────────────────────────────────
+    //  P2P FILE RECEIVE
+    // ────────────────────────────────────────────────────────────
+
+    // Receive file from another dweb instance
+    if (pathname === "/api/p2p/receive" && method === "POST") {
+      const body = await parseBody(req);
+      const { fileName, fileData, fromPeerId, fromHostname } = body;
+      if (!fileName || !fileData) {
+        return json(res, 400, { error: "Missing fileName or fileData" });
+      }
+      const safeName = path.basename(fileName);
+      const prefix = fromHostname
+        ? `p2p-from-${fromHostname.replace(/[^a-zA-Z0-9-_]/g, "_")}-`
+        : "p2p-from-";
+      const destName = prefix + safeName;
+      const destPath = path.join(SHARE_DIR, destName);
+      if (!destPath.startsWith(SHARE_DIR)) return json(res, 403, { error: "Forbidden" });
+      const buf = Buffer.from(fileData, "base64");
+      fs.writeFileSync(destPath, buf);
+      console.log(`  [p2p] Received file "${safeName}" from ${fromPeerId ? fromPeerId.slice(0, 16) : "unknown"} (${buf.length} bytes)`);
+      return json(res, 200, { status: "ok", fileName: destName, size: buf.length });
+    }
+
+    // List received P2P files
+    if (pathname === "/api/p2p/received" && method === "GET") {
+      try {
+        const all = fs.readdirSync(SHARE_DIR);
+        const p2pFiles = all.filter(name => name.startsWith("p2p-from-")).map(name => {
+          const stat = fs.statSync(path.join(SHARE_DIR, name));
+          return { name, size: stat.size, added: stat.mtimeMs };
+        });
+        return json(res, 200, { status: "ok", count: p2pFiles.length, files: p2pFiles });
+      } catch (e) {
+        return json(res, 500, { error: e.message });
+      }
+    }
+
+    // Discover local peers via UDP multicast
+    if (pathname === "/api/p2p/discover-local" && method === "GET") {
+      const list = [];
+      for (const [peerId, info] of localPeers) {
+        list.push({ peerId, hostname: info.hostname, port: info.port, address: info.address, lastSeen: info.lastSeen, version: info.version, platform: info.platform });
+      }
+      return json(res, 200, { status: "ok", count: list.length, peers: list });
     }
 
     // ────────────────────────────────────────────────────────────
@@ -715,7 +816,6 @@ function startTCPRelay() {
 }
 
 function forwardRelayData(fromPeerId, data) {
-  // Forward buffered data to target if identifiable
   try {
     const msg = JSON.parse(data);
     if (msg.targetPeerId) {
@@ -723,6 +823,196 @@ function forwardRelayData(fromPeerId, data) {
       if (target) target.write(JSON.stringify({ type: "relay", fromPeerId, data: msg.data }) + "\n");
     }
   } catch {}
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  LOCAL DISCOVERY — UDP Multicast
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const MULTICAST_ADDR = "239.255.0.100";
+const MULTICAST_PORT = 49739;
+let discoverySocket = null;
+
+function startLocalDiscovery() {
+  try {
+    const sock = dgram.createSocket({ type: "udp4", reuseAddr: true });
+
+    sock.on("listening", () => {
+      try {
+        sock.addMembership(MULTICAST_ADDR);
+        sock.setBroadcast(true);
+        sock.setMulticastTTL(2);
+      } catch (e) {
+        console.log(`  [discovery] Membership error: ${e.message}`);
+      }
+    });
+
+    sock.on("message", (msg, rinfo) => {
+      try {
+        const data = JSON.parse(msg.toString());
+        if (data.peerId && data.peerId !== PEER_ID) {
+          const existing = localPeers.get(data.peerId);
+          localPeers.set(data.peerId, {
+            ...data,
+            lastSeen: Date.now(),
+            address: rinfo.address,
+          });
+          // Auto-register with newly discovered peers
+          if (!existing && !peers.has(data.peerId)) {
+            registerWithDiscoveredPeer(data, rinfo.address).catch(() => {});
+          }
+        }
+      } catch {}
+    });
+
+    sock.on("error", (err) => {
+      if (err.code !== "EADDRINUSE") {
+        console.log(`  [discovery] Socket error: ${err.message}`);
+      }
+    });
+
+    sock.bind(MULTICAST_PORT, () => {
+      console.log(`  Discovery  : udp://${MULTICAST_ADDR}:${MULTICAST_PORT}`);
+    });
+
+    // Periodic announcement broadcast (every 5 seconds)
+    setInterval(() => {
+      try {
+        const msg = JSON.stringify({
+          peerId: PEER_ID,
+          port: PORT,
+          relayPort: RELAY_PORT,
+          tcpPort: TCP_RELAY_PORT,
+          hostname: os.hostname(),
+          platform: process.platform,
+          version: "0.1.0",
+          mode: MODE,
+          localIPs: LOCAL_IPS,
+        });
+        sock.send(msg, MULTICAST_PORT, MULTICAST_ADDR);
+      } catch {}
+    }, 5000);
+
+    discoverySocket = sock;
+    return sock;
+  } catch (e) {
+    console.log(`  [discovery] UDP failed: ${e.message}`);
+    return null;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  FILE-BASED LOCAL DISCOVERY (reliable fallback for same-machine
+//  multi-instance, works in WSL/Docker where multicast may not)
+// ═══════════════════════════════════════════════════════════════
+
+const DISCOVERY_DIR = "/tmp/dweb-instances";
+let fileDiscoveryStarted = false;
+
+function startFileDiscovery() {
+  try {
+    if (!fs.existsSync(DISCOVERY_DIR)) fs.mkdirSync(DISCOVERY_DIR, { recursive: true });
+  } catch (e) {
+    console.log(`  [discovery] Cannot create ${DISCOVERY_DIR}: ${e.message}`);
+    return;
+  }
+  fileDiscoveryStarted = true;
+
+  // Write our own info periodically
+  const ourFile = path.join(DISCOVERY_DIR, `${PEER_ID}.json`);
+  function writeOurInfo() {
+    try {
+      const info = {
+        peerId: PEER_ID,
+        port: PORT,
+        relayPort: RELAY_PORT,
+        tcpPort: TCP_RELAY_PORT,
+        hostname: os.hostname(),
+        platform: process.platform,
+        version: "0.1.0",
+        mode: MODE,
+        pid: process.pid,
+        timestamp: Date.now(),
+      };
+      fs.writeFileSync(ourFile, JSON.stringify(info));
+    } catch {}
+  }
+  writeOurInfo();
+  setInterval(writeOurInfo, 10000);
+
+  // Cleanup our file on exit
+  process.on("exit", () => {
+    try { fs.unlinkSync(ourFile); } catch {}
+  });
+
+  // Scan for other instances every 5 seconds
+  setInterval(() => {
+    try {
+      const files = fs.readdirSync(DISCOVERY_DIR);
+      for (const f of files) {
+        if (!f.endsWith(".json")) continue;
+        if (f === `${PEER_ID}.json`) continue;
+        try {
+          const data = JSON.parse(fs.readFileSync(path.join(DISCOVERY_DIR, f), "utf-8"));
+          if (!data.peerId) continue;
+          // Stale check: if older than 30s, skip
+          if (Date.now() - data.timestamp > 30000) continue;
+          // Update localPeers
+          if (!localPeers.has(data.peerId)) {
+            localPeers.set(data.peerId, {
+              ...data,
+              lastSeen: data.timestamp,
+              address: "127.0.0.1",
+            });
+            // Auto-register with this peer
+            if (!peers.has(data.peerId)) {
+              registerWithDiscoveredPeer(data, "127.0.0.1").catch(() => {});
+            }
+          } else {
+            // Update lastSeen
+            const existing = localPeers.get(data.peerId);
+            existing.lastSeen = Date.now();
+          }
+        } catch {}
+      }
+      // Cleanup stale files
+      for (const f of files) {
+        if (!f.endsWith(".json")) continue;
+        if (f === `${PEER_ID}.json`) continue;
+        try {
+          const data = JSON.parse(fs.readFileSync(path.join(DISCOVERY_DIR, f), "utf-8"));
+          if (Date.now() - data.timestamp > 60000) {
+            fs.unlinkSync(path.join(DISCOVERY_DIR, f));
+          }
+        } catch {
+          try { fs.unlinkSync(path.join(DISCOVERY_DIR, f)); } catch {}
+        }
+      }
+    } catch {}
+  }, 5000);
+
+  console.log(`  [discovery] File-based discovery in ${DISCOVERY_DIR}`);
+}
+
+async function registerWithDiscoveredPeer(data, address) {
+  try {
+    const res = await httpReq("POST", address, data.port || PORT, "/register", {
+      id: PEER_ID,
+      hostname: os.hostname(),
+      platform: process.platform,
+      version: "0.1.0",
+      address: LOCAL_IPS[0] || "127.0.0.1",
+      port: PORT,
+      relayPort: RELAY_PORT,
+      mode: MODE,
+      services: hostedServices.map(s => s.name),
+    });
+    if (res?.status === "ok") {
+      console.log(`  [discovery] Registered with local peer ${data.peerId.slice(0, 16)}… at ${address}:${data.port || PORT}`);
+    }
+  } catch {
+    // Peer may have gone offline between discovery and registration
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -775,6 +1065,9 @@ function printBanner() {
   console.log(`  ║    /collab/services  — Hosted services             ║`);
   console.log(`  ║    /collab/sessions  — Shared dev sessions         ║`);
   console.log(`  ║    /dweb-status   — Instance status                ║`);
+  console.log(`  ║    /api/p2p/receive   — P2P file receive          ║`);
+  console.log(`  ║    /api/p2p/received  — Received P2P files        ║`);
+  console.log(`  ║    /api/p2p/discover-local  — Local peer discover ║`);
   console.log(`  ║    /              — dweb Web IDE frontend          ║`);
   console.log(`  ╚══════════════════════════════════════════════════╝`);
   console.log(`  Upstream relay: ${UPSTREAM_RELAY || "(none — this is a relay node)"}`);
@@ -790,64 +1083,90 @@ const isPeerMode = MODE === "peer" || MODE === "auto";
 
 // Create HTTP server that handles everything
 const server = http.createServer(handleRequest);
+let webServer = null;
 
-// Start listening on both ports if in relay mode
 function startServer() {
   if (isRelayMode) {
     // Listen on RELAY_PORT for P2P traffic, on PORT for frontend + API
-    // Use a single server that handles all ports via different listeners
     server.listen(RELAY_PORT, "0.0.0.0", () => {
       console.log(`  P2P Relay : http://0.0.0.0:${RELAY_PORT}`);
     });
 
     // Start a second server for the frontend port
-    const webServer = http.createServer(handleRequest);
+    webServer = http.createServer(handleRequest);
     webServer.listen(PORT, "0.0.0.0", () => {});
     
     return webServer;
   } else {
     server.listen(PORT, "0.0.0.0", () => {});
+    webServer = server;
     return server;
   }
 }
 
-const webServer = startServer();
-startTCPRelay();
+async function main() {
+  // Resolve ports dynamically — try preferred, then +1..+10, then OS-assigned
+  PORT = await findFreePort("PORT", 49737);
+  RELAY_PORT = await findFreePort("RELAY_PORT", 49736);
+  TCP_RELAY_PORT = await findFreePort("TCP_PORT", 49738);
 
-// Auto-register default services
-addHostedService("My Static Website", "Static Site", PORT, `http://localhost:${PORT}/welcome`);
-addHostedService("File Share", "File Browser", PORT, `http://localhost:${PORT}/fileshare`);
-console.log(`  [services] Auto-registered: "My Static Website" → /welcome`);
-console.log(`  [services] Auto-registered: "File Share" → /fileshare`);
+  console.log(`  Ports: Web=${PORT}, Relay=${RELAY_PORT}, TCP=${TCP_RELAY_PORT}`);
 
-printBanner();
+  // Start all server components
+  startTCPRelay();
+  startLocalDiscovery();   // UDP multicast (may fail in WSL)
+  startFileDiscovery();    // File-based (reliable for same-machine)
+  startServer();
 
-// Register with upstream relay
-if (UPSTREAM_RELAY && isPeerMode) {
-  registerWithUpstream();
-  setInterval(heartbeatUpstream, 30000);
+  // Auto-register default services
+  addHostedService("My Static Website", "Static Site", PORT, `http://localhost:${PORT}/welcome`);
+  addHostedService("File Share", "File Browser", PORT, `http://localhost:${PORT}/fileshare`);
+  console.log(`  [services] Auto-registered: "My Static Website" → /welcome`);
+  console.log(`  [services] Auto-registered: "File Share" → /fileshare`);
+
+  printBanner();
+
+  // Register with upstream relay
+  if (UPSTREAM_RELAY && isPeerMode) {
+    await registerWithUpstream();
+    setInterval(heartbeatUpstream, 30000);
+  }
+
+  // Periodic peer cleanup
+  setInterval(cleanupStalePeers, 15000);
+
+  // Status line
+  setInterval(() => {
+    const line = `  [${new Date().toLocaleTimeString()}] Peers: ${peers.size}  |  Services: ${hostedServices.length}  |  Sessions: ${sharedSessions.length}`;
+    process.stdout.write(`\x1b[2K\x1b[1A\x1b[2K${line}\n`);
+  }, 3000);
 }
 
-// Periodic peer cleanup
-setInterval(cleanupStalePeers, 15000);
-
-// Status line
-setInterval(() => {
-  const line = `  [${new Date().toLocaleTimeString()}] Peers: ${peers.size}  |  Services: ${hostedServices.length}  |  Sessions: ${sharedSessions.length}`;
-  process.stdout.write(`\x1b[2K\x1b[1A\x1b[2K${line}\n`);
-}, 3000);
+main().catch(err => {
+  console.error(`  [fatal] Failed to start dweb: ${err.message}`);
+  process.exit(1);
+});
 
 // Graceful shutdown
 process.on("SIGINT", () => {
   console.log("\n\n  Shutting down dweb...");
   console.log(`  Final state: ${peers.size} peers, ${hostedServices.length} services`);
   tcpRelays.forEach(s => s.end());
+  if (discoverySocket) {
+    try { discoverySocket.close(); } catch {}
+  }
   server.close();
-  webServer.close();
+  if (webServer && webServer !== server) webServer.close();
   process.exit(0);
 });
 
 process.on("SIGTERM", () => process.exit(0));
 
-// Export key info for programmatic use
-module.exports = { PEER_ID, SERVER_ID, PORT, RELAY_PORT, peers, hostedServices, sharedSessions };
+// Export key info for programmatic use — getters reflect resolved port values
+module.exports = {
+  PEER_ID, SERVER_ID,
+  get PORT() { return PORT; },
+  get RELAY_PORT() { return RELAY_PORT; },
+  get TCP_RELAY_PORT() { return TCP_RELAY_PORT; },
+  peers, hostedServices, sharedSessions,
+};

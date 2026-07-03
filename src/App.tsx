@@ -12,6 +12,7 @@ import Docs from "./views/Docs";
 import P2PDashboard from "./views/P2PDashboard";
 import type { View } from "./types";
 
+import P2PTransfer from "./views/P2PTransfer";
 import {
   Plus, Radio, RefreshCw, Wifi,
 } from "lucide-react";
@@ -52,6 +53,11 @@ function AppContent() {
       onClick: () => { setCurrentView("p2p-dashboard"); },
     },
     {
+      label: "File Transfer",
+      icon: <Radio size={14} />,
+      onClick: () => { setCurrentView("p2p-transfer"); },
+    },
+    {
       label: "Network Status",
       icon: <Radio size={14} />,
       onClick: () => addNotification({ type: "info", title: "Network", message: "Relay running on port 49746", duration: 3000 }),
@@ -81,6 +87,7 @@ function AppContent() {
       case "docs": return <Docs />;
       case "settings": return <Settings />;
       case "p2p-dashboard": return <P2PDashboard />;
+      case "p2p-transfer": return <P2PTransfer />;
     }
   };
 
