@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react";
 import Sidebar from "./components/Sidebar";
+import { NotificationProvider, useNotifications } from "./components/Notifications";
 import Dashboard from "./views/Dashboard";
 import BrowserView from "./views/BrowserView";
 import AIAgent from "./views/AIAgent";
@@ -8,12 +9,19 @@ import Repositories from "./views/Repositories";
 import Settings from "./views/Settings";
 import Integrations from "./views/Integrations";
 import Docs from "./views/Docs";
+import P2PDashboard from "./views/P2PDashboard";
 import type { View } from "./types";
 
-function App() {
+import {
+  Plus, Radio, Terminal, ExternalLink, RefreshCw, Globe, Wifi,
+} from "lucide-react";
+
+function AppContent() {
+  const { addNotification } = useNotifications();
   const [currentView, setCurrentView] = useState<View>("dashboard");
   const [browserUrl, setBrowserUrl] = useState<string>("");
   const [browserNavId, setBrowserNavId] = useState(0);
+  const [serverStatus, setServerStatus] = useState<string>("checking");
 
   /** Switch to the browser view and navigate to the given URL */
   const handleOpenInBrowser = useCallback((url: string) => {
@@ -25,12 +33,42 @@ function App() {
   /** Navigation handler for sidebar - clears pending external URL when switching to Browser */
   const handleNavigate = useCallback((view: View) => {
     if (view === "browser") {
-      // Clear any pending external URL so BrowserView doesn't re-add a stale tab
       setBrowserUrl("");
       setBrowserNavId(0);
     }
     setCurrentView(view);
   }, []);
+
+  /** Quick Actions */
+  const quickActions = [
+    {
+      label: "New Project",
+      icon: <Plus size={14} />,
+      onClick: () => addNotification({ type: "info", title: "Coming Soon", message: "Project scaffolding will be available in v0.2.0" }),
+    },
+    {
+      label: "P2P Connect",
+      icon: <Wifi size={14} />,
+      onClick: () => { setCurrentView("p2p-dashboard"); },
+    },
+    {
+      label: "Network Status",
+      icon: <Radio size={14} />,
+      onClick: () => addNotification({ type: "info", title: "Network", message: "Relay running on port 49746", duration: 3000 }),
+    },
+    {
+      label: "Refresh",
+      icon: <RefreshCw size={14} />,
+      onClick: () => window.location.reload(),
+    },
+  ];
+
+  /** Check server health on mount */
+  useState(() => {
+    fetch("/ping", { signal: AbortSignal.timeout(3000) })
+      .then(r => r.json().then(d => { setServerStatus(d.status === "ok" ? "online" : "error"); }))
+      .catch(() => setServerStatus("offline"));
+  });
 
   const renderView = () => {
     switch (currentView) {
@@ -42,17 +80,39 @@ function App() {
       case "repositories": return <Repositories />;
       case "docs": return <Docs />;
       case "settings": return <Settings />;
+      case "p2p-dashboard": return <P2PDashboard />;
     }
   };
 
   return (
     <div className="app-layout">
       <Sidebar currentView={currentView} onNavigate={handleNavigate} />
-      <main className="main-content">
-        {renderView()}
-      </main>
+      <div className="main-area">
+        {/* Quick Actions Toolbar */}
+        <div className="quick-actions-toolbar">
+          {quickActions.map((action, i) => (
+            <button key={i} className="quick-action-btn" onClick={action.onClick}>
+              {action.icon} {action.label}
+            </button>
+          ))}
+          <div className="quick-action-separator" />
+          <div className="quick-action-status">
+            <span className={`status-dot ${serverStatus}`} />
+            {serverStatus === "online" ? "Server Online" : serverStatus === "offline" ? "Offline" : "Checking..."}
+          </div>
+        </div>
+        <main className="main-content">
+          {renderView()}
+        </main>
+      </div>
     </div>
   );
 }
 
-export default App;
+export default function App() {
+  return (
+    <NotificationProvider>
+      <AppContent />
+    </NotificationProvider>
+  );
+}

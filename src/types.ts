@@ -343,7 +343,53 @@ export const githubApi = {
 
 /* ─── App View Type ────────────────────────────────────────── */
 
-export type View = "dashboard" | "browser" | "ai-agent" | "domains" | "repositories" | "settings" | "integrations" | "docs";
+export type View = "dashboard" | "browser" | "ai-agent" | "domains" | "repositories" | "settings" | "integrations" | "docs" | "p2p-dashboard";
+
+/* ─── P2P Network Types ──────────────────────────────────── */
+
+export interface P2PPeer {
+  id: string;
+  publicKey: string;
+  address: string;
+  port: number;
+  hostname: string;
+  platform: string;
+  version: string;
+  mode: string;
+  services: string[];
+  relayPort: number;
+  age: number;
+  connected: boolean;
+  latency?: number;
+  lastSeen?: number;
+}
+
+export interface P2PNetworkStatus {
+  peerId: string;
+  hostname: string;
+  localIPs: string[];
+  port: number;
+  relayPort: number;
+  mode: string;
+  uptime: number;
+  relayConnected: boolean;
+  upstreamRelay: string | null;
+  peersOnline: number;
+  hostedServices: number;
+  sharedSessions: number;
+  services: string[];
+  relayError: string | null;
+}
+
+export interface Notification {
+  id: string;
+  type: "info" | "success" | "warning" | "error";
+  title: string;
+  message: string;
+  timestamp: number;
+  duration?: number;
+  action?: { label: string; onClick: () => void };
+}
 
 /* ─── Browser Tab Types ──────────────────────────────────── */
 
