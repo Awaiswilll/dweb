@@ -370,21 +370,18 @@ function AddServiceModal({ onClose, onAdd, initialData }: {
 
 /* ─── Default Services (always running) ──────────────────── */
 const DEFAULT_SERVICES: Service[] = [
-  { name: "My Static Website", type: "Static Site", port: 0, running: true, cpu: 0.1, memory: 2_000_000 },
-  { name: "File Share", type: "File Browser", port: 0, running: true, cpu: 0.2, memory: 4_000_000 },
+  { name: "My Static Website", type: "Static Site", port: 0, running: true, cpu: 0.1, memory: 2_000_000, url: `${window.location.origin}/welcome` },
+  { name: "File Share", type: "File Browser", port: 0, running: true, cpu: 0.2, memory: 4_000_000, url: `${window.location.origin}/fileshare` },
 ];
 
 /* ─── Service Access URLs ─────────────────────────────────── */
-function getServiceUrl(name: string): string {
-  const base = window.location.origin;
-  if (name === "My Static Website") return `${base}/welcome`;
-  if (name === "File Share") return `${base}/fileshare`;
-  return base;
+function getServiceUrl(svc: Service): string {
+  return svc.url || `${window.location.origin}/welcome`;
 }
 
-function getServiceSourceUrl(name: string): string | null {
-  if (name === "My Static Website") return `${window.location.origin}/welcome/source`;
-  if (name === "File Share") return `${window.location.origin}/fileshare/api/source`;
+function getServiceSourceUrl(svc: Service): string | null {
+  if (svc.name === "My Static Website") return `${window.location.origin}/welcome/source`;
+  if (svc.name === "File Share") return `${window.location.origin}/fileshare/api/source`;
   return null;
 }
 
@@ -415,6 +412,8 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editService, setEditService] = useState<(Service & { dir?: string }) | null>(null);
   const [runtimesExpanded, setRuntimesExpanded] = useState(false);
+  const [editingUrlFor, setEditingUrlFor] = useState<string | null>(null);
+  const [urlEditValue, setUrlEditValue] = useState("");
 
   const loadServices = async () => {
     setLoadingServices(true);
@@ -478,7 +477,55 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
   };
 
   useEffect(() => {
-    loadServices();
+    (async () => {
+      await loadServices();
+      // Auto-start managed "My Static Website" if not already running as a managed service
+      // Check if the backend API has it
+      try {
+        const resp = await fetch(`${window.location.origin}/api/services`);
+        const data = await resp.json();
+        const hasManagedStatic = data?.services?.some((s: any) => s.name === "My Static Website");
+        if (!hasManagedStatic) {
+          const startResp = await fetch(`${window.location.origin}/api/service/start`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: "My Static Website", type: "Static Site", port: 30999 }),
+          });
+          if (startResp.ok) {
+            const svcData = await startResp.json();
+            if (svcData?.service) {
+              const svc = svcData.service;
+              // Update local service state
+              setServices(prev => {
+                const next = prev.map(s =>
+                  s.name === "My Static Website"
+                    ? { ...s, port: svc.port, running: true, url: svc.url || `http://localhost:${svc.port}` }
+                    : s
+                );
+                try { localStorage.setItem(SERVICES_STORAGE_KEY, JSON.stringify(next)); } catch {}
+                return next;
+              });
+            }
+            setConnectionMsg({ type: "success", text: "My Static Website is now running and P2P-discoverable" });
+          }
+        } else {
+          // Update URL from managed service
+          const managed = data.services.find((s: any) => s.name === "My Static Website");
+          if (managed) {
+            const url = `http://localhost:${managed.port}`;
+            setServices(prev => {
+              const next = prev.map(s =>
+                s.name === "My Static Website"
+                  ? { ...s, port: managed.port, url }
+                  : s
+              );
+              try { localStorage.setItem(SERVICES_STORAGE_KEY, JSON.stringify(next)); } catch {}
+              return next;
+            });
+          }
+        }
+      } catch {}
+    })();
     loadRuntimes();
     loadTorStatus();
   }, []);
@@ -536,17 +583,38 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
     setConnectionMsg({ type: "success", text: `Service "${updated.name}" updated` });
   };
 
+  /* ─── Edit service URL inline ──────────────────────────── */
+  const handleStartUrlEdit = (svc: Service) => {
+    setEditingUrlFor(svc.name);
+    setUrlEditValue(getServiceUrl(svc));
+  };
+
+  const handleSaveUrlEdit = (name: string) => {
+    setServices(prev => {
+      const next = prev.map(s => s.name === name ? { ...s, url: urlEditValue } : s);
+      try { localStorage.setItem(SERVICES_STORAGE_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+    setEditingUrlFor(null);
+    setConnectionMsg({ type: "success", text: `URL updated for "${name}"` });
+  };
+
+  const handleCancelUrlEdit = () => {
+    setEditingUrlFor(null);
+  };
+
   const isDefaultService = (name: string) =>
     DEFAULT_SERVICES.some(d => d.name === name);
 
   const handleToggleService = async (name: string, running: boolean) => {
+    const svc = services.find(s => s.name === name);
+    if (!svc) return;
+
     // Default services always run — clicking Stop just opens them
     if (isDefaultService(name)) {
-      window.open(getServiceUrl(name), '_blank');
+      window.open(getServiceUrl(svc), '_blank');
       return;
     }
-
-    const svc = services.find(s => s.name === name);
     const apiBase = window.location.origin;
 
     if (running) {
@@ -1249,19 +1317,59 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
                   <FolderGit2 size={10} />
                 </span>
               )}
+              {/* Editable URL */}
+              {svc.running && (
+                <span className="pill-url" style={{ fontSize: 10, color: "var(--text-muted)", marginLeft: 4 }}>
+                  {editingUrlFor === svc.name ? (
+                    <span style={{ display: "inline-flex", gap: 3, alignItems: "center" }}>
+                      <input
+                        type="text"
+                        value={urlEditValue}
+                        onChange={(e) => setUrlEditValue(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") handleSaveUrlEdit(svc.name); if (e.key === "Escape") handleCancelUrlEdit(); }}
+                        style={{
+                          width: 180, fontSize: 10, padding: "1px 4px",
+                          background: "rgba(255,255,255,0.08)",
+                          border: "1px solid rgba(255,255,255,0.15)",
+                          borderRadius: 3, color: "var(--text-primary)",
+                          outline: "none",
+                        }}
+                        autoFocus
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                      <button className="pill-btn" title="Save"
+                        onClick={(e) => { e.stopPropagation(); handleSaveUrlEdit(svc.name); }}
+                        style={{ color: "#22c55e" }}>✓</button>
+                      <button className="pill-btn" title="Cancel"
+                        onClick={(e) => { e.stopPropagation(); handleCancelUrlEdit(); }}
+                        style={{ color: "#ef4444" }}>✕</button>
+                    </span>
+                  ) : (
+                    <span
+                      className="pill-url-text"
+                      onClick={(e) => { e.stopPropagation(); handleStartUrlEdit(svc); }}
+                      title="Click to edit URL"
+                      style={{ cursor: "pointer", borderBottom: "1px dashed rgba(255,255,255,0.15)" }}
+                    >
+                      {getServiceUrl(svc).replace(/^https?:\/\//, "")}
+                    </span>
+                  )}
+                </span>
+              )}
               {svc.running ? (
                 <>
-                  {getServiceSourceUrl(svc.name) && (
+                  {getServiceSourceUrl(svc) && (
                     <button className="pill-btn" title="View HTML Source"
-                      onClick={(e) => { e.stopPropagation(); window.open(getServiceSourceUrl(svc.name)!, '_blank'); }}>
+                      onClick={(e) => { e.stopPropagation(); window.open(getServiceSourceUrl(svc)!, '_blank'); }}>
                       <Code size={12} />
                     </button>
                   )}
                   <button className="pill-btn pill-open" title="Open in dweb Browser"
                     onClick={(e) => {
                       e.stopPropagation();
-                      if (onOpenInBrowser) onOpenInBrowser(getServiceUrl(svc.name));
-                      else window.open(getServiceUrl(svc.name), '_blank');
+                      const url = getServiceUrl(svc);
+                      if (onOpenInBrowser) onOpenInBrowser(url);
+                      else window.open(url, '_blank');
                     }}>
                     <ExternalLink size={12} />
                   </button>
@@ -1273,6 +1381,7 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
                       <Square size={12} />
                     </button>
                   )}
+                  <span className="pill-badge pill-p2p" title="P2P discoverable">P2P</span>
                 </>
               ) : (
                 <button className="pill-btn pill-start" title="Start"

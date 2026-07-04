@@ -64,6 +64,16 @@ function addHostedService(name, type, port, url) {
   return svc;
 }
 
+function removeHostedService(name) {
+  const idx = hostedServices.findIndex(s => s.name === name);
+  if (idx >= 0) {
+    const removed = hostedServices.splice(idx, 1)[0];
+    console.log(`  [state] Removed hosted service: "${name}"`);
+    return removed;
+  }
+  return null;
+}
+
 function shareSession(sessionId, type, title, data) {
   const existing = sharedSessions.findIndex(s => s.id === sessionId);
   const session = { id: sessionId, type, title, data, peerId: "", shared: Date.now() };
@@ -86,7 +96,7 @@ function cleanupStalePeers() {
 module.exports = {
   peers, signals, hostedServices, sharedSessions, peerServices, tcpRelays, localPeers,
   relayConnected, relayError,
-  PeerRecord, storeSignal, popSignals, addHostedService, shareSession, cleanupStalePeers,
+  PeerRecord, storeSignal, popSignals, addHostedService, removeHostedService, shareSession, cleanupStalePeers,
   setRelayConnected(v) { relayConnected = v; },
   setRelayError(v) { relayError = v; },
 };

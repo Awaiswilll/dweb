@@ -7,6 +7,8 @@ export interface Service {
   port: number;
   cpu: number;
   memory: number;
+  url?: string;
+  dir?: string;
 }
 
 export type DomainTier = "free" | "premium" | "business";

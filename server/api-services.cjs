@@ -10,6 +10,7 @@ const os = require("os");
 const { execSync } = require("child_process");
 const { json, parseBody } = require("./helpers.cjs");
 const config = require("./config.cjs");
+const { addHostedService, removeHostedService } = require("./state.cjs");
 
 // ─── Running Services Map ────────────────────────────────────────────────────
 // name -> { server, port, type, dir, started }
@@ -66,6 +67,8 @@ function restoreServices() {
       const svc = createServiceServer(entry.name, type, port, dir);
       if (svc) {
         runningServices.set(entry.name, svc);
+        // Re-register on P2P relay
+        addHostedService(entry.name, type, svc.port, `http://localhost:${svc.port}`);
         restored++;
       }
     }
@@ -87,6 +90,26 @@ function getDemoDir(type, name, port) {
 
   try {
     fs.mkdirSync(demoDir, { recursive: true });
+
+    if (type === "Static Site" || type === "Single Page App" || type === "Documentation Site" || type === "Dashboard") {
+      // Copy the real welcome.html as index.html for a proper welcome page
+      const welcomeSrc = path.join(__dirname, "..", "welcome", "welcome.html");
+      if (fs.existsSync(welcomeSrc)) {
+        // Read welcome.html, replace the "/welcome/source" link with actual port info
+        let welcomeContent = fs.readFileSync(welcomeSrc, "utf8");
+        welcomeContent = welcomeContent
+          .replace(/dweb\.local/g, name)
+          .replace(/dweb v0\.1\.0/i, `${name} — ${type}`);
+        fs.writeFileSync(path.join(demoDir, "index.html"), welcomeContent);
+      } else {
+        // Fallback generic welcome
+        fs.writeFileSync(path.join(demoDir, "index.html"),
+          `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>${name}</title>` +
+          `<style>body{font-family:system-ui,sans-serif;background:#0f0f13;color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh;flex-direction:column;gap:12px}</style></head>` +
+          `<body><h1>${name}</h1><p>Welcome! This static site is hosted by dweb.</p>` +
+          `<p style="color:var(--text-muted);font-size:13px">Port: ${port}</p></body></html>`);
+      }
+    }
 
     if (type === "File Browser") {
       fs.writeFileSync(path.join(demoDir, "README.md"),
@@ -270,10 +293,13 @@ function registerRoutes(router) {
     runningServices.set(name, svc);
     saveServices();
 
+    // Register on P2P relay for global discovery
+    addHostedService(name, serviceType, servicePort, `http://localhost:${servicePort}`);
+
     json(res, 200, {
       status: "ok",
       message: `Service "${name}" started on port ${servicePort}`,
-      service: { name, port: servicePort, type: serviceType, dir: dir || null, running: true },
+      service: { name, port: servicePort, type: serviceType, dir: dir || null, running: true, url: `http://localhost:${servicePort}` },
     });
   });
 
@@ -293,6 +319,9 @@ function registerRoutes(router) {
     } catch {}
     runningServices.delete(name);
     saveServices();
+
+    // Remove from P2P relay
+    removeHostedService(name);
 
     console.log(`  [service] Stopped "${name}" on port ${svc.port}`);
     json(res, 200, { status: "ok", message: `Service "${name}" stopped` });
