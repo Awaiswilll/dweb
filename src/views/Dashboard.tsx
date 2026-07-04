@@ -1301,7 +1301,10 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
               const resp = await fetch("/api/instance/spawn", { method: "POST" });
               const data = await resp.json();
               if (data.status === "ok") {
-                setConnectionMsg({ type: "success", text: `New instance on port ${data.port} → ${data.url}` });
+                setConnectionMsg({ type: "success", text: `Opened new instance on port ${data.port}` });
+                window.open(data.url, "_blank");
+              } else {
+                setConnectionMsg({ type: "error", text: `Failed: ${data.error}` });
               }
             } catch (e) {
               setConnectionMsg({ type: "error", text: `Failed to spawn: ${e}` });
