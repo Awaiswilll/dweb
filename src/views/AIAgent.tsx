@@ -4,24 +4,24 @@ import {
   GitBranch, RefreshCw, Play, Trash2, Globe,
   Box, Cpu, History, ChevronDown, ChevronUp,
   Clock, MessageSquare, Sun, Moon, Download,
-  PlayCircle,
+  PlayCircle, Square,
 } from "lucide-react";
 
 /* ─── System Context ────────────────────────────────────
    This gets prepended to every opencode command so opencode
    immediately understands the dweb environment. */
-const DWEB_CONTEXT = `You are operating inside **dweb** — a self-hosted P2P dev portal running at http://localhost:19999/. 
+const DWEB_CONTEXT = `You are operating inside **dweb** — a self-hosted P2P dev portal running at http://localhost:49737/. 
 
 ENVIRONMENT:
 - Repo: github.com/Awaiswilll/dweb (dev branch)
 - Stack: React+Vite+TypeScript frontend, Node.js backend (dweb.cjs)
-- Ports: Web IDE=19999, P2P Relay=49736, TCP Proxy=49738
-- Default services: My Static Website (/welcome), File Share (/fileshare)
+- Ports: HTTP=49737, P2P Relay=49736, TCP Proxy=49738
 - Project files at: /home/awais/dweb/
 - Build: \`npm run build\`, Dev: \`npm run dev\`, Test: \`npm test\`
 
 CAPABILITIES:
 - You can BUILD web apps and get them HOSTED at /project/:name
+- You can MANAGE SERVICES: GET /api/services to list, POST /api/service/start to start, POST /api/service/stop to stop
 - You can run npm scripts, edit files, explore the repo
 - The AI Agent UI is at / (click "AI Agent" in sidebar)
 - Quick actions: build, test, status, dev, host, clean
@@ -115,6 +115,7 @@ export default function AIAgent() {
   const [activeModel, setActiveModel] = useState(loadModel);
   const [currentPrompt, setCurrentPrompt] = useState("");
   const outputRef = useRef<HTMLDivElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // ── Models ──
   const [models, setModels] = useState<OpenCodeModel[]>([]);
@@ -187,12 +188,13 @@ export default function AIAgent() {
     setOllamaLoading(false);
   };
 
-  // Fetch on mount & poll when panel is open
+  // Fetch on mount & poll only when the Ollama panel is open
   useEffect(() => {
+    if (!showOllama) return;
     fetchOllamaStatus();
     const interval = setInterval(fetchOllamaStatus, 8000);
     return () => clearInterval(interval);
-  }, []);
+  }, [showOllama]);
 
   /* ── Install Ollama ── */
   const handleInstallOllama = async () => {
@@ -265,6 +267,11 @@ export default function AIAgent() {
     setPrompt("");
     setShowHistory(false);
     setShowModelPicker(false);
+
+    // Create AbortController so user can cancel
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     try {
       const resp = await fetch("/api/opencode/run", {
         method: "POST",
@@ -274,6 +281,7 @@ export default function AIAgent() {
           model: useOllama ? `ollama/${ollamaModel}` : activeModel,
           useOllama,
         }),
+        signal: controller.signal,
       });
       const data = await resp.json();
       const text = data.output || "(no output)";
@@ -297,9 +305,22 @@ export default function AIAgent() {
         return next;
       });
     } catch (e) {
-      setOutput(`❌ Network error: ${e}`);
+      if ((e as Error)?.name === "AbortError") {
+        setOutput("❌ Cancelled by user");
+      } else {
+        setOutput(`❌ Network error: ${e}`);
+      }
     }
     setRunning(false);
+    abortControllerRef.current = null;
+  };
+
+  /* ── Stop running prompt ── */
+  const handleStop = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
   };
 
   /* ── Re-run a history entry ── */
@@ -798,12 +819,18 @@ export default function AIAgent() {
           alignItems: "center", marginTop: 8, gap: 8,
         }}>
           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            <button className="btn btn-sm btn-primary" onClick={() => handleRun()}
-              disabled={running || !prompt.trim()}
-              style={{ display: "flex", alignItems: "center", gap: 6, fontSize: fs(13) }}>
-              {running ? <Loader2 size={15} className="spin" /> : <Terminal size={15} />}
-              {running ? "Running..." : "Run in opencode"}
-            </button>
+            {running ? (
+              <button className="btn btn-sm btn-danger" onClick={handleStop}
+                style={{ display: "flex", alignItems: "center", gap: 6, fontSize: fs(13) }}>
+                <Square size={15} /> Stop
+              </button>
+            ) : (
+              <button className="btn btn-sm btn-primary" onClick={() => handleRun()}
+                disabled={!prompt.trim()}
+                style={{ display: "flex", alignItems: "center", gap: 6, fontSize: fs(13) }}>
+                <Terminal size={15} /> Run in opencode
+              </button>
+            )}
             {output && (
               <>
                 <button className="btn btn-sm btn-secondary" onClick={handleClear}

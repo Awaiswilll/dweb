@@ -28,6 +28,7 @@ const { peers, hostedServices, sharedSessions, tcpRelays,
 const { createRouter } = require("./router.cjs");
 const { startTCPRelay } = require("./relay-tcp.cjs");
 const { startLocalDiscovery, startFileDiscovery, printBanner, getDiscoverySocket } = require("./discovery.cjs");
+const { restoreServices } = require("./api-services.cjs");
 
 // ── Main ───────────────────────────────────────────────────────────────────────
 
@@ -124,6 +125,9 @@ async function main() {
   console.log(`  [services] Auto-registered: "File Share" → /fileshare`);
 
   printBanner();
+
+  // Restore managed services from disk
+  restoreServices();
 
   // Register with upstream relay
   if (UPSTREAM_RELAY && isPeerMode) {

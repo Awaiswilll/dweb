@@ -11,6 +11,7 @@ const { registerRoutes: registerFileshareRoutes } = require("./api-fileshare.cjs
 const { registerRoutes: registerOpencodeRoutes } = require("./api-opencode.cjs");
 const { registerRoutes: registerSystemRoutes } = require("./api-system.cjs");
 const { registerRoutes: registerOllamaRoutes } = require("./api-ollama.cjs");
+const { registerRoutes: registerServiceRoutes } = require("./api-services.cjs");
 
 // ─── Lightweight Router ────────────────────────────────────────────────────────
 
@@ -67,6 +68,7 @@ function createRouter() {
   registerOpencodeRoutes(router);
   registerSystemRoutes(router);
   registerOllamaRoutes(router);
+  registerServiceRoutes(router);
   return router;
 }
 
