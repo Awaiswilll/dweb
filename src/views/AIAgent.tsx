@@ -3,7 +3,8 @@ import {
   Terminal, Loader2, Rocket, ExternalLink, Copy,
   GitBranch, RefreshCw, Play, Trash2, Globe,
   Box, Cpu, History, ChevronDown, ChevronUp,
-  Clock, MessageSquare, Sun, Moon,
+  Clock, MessageSquare, Sun, Moon, Download,
+  PlayCircle,
 } from "lucide-react";
 
 /* ─── System Context ────────────────────────────────────
@@ -38,6 +39,16 @@ interface HistoryEntry {
 
 interface OpenCodeModel {
   id: string; label: string; provider: string; free: boolean;
+}
+
+interface OllamaModel {
+  name: string; size: number; modified?: string; details?: { family?: string; parameter_size?: string; };
+}
+
+interface OllamaStatus {
+  installed: boolean; running: boolean; platform: string;
+  models: OllamaModel[]; modelCount: number; port: number;
+  apiEndpoint: string; suggestedModel: string;
 }
 
 /* ─── Quick Actions ─────────────────────────────────────── */
@@ -113,6 +124,14 @@ export default function AIAgent() {
   const [history, setHistory] = useState<HistoryEntry[]>(loadHistory);
   const [showHistory, setShowHistory] = useState(false);
 
+  // ── Ollama (local AI) ──
+  const [ollamaStatus, setOllamaStatus] = useState<OllamaStatus | null>(null);
+  const [ollamaLoading, setOllamaLoading] = useState(false);
+  const [showOllama, setShowOllama] = useState(false);
+  const [useOllama, setUseOllama] = useState(false);
+  const [ollamaModel, setOllamaModel] = useState("qwen2.5-coder:7b");
+  const [ollamaActionMsg, setOllamaActionMsg] = useState("");
+
   // ── User preferences ──
   const [fontSize, setFontSize] = useState<FontSize>(loadFontSize);
 
@@ -153,6 +172,77 @@ export default function AIAgent() {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /* ── Fetch Ollama status ── */
+  const fetchOllamaStatus = async () => {
+    setOllamaLoading(true);
+    try {
+      const resp = await fetch("/api/ollama/status");
+      const data = await resp.json();
+      if (data.status === "ok") {
+        setOllamaStatus(data);
+        // Auto-hide the action message after success
+        if (data.installed) setOllamaActionMsg("");
+      }
+    } catch {}
+    setOllamaLoading(false);
+  };
+
+  // Fetch on mount & poll when panel is open
+  useEffect(() => {
+    fetchOllamaStatus();
+    const interval = setInterval(fetchOllamaStatus, 8000);
+    return () => clearInterval(interval);
+  }, []);
+
+  /* ── Install Ollama ── */
+  const handleInstallOllama = async () => {
+    setOllamaActionMsg("Installing Ollama...");
+    try {
+      const resp = await fetch("/api/ollama/install", { method: "POST" });
+      const data = await resp.json();
+      setOllamaActionMsg(data.message || data.error || "Done");
+      await fetchOllamaStatus();
+    } catch (e) {
+      setOllamaActionMsg(`Error: ${e}`);
+    }
+  };
+
+  /* ── Start Ollama ── */
+  const handleStartOllama = async () => {
+    setOllamaActionMsg("Starting Ollama...");
+    try {
+      const resp = await fetch("/api/ollama/start", { method: "POST" });
+      const data = await resp.json();
+      setOllamaActionMsg(data.message || data.error || "Done");
+      await fetchOllamaStatus();
+    } catch (e) {
+      setOllamaActionMsg(`Error: ${e}`);
+    }
+  };
+
+  /* ── Pull Ollama model ── */
+  const handlePullOllamaModel = async () => {
+    setOllamaActionMsg(`Pulling ${ollamaModel}...`);
+    try {
+      const resp = await fetch("/api/ollama/pull", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: ollamaModel }),
+      });
+      const data = await resp.json();
+      setOllamaActionMsg(data.message || data.error || "Done");
+      // Poll for model list changes
+      setTimeout(fetchOllamaStatus, 5000);
+    } catch (e) {
+      setOllamaActionMsg(`Error: ${e}`);
+    }
+  };
+
+  /* ── Toggle Ollama mode ── */
+  const handleToggleOllama = () => {
+    setUseOllama(prev => !prev);
+  };
+
   /* ── Cycle font size ── */
   const cycleFontSize = () => {
     const sizes: FontSize[] = ["normal", "large", "xlarge"];
@@ -179,7 +269,11 @@ export default function AIAgent() {
       const resp = await fetch("/api/opencode/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ command: fullCmd, model: activeModel }),
+        body: JSON.stringify({
+          command: fullCmd,
+          model: useOllama ? `ollama/${ollamaModel}` : activeModel,
+          useOllama,
+        }),
       });
       const data = await resp.json();
       const text = data.output || "(no output)";
@@ -423,6 +517,173 @@ export default function AIAgent() {
             }} />
             <span>opencode</span>
             {ocAvailable === true && <span style={{ color: "#22c55e", fontSize: fs(11) }}>v{ocVersion}</span>}
+          </div>
+
+          {/* Ollama toggle */}
+          <div style={{ position: "relative" }}>
+            <button className="btn btn-sm" onClick={() => setShowOllama(!showOllama)}
+              title="Local AI (Ollama)"
+              style={{
+                display: "flex", alignItems: "center", gap: 5, fontSize: fs(12),
+                background: useOllama
+                  ? "rgba(34,197,94,0.15)"
+                  : ollamaStatus?.installed
+                    ? "rgba(99,102,241,0.1)"
+                    : "rgba(255,255,255,0.04)",
+                border: `1px solid ${
+                  useOllama
+                    ? "rgba(34,197,94,0.3)"
+                    : ollamaStatus?.installed
+                      ? "rgba(99,102,241,0.2)"
+                      : "rgba(255,255,255,0.08)"
+                }`,
+                color: useOllama ? "#22c55e" : "var(--text-primary)",
+              }}>
+              <Cpu size={13} />
+              <span>{useOllama ? "Ollama ON" : "Ollama"}</span>
+              {ollamaLoading ? (
+                <Loader2 size={11} className="spin" />
+              ) : (
+                <div style={{
+                  width: 7, height: 7, borderRadius: "50%",
+                  background: !ollamaStatus ? "#6b7280"
+                    : ollamaStatus.running ? "#22c55e"
+                    : ollamaStatus.installed ? "#f59e0b"
+                    : "#6b7280",
+                  flexShrink: 0,
+                }} />
+              )}
+              {showOllama ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+            </button>
+            {showOllama && (
+              <div className="glass-sm" style={{
+                position: "absolute", top: "100%", right: 0, zIndex: 100,
+                width: 320, marginTop: 4, padding: 10, borderRadius: "var(--radius-sm)",
+                fontSize: fs(12),
+              }}>
+                {/* Status line */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                  <span style={{ fontWeight: 600, display: "flex", alignItems: "center", gap: 5 }}>
+                    <Cpu size={14} /> Local AI (Ollama)
+                  </span>
+                  <span style={{
+                    fontSize: fs(11), padding: "2px 8px", borderRadius: 10,
+                    background: !ollamaStatus ? "rgba(107,114,128,0.2)" : "transparent",
+                    color: !ollamaStatus ? "#6b7280"
+                      : ollamaStatus.running ? "#22c55e"
+                      : ollamaStatus.installed ? "#f59e0b"
+                      : "#6b7280",
+                  }}>
+                    {!ollamaStatus ? "Checking..."
+                      : ollamaStatus.running ? "Running"
+                      : ollamaStatus.installed ? "Stopped"
+                      : "Not installed"}
+                  </span>
+                </div>
+
+                {/* Platform info */}
+                {ollamaStatus && (
+                  <div style={{ fontSize: fs(11), color: "var(--text-muted)", marginBottom: 8 }}>
+                    Platform: {ollamaStatus.platform} · Port: {ollamaStatus.port}
+                    {ollamaStatus.modelCount > 0 && ` · ${ollamaStatus.modelCount} model${ollamaStatus.modelCount !== 1 ? "s" : ""} loaded`}
+                  </div>
+                )}
+
+                {/* Action buttons */}
+                <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 8 }}>
+                  {!ollamaStatus?.installed && (
+                    <button className="btn btn-sm" onClick={handleInstallOllama}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 4,
+                        fontSize: fs(11), padding: "4px 10px",
+                        background: "rgba(99,102,241,0.15)",
+                        border: "1px solid rgba(99,102,241,0.25)",
+                      }}>
+                      <Download size={12} /> Install
+                    </button>
+                  )}
+                  {ollamaStatus?.installed && !ollamaStatus?.running && (
+                    <button className="btn btn-sm" onClick={handleStartOllama}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 4,
+                        fontSize: fs(11), padding: "4px 10px",
+                        background: "rgba(34,197,94,0.15)",
+                        border: "1px solid rgba(34,197,94,0.25)",
+                        color: "#22c55e",
+                      }}>
+                      <PlayCircle size={12} /> Start
+                    </button>
+                  )}
+                  {ollamaStatus?.running && (
+                    <>
+                      <button className="btn btn-sm" onClick={handlePullOllamaModel}
+                        style={{
+                          display: "flex", alignItems: "center", gap: 4,
+                          fontSize: fs(11), padding: "4px 10px",
+                          background: "rgba(245,158,11,0.15)",
+                          border: "1px solid rgba(245,158,11,0.25)",
+                          color: "#f59e0b",
+                        }}>
+                        <Download size={12} /> Pull Model
+                      </button>
+                      <label style={{
+                        display: "flex", alignItems: "center", gap: 4, cursor: "pointer",
+                        fontSize: fs(11), padding: "4px 8px",
+                        color: useOllama ? "#22c55e" : "var(--text-muted)",
+                      }}>
+                        <input type="checkbox" checked={useOllama} onChange={handleToggleOllama}
+                          style={{ accentColor: "#22c55e" }} />
+                        Use for prompts
+                      </label>
+                    </>
+                  )}
+                </div>
+
+                {/* Model selector (when running) */}
+                {ollamaStatus?.running && (
+                  <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
+                    <select value={ollamaModel} onChange={e => setOllamaModel(e.target.value)}
+                      style={{
+                        flex: 1, padding: "4px 6px", fontSize: fs(11),
+                        background: "rgba(0,0,0,0.3)",
+                        border: "1px solid rgba(255,255,255,0.1)",
+                        borderRadius: "var(--radius-sm)",
+                        color: "var(--text-primary)",
+                        outline: "none",
+                      }}>
+                      <option value="qwen2.5-coder:7b">qwen2.5-coder:7b (recommended)</option>
+                      <option value="qwen2.5-coder:1.5b">qwen2.5-coder:1.5b (faster)</option>
+                      <option value="qwen2.5:7b">qwen2.5:7b</option>
+                      <option value="llama3.2:3b">llama3.2:3b</option>
+                      <option value="llama3.2:1b">llama3.2:1b (fastest)</option>
+                      <option value="codellama:7b">codellama:7b</option>
+                      <option value="deepseek-coder:6.7b">deepseek-coder:6.7b</option>
+                      <option value="mistral:7b">mistral:7b</option>
+                      {ollamaStatus.models.map(m => (
+                        <option key={m.name} value={m.name}>{m.name}</option>
+                      ))}
+                    </select>
+                    {ollamaStatus.modelCount > 0 && (
+                      <span style={{ fontSize: fs(10), color: "var(--text-muted)" }}>
+                        +{ollamaStatus.models.length} local
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {/* Action status message */}
+                {ollamaActionMsg && (
+                  <div style={{
+                    marginTop: 6, padding: "4px 8px", borderRadius: "var(--radius-sm)",
+                    fontSize: fs(11), background: "rgba(255,255,255,0.04)",
+                    color: ollamaActionMsg.startsWith("Error") ? "#ef4444" : "#22c55e",
+                    wordBreak: "break-word",
+                  }}>
+                    {ollamaActionMsg}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* History toggle */}

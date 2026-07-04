@@ -2275,6 +2275,11 @@ body {
   to { transform: rotate(360deg); }
 }
 
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }
@@ -2287,6 +2292,10 @@ body {
 
 .spin {
   animation: spin 0.8s linear infinite;
+}
+
+.blink {
+  animation: blink 1s step-end infinite;
 }
 
 /* ─── Scrollbar ──────────────────────────────────────────── */

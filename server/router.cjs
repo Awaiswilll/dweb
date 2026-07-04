@@ -10,6 +10,7 @@ const { registerRoutes: registerCollabRoutes } = require("./api-collab.cjs");
 const { registerRoutes: registerFileshareRoutes } = require("./api-fileshare.cjs");
 const { registerRoutes: registerOpencodeRoutes } = require("./api-opencode.cjs");
 const { registerRoutes: registerSystemRoutes } = require("./api-system.cjs");
+const { registerRoutes: registerOllamaRoutes } = require("./api-ollama.cjs");
 
 // ─── Lightweight Router ────────────────────────────────────────────────────────
 
@@ -65,6 +66,7 @@ function createRouter() {
   registerFileshareRoutes(router);
   registerOpencodeRoutes(router);
   registerSystemRoutes(router);
+  registerOllamaRoutes(router);
   return router;
 }
 

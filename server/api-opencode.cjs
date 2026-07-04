@@ -57,7 +57,7 @@ function registerRoutes(router) {
   // Run opencode command
   router.post("/api/opencode/run", async (req, res) => {
     const body = await parseBody(req);
-    const { command, model, context } = body;
+    const { command, model, context, useOllama } = body;
     if (!command) return json(res, 400, { error: "Missing command" });
     let cmd = command.trim();
     const shorthands = {
@@ -78,14 +78,26 @@ function registerRoutes(router) {
     const fullCommand = `${serverContext}\n\nUser: ${expanded}`;
 
     try {
-      const output = execSync(`opencode run -m ${JSON.stringify(useModel)} ${JSON.stringify(fullCommand)} 2>&1`, {
-        timeout: 300000,
-        encoding: "utf-8",
-        maxBuffer: 1024 * 1024,
-      });
-      json(res, 200, { status: "ok", output, command: expanded, model: useModel });
+      // When using Ollama, set environment variables to route through local LLM
+      const env = { ...process.env };
+      const ollamaModel = model || "ollama/qwen2.5-coder:7b";
+      if (useOllama) {
+        env.OPENAI_BASE_URL = "http://127.0.0.1:11434/v1";
+        env.OPENAI_API_KEY = "ollama";
+      }
+
+      const output = execSync(
+        `opencode run -m ${JSON.stringify(useOllama ? ollamaModel : useModel)} ${JSON.stringify(fullCommand)} 2>&1`,
+        {
+          timeout: 300000,
+          encoding: "utf-8",
+          maxBuffer: 1024 * 1024,
+          env,
+        }
+      );
+      json(res, 200, { status: "ok", output, command: expanded, model: useOllama ? ollamaModel : useModel, provider: useOllama ? "ollama" : "cloud" });
     } catch (e) {
-      json(res, 200, { status: "error", output: (e.stderr || e.message || "").toString(), command: expanded, model: useModel });
+      json(res, 200, { status: "error", output: (e.stderr || e.message || "").toString(), command: expanded, model: useOllama ? ollamaModel : useModel, provider: useOllama ? "ollama" : "cloud" });
     }
   });
 }
