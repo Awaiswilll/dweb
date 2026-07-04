@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import {
-  Terminal, Loader2, Rocket, ExternalLink,
+  Terminal, Loader2, Rocket, ExternalLink, Copy,
   GitBranch, RefreshCw, Play, Trash2, Globe,
   Box, Cpu, History, ChevronDown, ChevronUp,
   Clock, MessageSquare, Sun, Moon,
@@ -290,6 +290,16 @@ export default function AIAgent() {
     setPublishing(false);
   };
 
+  /* ── Copy output to clipboard ── */
+  const handleCopyOutput = async () => {
+    try {
+      await navigator.clipboard.writeText(output);
+      // brief visual feedback
+      const btn = document.getElementById("copy-output-btn");
+      if (btn) { btn.textContent = "Copied!"; setTimeout(() => { btn.textContent = ""; }, 1200); }
+    } catch {}
+  };
+
   /* ── Clear output ── */
   const handleClear = () => { setOutput(""); setShowOutput(false); };
 
@@ -577,7 +587,22 @@ export default function AIAgent() {
               <Terminal size={13} />
               {currentPrompt.slice(0, 60)}{currentPrompt.length > 60 ? "..." : ""}
             </span>
-            <span>{output.length} bytes</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span>{output.length} bytes</span>
+              {output && (
+                <button id="copy-output-btn" onClick={handleCopyOutput}
+                  title="Copy output to clipboard"
+                  style={{
+                    background: "none", border: "none", color: "var(--text-muted)",
+                    cursor: "pointer", display: "flex", alignItems: "center", gap: 3,
+                    fontSize: fs(11), padding: "2px 6px", borderRadius: 3,
+                  }}
+                  onMouseOver={e => { e.currentTarget.style.background = "rgba(255,255,255,0.08)"; }}
+                  onMouseOut={e => { e.currentTarget.style.background = "none"; }}>
+                  <Copy size={12} />
+                </button>
+              )}
+            </div>
           </div>
           <div ref={outputRef} style={{
             maxHeight: 420, overflow: "auto",

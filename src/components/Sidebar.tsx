@@ -11,7 +11,6 @@ const navItems: { id: View; label: string; icon: React.ReactNode; badge?: string
   { id: "dashboard", label: "Dashboard", icon: <Gauge size={20} /> },
   { id: "browser", label: "Browser", icon: <Globe size={20} /> },
   { id: "p2p-dashboard", label: "P2P Network", icon: <Radio size={20} />, badge: "NEW" },
-  { id: "p2p-transfer", label: "File Transfer", icon: <Radio size={20} /> },
   { id: "ai-agent", label: "AI Agent", icon: <Bot size={20} /> },
   { id: "domains", label: "Domains", icon: <Network size={20} /> },
   { id: "docs", label: "Docs", icon: <BookOpen size={20} /> },

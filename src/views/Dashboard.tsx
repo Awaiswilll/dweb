@@ -384,15 +384,16 @@ function getServiceUrl(name: string): string {
 
 function getServiceSourceUrl(name: string): string | null {
   if (name === "My Static Website") return `${window.location.origin}/welcome/source`;
+  if (name === "File Share") return `${window.location.origin}/fileshare/api/source`;
   return null;
 }
 
 /* ─── Main Dashboard ──────────────────────────────────────── */
 interface DashboardProps {
-  // props available for future use
+  onOpenInBrowser?: (url: string) => void;
 }
 
-export default function Dashboard(_props: DashboardProps) {
+export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
   // Restore services from localStorage cache so pills appear immediately on tab switch
   const [services, setServices] = useState<Service[]>(() => {
     try {
@@ -468,10 +469,39 @@ export default function Dashboard(_props: DashboardProps) {
     }
   };
 
+  const loadTorStatus = async () => {
+    try {
+      const resp = await fetch("/api/tor/status");
+      const data = await resp.json();
+      if (data.status === "ok") setTorStatus(data);
+    } catch {}
+  };
+
   useEffect(() => {
     loadServices();
     loadRuntimes();
+    loadTorStatus();
   }, []);
+
+  const handleTorToggle = async () => {
+    setTogglingTor(true);
+    try {
+      const action = torStatus?.running ? "stop" : "start";
+      const resp = await fetch("/api/tor/toggle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      const data = await resp.json();
+      if (data.status === "ok") {
+        setTorStatus(prev => prev ? { ...prev, running: action === "start" } : prev);
+        setConnectionMsg({ type: "success", text: data.message });
+      }
+    } catch (e) {
+      setConnectionMsg({ type: "error", text: `Tor error: ${e}` });
+    }
+    setTogglingTor(false);
+  };
 
   const handleAddService = (svc: Service) => {
     // Add with running=true immediately, save to localStorage, and auto-start via API
@@ -600,6 +630,8 @@ export default function Dashboard(_props: DashboardProps) {
   const [discoveredPeers, setDiscoveredPeers] = useState<RelayPeer[]>([]);
   const [incomingSignals, setIncomingSignals] = useState<string[]>([]);
   const [connectionMsg, setConnectionMsg] = useState<{ type: "success" | "error" | "info"; text: string } | null>(null);
+  const [torStatus, setTorStatus] = useState<{ installed: boolean; running: boolean; kalitorifyAvailable: boolean } | null>(null);
+  const [togglingTor, setTogglingTor] = useState(false);
   const relayLoaded = useRef(false);
 
   // Fetch relay status + peer list periodically
@@ -1008,6 +1040,43 @@ export default function Dashboard(_props: DashboardProps) {
         )}
       </div>
 
+      {/* Tor Network toggle */}
+      {torStatus !== null && (
+        <div className="glass-sm" style={{
+          display: "flex", alignItems: "center", gap: 12,
+          padding: "8px 14px", borderRadius: "var(--radius-sm)",
+          marginBottom: 10, fontSize: 12,
+          border: torStatus?.running ? "1px solid rgba(126,34,206,0.3)" : "1px solid transparent",
+        }}>
+          <span style={{
+            width: 8, height: 8, borderRadius: "50%",
+            background: torStatus.running ? "#7c3aed" : torStatus.installed ? "#6b7280" : "#374151",
+            boxShadow: torStatus.running ? "0 0 6px rgba(126,34,206,0.5)" : "none",
+          }} />
+          <span style={{ fontWeight: 600 }}>Tor</span>
+          <span style={{ color: "var(--text-muted)" }}>
+            {torStatus.running ? "Routing enabled" : torStatus.installed ? "Installed, inactive" : "Not available"}
+          </span>
+          {torStatus.kalitorifyAvailable && (
+            <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 8, background: "rgba(126,34,206,0.15)", color: "#7c3aed" }}>
+              kalitorify
+            </span>
+          )}
+          <div style={{ marginLeft: "auto" }}>
+            <button className="btn btn-sm" onClick={handleTorToggle} disabled={!torStatus.installed || togglingTor}
+              style={{
+                fontSize: 11, padding: "4px 12px",
+                background: torStatus.running ? "rgba(239,68,68,0.1)" : "rgba(126,34,206,0.1)",
+                border: `1px solid ${torStatus.running ? "rgba(239,68,68,0.3)" : "rgba(126,34,206,0.3)"}`,
+                color: torStatus.running ? "#ef4444" : "#7c3aed",
+                cursor: torStatus.installed ? "pointer" : "not-allowed", opacity: torStatus.installed ? 1 : 0.5,
+              }}>
+              {togglingTor ? "..." : torStatus.running ? "Disconnect" : "Connect via Tor"}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Discovered peers from relay */}
       {discoveredPeers.length > 0 && (
         <div className="glass-sm" style={{
@@ -1128,9 +1197,6 @@ export default function Dashboard(_props: DashboardProps) {
             ({runtimes.filter(r => r.available).length} found)
           </span>
         </div>
-        <button className="btn btn-icon btn-sm" onClick={e => { e.stopPropagation(); loadRuntimes(); }} title="Refresh">
-          <RefreshCw size={12} />
-        </button>
       </div>
       {runtimesExpanded && (
         <div className="provider-config-body" style={{ overflow: "visible" }}>
@@ -1191,11 +1257,14 @@ export default function Dashboard(_props: DashboardProps) {
                       <Code size={12} />
                     </button>
                   )}
-                  <a className="pill-btn pill-open" title="Open in Browser"
-                    href={getServiceUrl(svc.name)} target="_blank" rel="noopener"
-                    onClick={(e) => e.stopPropagation()}>
+                  <button className="pill-btn pill-open" title="Open in dweb Browser"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (onOpenInBrowser) onOpenInBrowser(getServiceUrl(svc.name));
+                      else window.open(getServiceUrl(svc.name), '_blank');
+                    }}>
                     <ExternalLink size={12} />
-                  </a>
+                  </button>
                   {isDefaultService(svc.name) ? (
                     <span className="pill-badge">built-in</span>
                   ) : (
@@ -1226,8 +1295,26 @@ export default function Dashboard(_props: DashboardProps) {
           <h2>Services & Runtimes</h2>
           <p className="text-muted-sm">Manage your services and detected system runtimes</p>
         </div>
-        <div className="header-actions">
-          <button className="btn btn-secondary" onClick={() => { loadServices(); loadRuntimes(); }}>
+        <div className="header-actions" style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+          <button className="btn btn-secondary" onClick={async () => {
+            try {
+              const resp = await fetch("/api/instance/spawn", { method: "POST" });
+              const data = await resp.json();
+              if (data.status === "ok") {
+                setConnectionMsg({ type: "success", text: `New instance on port ${data.port} → ${data.url}` });
+              }
+            } catch (e) {
+              setConnectionMsg({ type: "error", text: `Failed to spawn: ${e}` });
+            }
+          }}>
+            <Plus size={14} /> New Instance
+          </button>
+          <button className="btn btn-secondary" onClick={() => {
+            loadServices(); loadRuntimes();
+            // Also refresh relay/network data
+            getRelayStatus().then(s => { if (s) setRelayStatus(s); });
+            getRelayPeers().then(p => { setDiscoveredPeers(p); if (p.length > 0) setPeerCount(p.length); });
+          }}>
             <RefreshCw size={14} /> Refresh
           </button>
         </div>

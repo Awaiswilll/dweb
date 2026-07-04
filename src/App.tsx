@@ -53,11 +53,6 @@ function AppContent() {
       onClick: () => { setCurrentView("p2p-dashboard"); },
     },
     {
-      label: "File Transfer",
-      icon: <Radio size={14} />,
-      onClick: () => { setCurrentView("p2p-transfer"); },
-    },
-    {
       label: "Network Status",
       icon: <Radio size={14} />,
       onClick: () => addNotification({ type: "info", title: "Network", message: "Relay running on port 49746", duration: 3000 }),
@@ -78,7 +73,7 @@ function AppContent() {
 
   const renderView = () => {
     switch (currentView) {
-      case "dashboard": return <Dashboard />;
+      case "dashboard": return <Dashboard onOpenInBrowser={handleOpenInBrowser} />;
       case "browser": return <BrowserView initialUrl={browserUrl} navId={browserNavId} />;
       case "ai-agent": return <AIAgent />;
       case "domains": return <Domains onOpenInBrowser={handleOpenInBrowser} />;

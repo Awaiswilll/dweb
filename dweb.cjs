@@ -559,6 +559,18 @@ async function handleRequest(req, res) {
       return;
     }
 
+    // File Share API — view source
+    if (pathname === "/fileshare/api/source" && method === "GET") {
+      const fsPath = path.join(__dirname, "welcome", "fileshare.html");
+      if (!fs.existsSync(fsPath)) return json(res, 404, { error: "Source not found" });
+      res.writeHead(200, {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Access-Control-Allow-Origin": "*",
+      });
+      res.end(fs.readFileSync(fsPath));
+      return;
+    }
+
     // ────────────────────────────────────────────────────────────
     //  BUILD & DEPLOY API — register a user-built project as a service
     // ────────────────────────────────────────────────────────────
@@ -705,6 +717,118 @@ async function handleRequest(req, res) {
         return json(res, 200, { status: "ok", output, command: expanded, model: useModel });
       } catch (e) {
         return json(res, 200, { status: "error", output: (e.stderr || e.message || "").toString(), command: expanded, model: useModel });
+      }
+    }
+
+    // ────────────────────────────────────────────────────────────
+    //  TOR NETWORK
+    // ────────────────────────────────────────────────────────────
+
+    // Tor status — check if tor is installed and running
+    if (pathname === "/api/tor/status" && method === "GET") {
+      let installed = false, running = false;
+      try {
+        execSync("which tor 2>/dev/null", { timeout: 3000 });
+        installed = true;
+      } catch {}
+      try {
+        execSync("pgrep -x tor 2>/dev/null", { timeout: 3000 });
+        running = true;
+      } catch {}
+      // Also check torsocks/kalitorify
+      let kalitorifyAvailable = false;
+      try { execSync("which kalitorify 2>/dev/null", { timeout: 3000 }); kalitorifyAvailable = true; } catch {}
+      return json(res, 200, { status: "ok", installed, running, kalitorifyAvailable, torProxy: "socks5://127.0.0.1:9050" });
+    }
+
+    // Tor toggle — start or stop tor routing
+    if (pathname === "/api/tor/toggle" && method === "POST") {
+      const body = await parseBody(req);
+      const { action } = body; // "start" or "stop"
+      try {
+        if (action === "start") {
+          // Try kalitorify first, then plain tor
+          try {
+            execSync("sudo kalitorify --tor 2>/dev/null", { timeout: 10000 });
+          } catch {
+            execSync("nohup tor > /dev/null 2>&1 &", { timeout: 5000 });
+          }
+          return json(res, 200, { status: "ok", message: "Tor routing enabled", torProxy: "socks5://127.0.0.1:9050" });
+        } else if (action === "stop") {
+          try {
+            execSync("sudo kalitorify --clearnet 2>/dev/null", { timeout: 10000 });
+          } catch {}
+          try {
+            execSync("pkill -x tor 2>/dev/null", { timeout: 3000 });
+          } catch {}
+          return json(res, 200, { status: "ok", message: "Tor routing disabled" });
+        } else {
+          return json(res, 400, { error: "Invalid action. Use 'start' or 'stop'." });
+        }
+      } catch (e) {
+        return json(res, 500, { error: e.message });
+      }
+    }
+
+    // ────────────────────────────────────────────────────────────
+    //  INSTANCE MANAGEMENT — spawn new dweb peer instances
+    // ────────────────────────────────────────────────────────────
+
+    // Spawn a new dweb instance on a random port
+    if (pathname === "/api/instance/spawn" && method === "POST") {
+      const body = await parseBody(req);
+      const mode = body.mode || "peer";
+      // Find a random free port between 50000-59999
+      const getRandomPort = () => Math.floor(Math.random() * 10000) + 50000;
+      function isPortFree(port) {
+        return new Promise((resolve) => {
+          const s = net.createServer();
+          s.once("error", () => resolve(false));
+          s.once("listening", () => { s.close(); resolve(true); });
+          s.listen(port, "127.0.0.1");
+        });
+      }
+      let newPort = getRandomPort();
+      let attempts = 0;
+      while (!(await isPortFree(newPort)) && attempts < 20) {
+        newPort = getRandomPort();
+        attempts++;
+      }
+      const instanceDir = __dirname;
+      const logFile = path.join(instanceDir, `instance-${newPort}.log`);
+      const cmd = `MODE=${mode} PORT=${newPort} RELAY_PORT=${newPort + 1} nohup node ${path.join(instanceDir, "dweb.cjs")} > ${logFile} 2>&1 &`;
+      try {
+        execSync(cmd, { timeout: 5000 });
+        // Give it a moment to start
+        await new Promise(r => setTimeout(r, 2000));
+        return json(res, 200, { 
+          status: "ok", 
+          port: newPort, 
+          url: `http://127.0.0.1:${newPort}/`,
+          logFile,
+          message: `New dweb instance spawned on port ${newPort}`
+        });
+      } catch (e) {
+        return json(res, 500, { error: e.message });
+      }
+    }
+
+    // List running dweb instances
+    if (pathname === "/api/instance/list" && method === "GET") {
+      try {
+        const raw = execSync("pgrep -f 'dweb.cjs' 2>/dev/null", { timeout: 3000, encoding: "utf-8" });
+        const pids = raw.trim().split("\n").filter(Boolean).map(p => parseInt(p.trim(), 10));
+        const instances = [];
+        for (const pid of pids) {
+          try {
+            const portLine = execSync(`cat /proc/${pid}/environ 2>/dev/null | tr '\\0' '\\n' | grep '^PORT=' || true`, { timeout: 2000, encoding: "utf-8" }).trim();
+            const port = portLine ? parseInt(portLine.replace("PORT=", ""), 10) : 0;
+            instances.push({ pid, port, url: port ? `http://127.0.0.1:${port}/` : null });
+          } catch {}
+        }
+        return json(res, 200, { status: "ok", count: instances.length, instances });
+      } catch (e) {
+        return json(res, 200, { status: "ok", count: 0, instances: [] });
       }
     }
 
@@ -1068,6 +1192,8 @@ function printBanner() {
   console.log(`  ║    /api/p2p/receive   — P2P file receive          ║`);
   console.log(`  ║    /api/p2p/received  — Received P2P files        ║`);
   console.log(`  ║    /api/p2p/discover-local  — Local peer discover ║`);
+  console.log(`  ║    /api/tor/status       — Tor network status            ║`);
+  console.log(`  ║    /api/instance/spawn   — Spawn new dweb instance       ║`);
   console.log(`  ║    /              — dweb Web IDE frontend          ║`);
   console.log(`  ╚══════════════════════════════════════════════════╝`);
   console.log(`  Upstream relay: ${UPSTREAM_RELAY || "(none — this is a relay node)"}`);
