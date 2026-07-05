@@ -47,12 +47,14 @@ interface OllamaModel {
 
 interface OllamaStatus {
   installed: boolean; running: boolean; platform: string;
+  isWSL?: boolean; detectedVia?: string | null; recommended?: boolean;
   models: OllamaModel[]; modelCount: number; port: number;
   apiEndpoint: string; suggestedModel: string;
 }
 
 /* ─── Quick Actions ─────────────────────────────────────── */
 const QUICK_ACTIONS = [
+  { id: "hello-dweb", label: "Hello dweb", icon: <Globe size={15} />, prompt: "INSTANT_PUBLISH" },
   { id: "build",  label: "Run Build",   icon: <Play size={15} />, prompt: "run npm run build in the dweb repo and fix any errors" },
   { id: "test",   label: "Run Tests",   icon: <RefreshCw size={15} />, prompt: "run npm test in the dweb repo and fix any failures" },
   { id: "status", label: "Repo Status", icon: <GitBranch size={15} />, prompt: "show the current state of the dweb repo, its architecture, branch, recent changes, and what can be built next" },
@@ -65,6 +67,7 @@ const QUICK_ACTIONS = [
 const HISTORY_KEY = "dweb-oc-history";
 const MODEL_KEY = "dweb-oc-model";
 const FONT_SIZE_KEY = "dweb-font-size";
+const SESSION_KEY = "dweb-oc-session"; // Persisted across tab switches within SPA
 
 type FontSize = "normal" | "large" | "xlarge";
 
@@ -115,7 +118,7 @@ export default function AIAgent() {
   const [activeModel, setActiveModel] = useState(loadModel);
   const [currentPrompt, setCurrentPrompt] = useState("");
   const outputRef = useRef<HTMLDivElement>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
 
   // ── Models ──
   const [models, setModels] = useState<OpenCodeModel[]>([]);
@@ -155,22 +158,50 @@ export default function AIAgent() {
     }
   }, [output, showOutput]);
 
-  // On mount: load everything + send system context to opencode
+  // ── Connect to SSE stream for a session ────────────────
+  const connectSSE = useRef<(sessionId: string, userCmd: string) => void>(null);
+
+  // On mount: load everything + reconnect to active session if any
   useEffect(() => {
     fetch("/api/repo/status").then(r => r.json()).then(d => { if (d.status === "ok") setRepoInfo(d); }).catch(() => {});
     fetch("/api/opencode/status").then(r => r.json()).then(d => { setOcAvailable(d.available); setOcVersion(d.version || ""); }).catch(() => setOcAvailable(false));
     fetch("/api/opencode/models").then(r => r.json()).then(d => { if (d.status === "ok") setModels(d.models || []); }).catch(() => {});
     fetch("/api/projects").then(r => r.json()).then(d => { if (d.status === "ok" && d.projects) setPublished(d.projects); }).catch(() => {});
 
-    // Auto-send system context to warm up the agent
-    if (!sessionStorage.getItem("dweb-context-sent")) {
-      sessionStorage.setItem("dweb-context-sent", "1");
-      fetch("/api/opencode/run", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ command: DWEB_CONTEXT, model: activeModel, context: true }),
-      }).catch(() => {});
+    // ── Reconnect to active session (survive tab switches) ──
+    const savedSessionId = sessionStorage.getItem(SESSION_KEY);
+    if (savedSessionId) {
+      fetch(`/api/opencode/session/${savedSessionId}`)
+        .then(r => r.json())
+        .then(data => {
+          if (data.status === "ok" && data.session) {
+            const s = data.session;
+            setOutput(s.output || "");
+            setShowOutput(true);
+            setCurrentPrompt(s.command || "");
+            setRunning(s.running);
+            if (s.running) {
+              // Session still running — reconnect to SSE stream
+              const cmd = s.command || "";
+              connectSSE.current?.(savedSessionId, cmd);
+            } else {
+              // Session already finished — stored for reference
+              sessionStorage.removeItem(SESSION_KEY);
+            }
+          } else {
+            sessionStorage.removeItem(SESSION_KEY);
+          }
+        })
+        .catch(() => sessionStorage.removeItem(SESSION_KEY));
     }
+
+    // Cleanup EventSource on unmount
+    return () => {
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+        eventSourceRef.current = null;
+      }
+    };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ── Fetch Ollama status ── */
@@ -183,6 +214,10 @@ export default function AIAgent() {
         setOllamaStatus(data);
         // Auto-hide the action message after success
         if (data.installed) setOllamaActionMsg("");
+        // Auto-enable Ollama mode when running and not already set
+        if (data.running) {
+          setUseOllama(prev => prev === false ? true : prev);
+        }
       }
     } catch {}
     setOllamaLoading(false);
@@ -254,7 +289,86 @@ export default function AIAgent() {
     saveFontSize(next);
   };
 
-  /* ── Run opencode prompt (with hidden system context) ── */
+  /* ── Connect to SSE stream for a session ──────────────── */
+  const doConnectSSE = (sessionId: string, userCmd: string) => {
+    // Close any existing EventSource
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
+
+    const es = new EventSource(`/api/opencode/session-stream/${sessionId}`);
+    eventSourceRef.current = es;
+
+    es.addEventListener("connected", () => {
+      // SSE connection established
+    });
+
+    es.addEventListener("output", (event: MessageEvent) => {
+      try {
+        const parsed = JSON.parse(event.data);
+        if (parsed.text) {
+          setOutput(prev => prev + parsed.text + "\n");
+        }
+      } catch {}
+    });
+
+    es.addEventListener("done", (event: MessageEvent) => {
+      try {
+        const evtData = JSON.parse(event.data);
+        // event data has final output, error, duration
+        // We re-fetch from server for the exact full output
+        fetch(`/api/opencode/session/${sessionId}`)
+          .then(r => r.json())
+          .then(d => {
+            const finalOutput = d.session?.output || evtData.output || "";
+            // Save to history
+            const entry: HistoryEntry = {
+              id: genId(),
+              prompt: userCmd,
+              response: finalOutput,
+              model: activeModel,
+              timestamp: Date.now(),
+            };
+            setHistory(prev => {
+              const next = [entry, ...prev];
+              saveHistory(next);
+              return next;
+            });
+            setOutput(finalOutput);
+            setRunning(false);
+          })
+          .catch(() => {
+            setRunning(false);
+          });
+      } catch {
+        setRunning(false);
+      }
+      es.close();
+      eventSourceRef.current = null;
+      sessionStorage.removeItem(SESSION_KEY);
+    });
+
+    es.addEventListener("error", (event: Event) => {
+      // EventSource auto-reconnects; only handle when we get error data
+      try {
+        const msgEvent = event as MessageEvent;
+        const parsed = JSON.parse(msgEvent.data || "{}");
+        if (parsed.error) {
+          setOutput(prev => prev + `\n❌ ${parsed.error}`);
+          setRunning(false);
+          es.close();
+          eventSourceRef.current = null;
+          sessionStorage.removeItem(SESSION_KEY);
+        }
+      } catch {}
+    });
+  };
+
+  // Store connectSSE in ref so useEffect can call it
+  connectSSE.current = doConnectSSE;
+
+  /* ── Run opencode prompt via streaming SSE ────────────── */
   const handleRun = async (customPrompt?: string) => {
     const userCmd = (customPrompt || prompt).trim();
     if (!userCmd) return;
@@ -268,12 +382,9 @@ export default function AIAgent() {
     setShowHistory(false);
     setShowModelPicker(false);
 
-    // Create AbortController so user can cancel
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
-
     try {
-      const resp = await fetch("/api/opencode/run", {
+      // 1. Create a streaming session
+      const resp = await fetch("/api/opencode/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -281,46 +392,42 @@ export default function AIAgent() {
           model: useOllama ? `ollama/${ollamaModel}` : activeModel,
           useOllama,
         }),
-        signal: controller.signal,
       });
       const data = await resp.json();
-      const text = data.output || "(no output)";
-      const display = data.status === "error"
-        ? `⚠️ Command failed:\n\n${text}`
-        : text;
 
-      setOutput(display);
-
-      // Save to history
-      const entry: HistoryEntry = {
-        id: genId(),
-        prompt: userCmd,
-        response: text,
-        model: activeModel,
-        timestamp: Date.now(),
-      };
-      setHistory(prev => {
-        const next = [entry, ...prev];
-        saveHistory(next);
-        return next;
-      });
-    } catch (e) {
-      if ((e as Error)?.name === "AbortError") {
-        setOutput("❌ Cancelled by user");
-      } else {
-        setOutput(`❌ Network error: ${e}`);
+      if (data.status !== "ok" || !data.sessionId) {
+        setOutput(`⚠️ Failed to start session: ${data.error || "unknown error"}`);
+        setRunning(false);
+        return;
       }
+
+      // 2. Store session ID so it survives tab switches
+      sessionStorage.setItem(SESSION_KEY, data.sessionId);
+
+      // 3. Connect to SSE stream for live output
+      doConnectSSE(data.sessionId, userCmd);
+    } catch (e) {
+      setOutput(`❌ Network error: ${e}`);
+      setRunning(false);
     }
-    setRunning(false);
-    abortControllerRef.current = null;
   };
 
-  /* ── Stop running prompt ── */
-  const handleStop = () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
+  /* ── Stop running session ── */
+  const handleStop = async () => {
+    const sessionId = sessionStorage.getItem(SESSION_KEY);
+    if (sessionId) {
+      try {
+        await fetch(`/api/opencode/session/${sessionId}/cancel`, { method: "POST" });
+      } catch {}
     }
+    // Close EventSource
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
+    setRunning(false);
+    setOutput(prev => prev + "\n\n❌ Cancelled by user");
+    sessionStorage.removeItem(SESSION_KEY);
   };
 
   /* ── Re-run a history entry ── */
@@ -345,7 +452,11 @@ export default function AIAgent() {
 
   /* ── Quick action ── */
   const handleQuickAction = (action: typeof QUICK_ACTIONS[0]) => {
-    handleRun(action.prompt);
+    if (action.prompt === "INSTANT_PUBLISH") {
+      handleGlobalHost();
+    } else {
+      handleRun(action.prompt);
+    }
   };
 
   /* ── Handle Enter key ── */
@@ -403,6 +514,85 @@ export default function AIAgent() {
       setOutput(prev => prev + `\n\n---\n❌ Publish error: ${e}`);
     }
     setPublishing(false);
+  };
+
+  /* ── Instant Global Host (hello-dweb) ── */
+  const handleGlobalHost = async () => {
+    setRunning(true);
+    setShowOutput(true);
+    setCurrentPrompt("Publishing hello-dweb with global .dweb domain...");
+    setOutput("🚀 Initializing global hosting for hello-dweb...\n");
+
+    try {
+      // 1. Read the pre-built hello-dweb files from the server
+      setOutput(prev => prev + "📂 Reading hello-dweb project files...\n");
+      const filesResp = await fetch("/project/hello-dweb/index.html");
+      const aboutResp = await fetch("/project/hello-dweb/about.html");
+      const cssResp = await fetch("/project/hello-dweb/style.css");
+
+      if (!filesResp.ok) {
+        setOutput(prev => prev + "❌ hello-dweb project not found. Build it first via opencode.\n");
+        setRunning(false);
+        return;
+      }
+
+      const indexHtml = await filesResp.text();
+      const aboutHtml = aboutResp.ok ? await aboutResp.text() : "";
+      const styleCss = cssResp.ok ? await cssResp.text() : "";
+
+      // 2. Publish with auto_domain=true (triggers server-side domain auto-assignment)
+      setOutput(prev => prev + "📡 Publishing to dweb with auto-domain assignment...\n");
+      const files = [
+        { path: "index.html", content: indexHtml },
+        { path: "about.html", content: aboutHtml },
+        { path: "style.css", content: styleCss },
+      ];
+
+      const pubResp = await fetch("/api/publish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "hello-dweb",
+          type: "Static Site",
+          files,
+          auto_domain: true,
+        }),
+      });
+
+      const pubData = await pubResp.json();
+      if (pubData.status !== "ok") {
+        setOutput(prev => prev + `❌ Publish failed: ${pubData.error || "unknown"}\n`);
+        setRunning(false);
+        return;
+      }
+
+      // 3. Build the result display
+      const localUrl = pubData.url;
+      const domainInfo = pubData.domain;
+      let resultMsg = `\n✅ hello-dweb published successfully!\n`;
+      resultMsg += `   Local URL: ${localUrl}\n`;
+
+      if (domainInfo) {
+        resultMsg += `\n🌐 GLOBAL DOMAIN: ${domainInfo.url}\n`;
+        resultMsg += `   Domain: ${domainInfo.name}\n`;
+        resultMsg += `   Status: ${domainInfo.auto_registered ? "Auto-registered (Free tier, 90d)" : "Already registered"}\n`;
+        resultMsg += `\n🔗 Other dweb users can access: ${domainInfo.url}\n`;
+      } else {
+        resultMsg += `\n⚠  No .dweb domain assigned. Register one in the Domains tab.\n`;
+      }
+
+      // 4. Update published list
+      setPublished(prev => [{
+        name: "hello-dweb",
+        url: localUrl,
+        route: pubData.project?.route || "/project/hello-dweb",
+      }, ...prev.filter(p => p.name !== "hello-dweb")]);
+
+      setOutput(prev => prev + resultMsg);
+    } catch (e: any) {
+      setOutput(prev => prev + `\n❌ Error: ${e.message || e}\n`);
+    }
+    setRunning(false);
   };
 
   /* ── Copy output to clipboard ── */
@@ -602,11 +792,32 @@ export default function AIAgent() {
                   </span>
                 </div>
 
-                {/* Platform info */}
+                {/* Platform & detection info */}
                 {ollamaStatus && (
                   <div style={{ fontSize: fs(11), color: "var(--text-muted)", marginBottom: 8 }}>
-                    Platform: {ollamaStatus.platform} · Port: {ollamaStatus.port}
-                    {ollamaStatus.modelCount > 0 && ` · ${ollamaStatus.modelCount} model${ollamaStatus.modelCount !== 1 ? "s" : ""} loaded`}
+                    <div>Platform: {ollamaStatus.platform}{ollamaStatus.isWSL ? " (WSL)" : ""}</div>
+                    <div>Port: {ollamaStatus.port}</div>
+                    {ollamaStatus.detectedVia && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 2 }}>
+                        <span style={{
+                          display: "inline-block", width: 6, height: 6, borderRadius: "50%",
+                          background: ollamaStatus.running ? "#22c55e" : "#6b7280",
+                        }} />
+                        Detected via: <strong>{ollamaStatus.detectedVia}</strong>
+                        {ollamaStatus.detectedVia === "wsl-host" && (
+                          <span style={{ fontSize: fs(10) }}>(Windows host Ollama)</span>
+                        )}
+                        {ollamaStatus.detectedVia === "docker" && (
+                          <span style={{ fontSize: fs(10) }}>(Docker container)</span>
+                        )}
+                        {ollamaStatus.detectedVia === "native" && (
+                          <span style={{ fontSize: fs(10) }}>(same machine)</span>
+                        )}
+                      </div>
+                    )}
+                    {ollamaStatus.modelCount > 0 && (
+                      <div>{ollamaStatus.modelCount} model{ollamaStatus.modelCount !== 1 ? "s" : ""} loaded</div>
+                    )}
                   </div>
                 )}
 
@@ -783,18 +994,26 @@ export default function AIAgent() {
 
       {/* ─── QUICK ACTIONS ──────────────────────────────── */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 8 }}>
-        {QUICK_ACTIONS.map(action => (
-          <button key={action.id} className="btn btn-sm" onClick={() => handleQuickAction(action)} disabled={running}
-            style={{
-              padding: "5px 12px", fontSize: fs(12), cursor: "pointer",
-              background: "rgba(255,255,255,0.04)",
-              border: "1px solid rgba(255,255,255,0.08)",
-              borderRadius: "var(--radius-sm)", color: "var(--text-primary)",
-              display: "flex", alignItems: "center", gap: 5,
-            }}>
-            {action.icon} {action.label}
-          </button>
-        ))}
+        {QUICK_ACTIONS.map(action => {
+          const isDweb = action.id === "hello-dweb";
+          const isHost = action.id === "host";
+          return (
+            <button key={action.id} className="btn btn-sm" onClick={() => handleQuickAction(action)} disabled={running}
+              style={{
+                padding: isDweb ? "5px 16px" : "5px 12px",
+                fontSize: fs(isDweb ? 13 : 12),
+                cursor: "pointer",
+                background: isDweb ? "rgba(34,197,94,0.12)" : isHost ? "rgba(99,102,241,0.1)" : "rgba(255,255,255,0.04)",
+                border: isDweb ? "1px solid rgba(34,197,94,0.3)" : isHost ? "1px solid rgba(99,102,241,0.2)" : "1px solid rgba(255,255,255,0.08)",
+                borderRadius: "var(--radius-sm)",
+                color: isDweb ? "#22c55e" : isHost ? "#818cf8" : "var(--text-primary)",
+                display: "flex", alignItems: "center", gap: 5,
+                fontWeight: isDweb ? 600 : 400,
+              }}>
+              {action.icon} {action.label}
+            </button>
+          );
+        })}
       </div>
 
       {/* ─── PROMPT INPUT ───────────────────────────────── */}

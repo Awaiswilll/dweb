@@ -72,17 +72,26 @@ Start/stop services with one click, monitor CPU/memory/ports, view logs:
 
 ### 🌐 P2P Networking & Discovery
 Every dweb installation is a **node** on a decentralized network:
-- **Peer discovery** — Find other dweb nodes automatically
-- **Direct connections** — WebRTC encrypted P2P links
-- **Relay fallback** — WebSocket + HTTP polling for NAT traversal
+- **Peer discovery** — Find other dweb nodes automatically via UDP multicast, file-based discovery, or relay-mediated signaling
+- **Direct connections** — WebRTC encrypted P2P links with Google STUN pre-configured
+- **Relay fallback** — WebSocket + HTTP polling for NAT traversal, with automatic reconnection and exponential backoff
+- **Connection UI** — Dedicated Connect dialog with mode selection (Direct P2P / Via Relay), hover info tooltips explaining each connection type, and inline peer browser with search and filtering
+- **Paginated peer lists** — Discovered peers and connected remotes displayed in pages of 15 with Prev/Next navigation and page counter
+- **Network status bar** — Real-time relay status, peer count, online mode indicator, and descriptive hover tooltips
+- **Multiple online modes** — Local Only, P2P Visible (discoverable), P2P Anonymous (connect out only)
+- **Auto-registration** — Each instance auto-registers as a peer on startup for immediate discoverability
+- **Persistent peer registry** — Peers survive server restarts via disk-backed storage (`/tmp/dweb-peers.json`)
 - **P2P File Transfer** — Share files directly between instances
-- **Multi-instance** — Run multiple peers, access each other's services
 
 ### 🏷️ .dweb Domain System
 Register and manage domains on the decentralized network:
 - **Free tier** — 1 `.dweb` domain, basic P2P hosting
 - **Premium tier** ($3/mo) — 5 domains, relay cache
 - **Business tier** ($10/mo) — unlimited domains, cloud shift
+- **Cross-peer domain resolution** — Resolve `.dweb` domains registered on any connected peer instance; queries all connected peers in parallel with 60s result caching
+- **Auto domain assignment** — Publishing a project can optionally auto-assign a free `.dweb` domain derived from the project name
+- **Domain persistence** — Domains survive restarts via `/tmp/dweb-domains.json`
+- **P2P content proxy** — Browse content from peer instances' `.dweb` domains via the built-in proxy endpoint, avoiding CORS issues
 
 ### 🤖 AI Build Agent with 15+ Providers
 Generate full-stack applications from natural language:
@@ -149,6 +158,108 @@ Full browser tab with `dweb://` protocol support:
 │  │  Rust backend: P2P (HyperDHT), domains, git, AI       │ │
 │  └────────────────────────────────────────────────────────┘ │
 └──────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## P2P Connection & Discovery UI
+
+dweb provides a rich in-browser interface for managing P2P connections, all accessible from the **Dashboard's Network section**.
+
+### Network Status Bar
+
+A real-time status bar shows your current networking state at a glance:
+
+```
+❶ Mode: P2P Visible  |  Peers: 7  |  Relay: Connected  |  Signals: 3
+```
+
+- **Mode indicator** — Hover to see what each mode does (Local Only / P2P Visible / P2P Anonymous)
+- **Peer count** — Number of actively connected peers; hover for summary
+- **Relay status** — Connected/Offline with relay address on hover
+- **Signal count** — Incoming WebRTC signaling requests (purple highlight)
+
+### Online Mode Toggle
+
+Three buttons toggle your instance's visibility:
+
+| Mode | Effect |
+|------|--------|
+| **Local** | No P2P — services are local-only |
+| **Visible** | Your instance is discoverable by other peers and can connect out |
+| **Anonymous** | You can connect to peers but they cannot discover you |
+
+Switching modes is persisted to `localStorage` across tab switches.
+
+### Connect Dialog
+
+Click the **Connect** button to open the connection modal with two modes:
+
+#### Direct P2P
+Enter `IP:Port` to connect directly — no relay needed. Works on LAN or when the remote peer has a public IP. Lower latency, no central dependency. May fail behind strict NATs or firewalls. Hover over the "Direct P2P" button for a detailed explanation panel.
+
+#### Via Relay
+Browse discovered peers from the relay, search/filter by ID or hostname, or enter a peer ID manually. The relay handles signaling/ICE/STUN for NAT traversal — data flows P2P once connected. Hover over the "Via Relay" button for a detailed explanation panel.
+
+Both modes support:
+- Manual address/peer ID input
+- Optional display label
+- Inline discovered peer browser with search filtering
+- Relay-connected status indicator
+- Warning banner when relay is offline
+
+### Paginated Peer Lists
+
+- **Discovered Peers** — All peers visible through the relay, displayed **15 per page** with Prev/Next navigation and a page counter (e.g. "Page 2 of 4"). Only shows pagination controls when there are multiple pages.
+- **Connected Remotes** — Your connected remote instances, also **15 per page** with full navigation. Each entry shows status dot (green/yellow/red), name, mode badge (Visible/Anonymous/Relay), address, latency, and service list. Use the reconnect/disconnect/remove buttons per entry.
+
+### Peer Persistence & Auto-Registration
+
+- The local instance **auto-registers** as a peer on startup — the P2P tab always shows at least one peer
+- Manual peer registrations and auto-discovered peers are **saved to disk** (`/tmp/dweb-peers.json`) and restored after server restarts
+- Peers that go silent for 60 seconds are **automatically cleaned up**
+
+---
+
+## Cross-Peer .dweb Domain Resolution
+
+When two or more dweb instances are connected via P2P, `.dweb` domains registered on any peer are **resolvable from any other peer**.
+
+### How It Works
+
+1. **Domain Registration** — Register a `.dweb` domain (e.g. `my-project.dweb`) via the Domains UI or `POST /api/domain/register`
+2. **Auto-Domain Assignment** — Publishing a service with `auto_domain: true` automatically creates a domain matching the project name
+3. **Local Resolution** — `GET /api/domain/resolve/:name` checks the local domain registry first
+4. **Cross-Peer Fallback** — If the domain isn't found locally, dweb queries **all connected peers in parallel** via their `/api/domain/query/:name` endpoints using `Promise.allSettled` — results are cached for 60 seconds
+5. **Content Proxy** — The resolved address is fetched through `/api/proxy/fetch?url=` to avoid CORS issues when rendering in the BrowserView
+
+### BrowserView Integration
+
+The built-in browser tab supports `dweb://` URLs:
+- **Tauri mode**: Uses Rust IPC to invoke `resolve_domain` natively
+- **Browser/Web IDE fallback**: Falls back to `fetch('/api/domain/resolve/:name')` and proxies content through the dweb server — works in any browser
+
+### Architecture
+
+```
+User visits dweb://my-site.dweb
+        │
+        ▼
+BrowserView resolves via HTTP API
+        │
+        ▼
+/api/domain/resolve/my-site.dweb
+        │
+        ├── Local registry found? → Return address:port
+        │
+        └── Not found locally?
+              │
+              ▼
+         Query all P2P peers in parallel
+              │
+              ├── Peer A has it → Return cached result (60s TTL)
+              ├── Peer B has it → Return cached result
+              └── No peer has it → Return 404
 ```
 
 ---
@@ -258,13 +369,63 @@ docker run -d \
 | `/api/service/stop` | POST | Stop a running service |
 | `/api/domain/services` | GET | List P2P-discovered remote services |
 | `/collab/services` | GET | List P2P collaboration services |
-| `/dweb-status` | GET | System status (uptime, peers, mode) |
+| `/dweb-status` | GET | System status (uptime, peers, mode, relay info) |
 | `/api/ollama/status` | GET | Ollama installation status |
-| `/api/opencode/run` | POST | Run opencode CLI command |
+| `/api/opencode/run` | POST | Run opencode CLI command (legacy blocking) |
+| `/api/opencode/stream` | POST | Create AI agent session (SSE streaming) |
+| `/api/opencode/session-stream/:id` | GET | SSE live output stream for AI agent session |
+| `/api/opencode/session/:id` | GET | Session snapshot (reconnect support) |
+| `/api/opencode/session/:id/cancel` | POST | Cancel a running AI agent session |
 | `/fileshare/api/list` | GET | List shared files |
 | `/fileshare/api/upload` | POST | Upload a file |
 | `/welcome` | GET | Welcome page |
 | `/welcome/source` | GET | Welcome page source |
+
+#### P2P Relay Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/ping` | GET | Health check + instance identity |
+| `/status` | GET | Full relay status (uptime, peers, memory) |
+| `/register` | POST | Register a peer on this relay |
+| `/discover` | GET | Discover all registered peers (supports `?mode=` filter) |
+| `/heartbeat` | POST | Keep-alive heartbeat for registered peers |
+| `/signal` | POST | Send WebRTC signal to a peer |
+| `/signal?peerId=` | GET | Poll for pending signals (HTTP fallback) |
+| `/peer/:id` | GET | Get specific peer info |
+| `/peer/:id` | DELETE | Remove a peer |
+
+#### Domain System Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/domain/pricing` | GET | Domain tier information |
+| `/api/domain/list` | GET | List owned `.dweb` domains |
+| `/api/domain/register` | POST | Register a new `.dweb` domain |
+| `/api/domain/bind` | POST | Bind domain to a service or port |
+| `/api/domain/unbind` | POST | Unbind domain from service |
+| `/api/domain/upgrade` | POST | Upgrade domain tier |
+| `/api/domain/renew` | POST | Renew domain |
+| `/api/domain/remove` | DELETE | Remove domain and unbind service |
+| `/api/domain/resolve/:name` | GET | Resolve `.dweb` domain to address:port (with cross-peer fallback) |
+| `/api/domain/query/:name` | GET | Peer-facing endpoint: query local domain record |
+| `/api/proxy/fetch?url=` | GET | Proxy-fetch remote content for BrowserView (bypasses CORS) |
+
+#### P2P System Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/p2p/discover-local` | GET | Discover local peers via UDP/file discovery |
+| `/api/p2p/receive` | POST | Receive file from P2P |
+| `/api/p2p/received` | GET | List received P2P files |
+| `/api/publish` | POST | Publish a service with optional auto-domain assignment |
+
+#### Collaboration Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/collab/services` | GET | List shared collaboration services |
+| `/collab/sessions` | GET | List shared development sessions |
 
 ---
 
@@ -275,14 +436,15 @@ dweb/
 ├── src/                    # React frontend
 │   ├── components/         # Reusable UI components
 │   ├── views/              # Page views
-│   │   ├── Dashboard.tsx   # Service management dashboard
-│   │   ├── AIAgent.tsx     # AI agent with multi-provider support
-│   │   ├── BrowserView.tsx # Built-in browser with dweb:// protocol
+│   │   │   ├── Dashboard.tsx   # Service management + P2P connectivity UI
+│   │   ├── AIAgent.tsx     # AI agent with SSO streaming, Ollama auto-detect
+│   │   ├── BrowserView.tsx # Built-in browser with dweb:// + HTTP fallback
 │   │   ├── Domains.tsx     # .dweb domain management
 │   │   ├── Docs.tsx        # In-app documentation
 │   │   ├── Settings.tsx    # App settings
 │   │   ├── Integrations.tsx
 │   │   ├── Repositories.tsx
+│   │   ├── P2PDashboard.tsx # P2P network status & discovery
 │   │   └── P2PTransfer.tsx # P2P file transfer
 │   ├── styles/             # CSS styles
 │   ├── types.ts            # TypeScript definitions
@@ -291,15 +453,17 @@ dweb/
 │   ├── index.cjs           # Entry point
 │   ├── router.cjs          # Route registration
 │   ├── api-services.cjs    # Service management API
-│   ├── api-relay.cjs       # P2P relay endpoints
+│   ├── api-relay.cjs       # P2P relay endpoints (/register, /discover, /signal)
+│   ├── api-domain.cjs      # .dweb domain management + cross-peer resolution
 │   ├── api-collab.cjs      # Collaboration API
 │   ├── api-fileshare.cjs   # File sharing API
-│   ├── api-opencode.cjs    # OpenCode CLI integration
-│   ├── api-ollama.cjs      # Ollama status API
-│   ├── api-system.cjs      # System status API
-│   ├── state.cjs           # Shared state (hosted services, peers)
+│   ├── api-opencode.cjs    # OpenCode CLI integration (SSE streaming)
+│   ├── opencode-worker.cjs # Persistent opencode session manager
+│   ├── api-ollama.cjs      # Ollama status API (WSL/Docker/native detection)
+│   ├── api-system.cjs      # System status, publish, proxy endpoints
+│   ├── state.cjs           # Shared state (peers, domains, services, signals)
 │   ├── config.cjs          # Configuration
-│   ├── discovery.cjs       # P2P peer discovery
+│   ├── discovery.cjs       # P2P peer discovery (UDP multicast + file-based)
 │   ├── relay-tcp.cjs       # TCP relay
 │   └── helpers.cjs         # Utility functions
 ├── src-tauri/              # Rust/Tauri desktop backend

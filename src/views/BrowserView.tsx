@@ -510,35 +510,90 @@ export default function BrowserView({ initialUrl, navId }: BrowserViewProps) {
     try {
       if (normalizedUrl.startsWith("dweb://")) {
         const domain = normalizedUrl.replace("dweb://", "").replace(".dweb", "");
+
+        // Try Tauri resolve first, fall back to HTTP API
+        let info: any = null;
+
         try {
-          const info = await invoke<DomainRecord>("resolve_domain", { domain });
+          // Attempt Tauri IPC resolve
+          info = await invoke<DomainRecord>("resolve_domain", { domain });
+        } catch {
+          // Tauri not available — try HTTP API resolve
+          try {
+            const httpRes = await fetch(`/api/domain/resolve/${encodeURIComponent(domain)}`);
+            if (httpRes.ok) {
+              const httpData = await httpRes.json();
+              if (httpData.status === "ok" && httpData.record) {
+                info = httpData.record;
+                info.address = httpData.address || info.address;
+                info.port = httpData.port || info.port;
+                info.path = httpData.path || info.path || "/";
+                info.resolvedUrl = httpData.url || null;
+              }
+            }
+          } catch {
+            // Both failed — keep going with error message
+          }
+        }
+
+        if (info) {
           patchTab(activeTabId, { resolvedDomain: info });
 
-          if (info?.address) {
-            patchTab(activeTabId, {
-              contentHtml: `<div class="dweb-page">
-                <div class="dweb-page-header">
-                  <h2>${escapeHtml(domain)}.dweb</h2>
-                  <span class="dweb-status-badge active">Serving via P2P</span>
-                </div>
-                <div class="dweb-meta">
-                  <div class="meta-row"><span>Owner:</span><code>${escapeHtml(info.owner_key)}</code></div>
-                  <div class="meta-row"><span>Address:</span><code>${escapeHtml(info.address)}</code></div>
-                  <div class="meta-row"><span>Expires:</span><code>${info.expires_at ? new Date(info.expires_at).toLocaleDateString() : 'Permanent'}</code></div>
-                </div>
-                <div class="dweb-proxy-info">
-                  <h4>🔒 Content Sandbox Active</h4>
-                  <p>This page is rendered in an isolated sandbox — no access to your system or dweb backend.</p>
-                  <div class="proxy-stats">
-                    <span>🔒 Encrypted (Noise protocol)</span>
-                    <span>⚡ 34ms latency</span>
-                    <span>📡 2.3 MB transferred</span>
-                    <span>🧪 Sandboxed origin: ${escapeHtml(domain)}.dweb</span>
+          // Try to proxy-fetch and render the actual content
+          const address = info.address || "";
+          const port = info.port || "";
+          const path = info.path || "/";
+          const resolvedUrl = info.resolvedUrl || (address && port ? `http://${address}:${port}${path}` : null);
+
+          if (resolvedUrl) {
+            try {
+              const proxyRes = await fetch(`/api/proxy/fetch?url=${encodeURIComponent(resolvedUrl)}`);
+              if (proxyRes.ok) {
+                const html = await proxyRes.text();
+                patchTab(activeTabId, {
+                  contentHtml: `<base href="${escapeHtml(resolvedUrl)}/">${html}`,
+                  title: `${domain}.dweb`,
+                  url: normalizedUrl,
+                });
+              } else {
+                // Proxy failed — show the resolved link as fallback
+                patchTab(activeTabId, {
+                  contentHtml: `<div class="dweb-page">
+                    <div class="dweb-page-header">
+                      <h2>${escapeHtml(domain)}.dweb</h2>
+                      <span class="dweb-status-badge active">Resolved</span>
+                    </div>
+                    <div class="dweb-meta glass">
+                      <div class="meta-row"><span>Domain:</span><code>${escapeHtml(domain)}.dweb</code></div>
+                      ${info.owner_key ? `<div class="meta-row"><span>Owner:</span><code>${escapeHtml(info.owner_key)}</code></div>` : ''}
+                      <div class="meta-row"><span>Address:</span><code>${escapeHtml(address)}:${escapeHtml(String(port))}</code></div>
+                      <div class="meta-row"><span>Path:</span><code>${escapeHtml(path)}</code></div>
+                      <div class="meta-row"><span>URL:</span><a href="${escapeHtml(resolvedUrl)}" target="_blank" rel="noopener">${escapeHtml(resolvedUrl)}</a></div>
+                    </div>
+                    <p>Content proxying returned HTTP ${proxyRes.status}. You can open the URL directly.</p>
+                  </div>`,
+                  title: `${domain}.dweb`,
+                });
+              }
+            } catch {
+              // Proxy fetch error — show resolved info
+              patchTab(activeTabId, {
+                contentHtml: `<div class="dweb-page">
+                  <div class="dweb-page-header">
+                    <h2>${escapeHtml(domain)}.dweb</h2>
+                    <span class="dweb-status-badge active">Resolved</span>
                   </div>
-                </div>
-              </div>`,
-              title: `${domain}.dweb`,
-            });
+                  <div class="dweb-meta glass">
+                    <div class="meta-row"><span>Domain:</span><code>${escapeHtml(domain)}.dweb</code></div>
+                    <div class="meta-row"><span>Address:</span><code>${escapeHtml(address)}:${escapeHtml(String(port))}</code></div>
+                    <div class="meta-row"><span>Path:</span><code>${escapeHtml(path)}</code></div>
+                    <div class="meta-row"><span>URL:</span><a href="${escapeHtml(resolvedUrl)}" target="_blank" rel="noopener">${escapeHtml(resolvedUrl)}</a></div>
+                  </div>
+                  <p>Cannot proxy content — open the URL directly.</p>
+                </div>`,
+                title: `${domain}.dweb`,
+              });
+            }
           } else {
             patchTab(activeTabId, {
               contentHtml: `<div class="dweb-page">
@@ -551,19 +606,18 @@ export default function BrowserView({ initialUrl, navId }: BrowserViewProps) {
               title: `${domain}.dweb`,
             });
           }
-        } catch (e: any) {
-          const msg = String(e?.message || e || "Unknown error");
+        } else {
           patchTab(activeTabId, {
             contentHtml: `<div class="dweb-page">
               <div class="dweb-error-card glass">
-                <h3>⚠️ dweb Backend Unavailable</h3>
-                <p>${escapeHtml(msg)}</p>
+                <h3>⚠️ Domain Not Found</h3>
+                <p>"${escapeHtml(domain)}.dweb" could not be resolved on this instance or any connected peer.</p>
                 <div class="dweb-recommendations">
-                  <h4>Recommendations:</h4>
+                  <h4>Try this:</h4>
                   <ul>
-                    <li><strong>Using Brave/Chrome?</strong> The dweb:// protocol requires the dweb desktop app.</li>
-                    <li><strong>Run the Tauri app:</strong> <code>cd dweb && npx tauri dev</code></li>
-                    <li><strong>Register a domain:</strong> Go to the Domains tab to claim your free .dweb name.</li>
+                    <li><strong>Check the Domains tab</strong> — register a new .dweb domain</li>
+                    <li><strong>Connect to peers</strong> — use the Peer Discovery panel to connect</li>
+                    <li><strong>Verify spelling</strong> — domain names use lowercase letters, numbers, and hyphens</li>
                   </ul>
                 </div>
               </div>

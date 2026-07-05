@@ -21,7 +21,7 @@ const http = require("http");
 const os = require("os");
 
 const config = require("./config.cjs");
-const { MODE, PORT, RELAY_PORT, UPSTREAM_RELAY, PEER_ID, INSTANCE_NAME, SERVER_ID } = config;
+const { MODE, PORT, RELAY_PORT, UPSTREAM_RELAY, PEER_ID, INSTANCE_NAME, SERVER_ID, LOCAL_IPS } = config;
 const { findFreePort, httpReq } = require("./helpers.cjs");
 const { peers, hostedServices, sharedSessions, tcpRelays,
         addHostedService, cleanupStalePeers, setRelayConnected, setRelayError } = require("./state.cjs");
@@ -29,6 +29,7 @@ const { createRouter } = require("./router.cjs");
 const { startTCPRelay } = require("./relay-tcp.cjs");
 const { startLocalDiscovery, startFileDiscovery, printBanner, getDiscoverySocket } = require("./discovery.cjs");
 const { restoreServices } = require("./api-services.cjs");
+const { restoreDomains, restorePeers } = require("./state.cjs");
 
 // ── Main ───────────────────────────────────────────────────────────────────────
 
@@ -128,6 +129,25 @@ async function main() {
 
   // Restore managed services from disk
   restoreServices();
+
+  // Restore domain registry from disk
+  restoreDomains();
+
+  // Restore peer registry from disk (survives restarts)
+  restorePeers();
+
+  // Auto-register this instance as a peer so it always appears in P2P discovery
+  require("./state.cjs").peers.set(PEER_ID, new (require("./state.cjs").PeerRecord)(PEER_ID, {
+    address: LOCAL_IPS[0] || "127.0.0.1",
+    port: PORT,
+    relayPort: RELAY_PORT,
+    hostname: os.hostname(),
+    platform: process.platform,
+    version: "0.1.0",
+    mode: "p2p-visible",
+    services: hostedServices.map(s => s.name),
+  }));
+  require("./state.cjs").savePeers();
 
   // Register with upstream relay
   if (UPSTREAM_RELAY && isPeerMode) {

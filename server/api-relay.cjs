@@ -7,7 +7,7 @@ const os = require("os");
 const crypto = require("crypto");
 const { json, parseBody, peerToJSON } = require("./helpers.cjs");
 const { SERVER_ID, PEER_TTL_MS, MODE, START_TIME, UPSTREAM_RELAY } = require("./config.cjs");
-const { peers, signals, PeerRecord, storeSignal, popSignals } = require("./state.cjs");
+const { peers, signals, PeerRecord, storeSignal, popSignals, savePeers } = require("./state.cjs");
 
 function registerRoutes(router) {
   // PING
@@ -47,10 +47,12 @@ function registerRoutes(router) {
     if (existing) {
       existing.touch();
       Object.assign(existing, body, { lastSeen: Date.now() });
+      savePeers();
       return json(res, 200, { status: "ok", action: "updated", peerId: id, peersOnline: peers.size });
     }
     const peer = new PeerRecord(id, body);
     peers.set(id, peer);
+    savePeers();
     console.log(`  [p2p] ${id.slice(0, 16)}… registered  (${peers.size} total)`);
     json(res, 201, { status: "ok", action: "registered", peerId: id, peersOnline: peers.size });
   });

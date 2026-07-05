@@ -700,6 +700,10 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
   const [connectionMsg, setConnectionMsg] = useState<{ type: "success" | "error" | "info"; text: string } | null>(null);
   const [torStatus, setTorStatus] = useState<{ installed: boolean; running: boolean; kalitorifyAvailable: boolean } | null>(null);
   const [togglingTor, setTogglingTor] = useState(false);
+  const [peerPage, setPeerPage] = useState(0);
+  const [remotePage, setRemotePage] = useState(0);
+  const PEERS_PER_PAGE = 15;
+  const REMOTES_PER_PAGE = 15;
   const relayLoaded = useRef(false);
 
   // Fetch relay status + peer list periodically
@@ -851,10 +855,33 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
     const [connecting, setConnecting] = useState(false);
     const [localPeers, setLocalPeers] = useState<RelayPeer[]>([]);
     const [searchTerm, setSearchTerm] = useState("");
+    const [hoveredMode, setHoveredMode] = useState<"direct" | "relay" | null>(null);
 
     useEffect(() => {
       getRelayPeers().then(peers => setLocalPeers(peers));
     }, []);
+
+    /* ─── Mode info tooltip content ────────────────────────── */
+    const modeInfo = {
+      direct: {
+        title: "Direct P2P Connection",
+        lines: [
+          "Connect via IP:Port directly — no relay server needed.",
+          "Works when both peers are on the same LAN, or when the remote peer is reachable via its public IP.",
+          "Lower latency, no central dependency, but may fail behind strict NATs or firewalls.",
+          "Best for: same-network peers, LAN parties, low-latency transfers.",
+        ],
+      },
+      relay: {
+        title: "Relay-Mediated Connection",
+        lines: [
+          "Connect via a relay server that brokers WebRTC signaling between peers.",
+          "The relay handles peer discovery and NAT traversal (ICE/STUN), but data flows peer-to-peer once connected.",
+          "Higher initial setup delay, but works across NATs, firewalls, and the open internet.",
+          "Best for: internet peers, strict NAT environments, discovery-based connections.",
+        ],
+      },
+    };
 
     const handleConnect = async () => {
       if (!addr.trim()) return;
@@ -913,19 +940,52 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
               Connect to another dweb instance on your network or the internet.
             </p>
 
-            <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ display: "flex", gap: 8, position: "relative" }}>
               <button
                 className={`btn btn-sm ${mode === "direct" ? "btn-primary" : "btn-secondary"}`}
                 onClick={() => setLocalMode("direct")}
+                onMouseEnter={() => setHoveredMode("direct")}
+                onMouseLeave={() => setHoveredMode(null)}
+                style={{ position: "relative" }}
               >
                 <Wifi size={14} /> Direct P2P
               </button>
               <button
                 className={`btn btn-sm ${mode === "relay" ? "btn-primary" : "btn-secondary"}`}
                 onClick={() => setLocalMode("relay")}
+                onMouseEnter={() => setHoveredMode("relay")}
+                onMouseLeave={() => setHoveredMode(null)}
+                style={{ position: "relative" }}
               >
                 <Globe size={14} /> Via Relay
               </button>
+              {/* Hover tooltip info panel */}
+              {hoveredMode && (
+                <div style={{
+                  position: "absolute",
+                  top: "calc(100% + 8px)",
+                  left: 0,
+                  right: 0,
+                  zIndex: 100,
+                  background: "var(--bg-elevated)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "var(--radius-sm)",
+                  padding: "10px 12px",
+                  fontSize: 11,
+                  lineHeight: 1.6,
+                  boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
+                  animation: "fadeIn 0.12s ease",
+                }}>
+                  <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 6, color: hoveredMode === "direct" ? "#22c55e" : "#8b5cf6" }}>
+                    {modeInfo[hoveredMode].title}
+                  </div>
+                  {modeInfo[hoveredMode].lines.map((line, i) => (
+                    <div key={i} style={{ color: "var(--text-secondary)", marginBottom: i < modeInfo[hoveredMode].lines.length - 1 ? 4 : 0, paddingLeft: 8 }}>
+                      {line}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {mode === "relay" && relayStatus?.connected && (
@@ -1064,7 +1124,9 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
                   gap: 4,
                   transition: "background 0.15s",
                 }}
-                title={m === "local" ? "Local Only" : m === "p2p-visible" ? "P2P Visible" : "P2P Anonymous"}
+                title={m === "local" ? "Local Only — no P2P connectivity"
+                  : m === "p2p-visible" ? "P2P Visible — other peers can discover and connect to you"
+                  : "P2P Anonymous — you see peers but they cannot discover you"}
               >
                 {modeIcon[m]}
                 {m === "local" ? "Local" : m === "p2p-visible" ? "Visible" : "Anonymous"}
@@ -1083,17 +1145,24 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
         padding: "8px 14px", borderRadius: "var(--radius-sm)",
         marginBottom: 10, fontSize: 12,
       }}>
-        <span style={{ display: "flex", alignItems: "center", gap: 4, color: onlineMode === "local" ? "var(--text-muted)" : "#22c55e" }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 4, color: onlineMode === "local" ? "var(--text-muted)" : "#22c55e" }}
+          title={onlineMode === "local" ? "Local only mode — not visible to peers"
+            : onlineMode === "p2p-visible" ? "Visible to all peers on the network"
+            : "Anonymous mode — visible but identity not shared"}>
           {onlineMode === "local" ? <WifiOff size={14} /> : <Wifi size={14} />}
           Mode: <strong>{onlineMode === "local" ? "Local Only" : onlineMode === "p2p-visible" ? "P2P Visible" : "P2P Anonymous"}</strong>
         </span>
         <span style={{ color: "var(--text-muted)" }}>|</span>
-        <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 4 }}
+          title={peerCount > 0 ? `${peerCount} peer(s) currently connected via P2P. Click Connect to manage.` : "No peers connected. Click Connect to discover peers."}>
           <Monitor size={14} />
           Peers: <strong style={{ color: peerCount > 0 ? "#22c55e" : "var(--text-muted)" }}>{peerCount}</strong>
         </span>
         <span style={{ color: "var(--text-muted)" }}>|</span>
-        <span style={{ display: "flex", alignItems: "center", gap: 4, color: relayStatus?.connected ? "#22c55e" : "var(--text-muted)" }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 4, color: relayStatus?.connected ? "#22c55e" : "var(--text-muted)" }}
+          title={relayStatus?.connected
+            ? `Relay connected at ${relayStatus.relayAddress} — ${relayStatus.peersOnline} peer(s) online. P2P data flows directly after signaling.`
+            : "Relay not connected. Only direct P2P connections are available."}>
           <Radio size={14} />
           Relay: <strong>{relayStatus?.connected ? "Connected" : "Offline"}</strong>
         </span>
@@ -1145,7 +1214,7 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
         </div>
       )}
 
-      {/* Discovered peers from relay */}
+      {/* Discovered peers from relay (paginated) */}
       {discoveredPeers.length > 0 && (
         <div className="glass-sm" style={{
           padding: "10px 14px", borderRadius: "var(--radius-sm)",
@@ -1154,26 +1223,61 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
           <div style={{ fontWeight: 600, marginBottom: 6, display: "flex", alignItems: "center", gap: 4 }}>
             <Radio size={12} /> Discovered Peers ({discoveredPeers.length})
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            {discoveredPeers.map(p => (
-              <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0" }}>
-                <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#22c55e", flexShrink: 0 }} />
-                <span style={{ fontWeight: 500 }}>{p.hostname || p.id.slice(0, 16)}</span>
-                <span style={{ color: "var(--text-muted)" }}>{p.address}:{p.port}</span>
-                <span style={{ color: "var(--text-muted)", fontSize: 10 }}>{p.mode}</span>
-                <span style={{ color: "var(--text-muted)", fontSize: 10 }}>{p.platform}</span>
-                {p.services?.length > 0 && (
-                  <span style={{ color: "var(--text-muted)", fontSize: 10, marginLeft: "auto" }}>
-                    {p.services.join(", ")}
-                  </span>
+          {(() => {
+            const totalPages = Math.max(1, Math.ceil(discoveredPeers.length / PEERS_PER_PAGE));
+            const safePage = Math.min(peerPage, totalPages - 1);
+            const pagePeers = discoveredPeers.slice(safePage * PEERS_PER_PAGE, (safePage + 1) * PEERS_PER_PAGE);
+            return (
+              <>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  {pagePeers.map(p => (
+                    <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0" }}>
+                      <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#22c55e", flexShrink: 0 }} />
+                      <span style={{ fontWeight: 500 }}>{p.hostname || p.id.slice(0, 16)}</span>
+                      <span style={{ color: "var(--text-muted)" }}>{p.address}:{p.port}</span>
+                      <span style={{ color: "var(--text-muted)", fontSize: 10 }}>{p.mode}</span>
+                      <span style={{ color: "var(--text-muted)", fontSize: 10 }}>{p.platform}</span>
+                      {p.services?.length > 0 && (
+                        <span style={{ color: "var(--text-muted)", fontSize: 10, marginLeft: "auto" }}>
+                          {p.services.join(", ")}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                {totalPages > 1 && (
+                  <div style={{
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+                    marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--border-subtle)",
+                  }}>
+                    <button
+                      className="btn btn-sm"
+                      disabled={safePage === 0}
+                      onClick={() => setPeerPage(safePage - 1)}
+                      style={{ fontSize: 11, padding: "3px 10px", opacity: safePage === 0 ? 0.4 : 1 }}
+                    >
+                      ◀ Prev
+                    </button>
+                    <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                      Page {safePage + 1} of {totalPages}
+                    </span>
+                    <button
+                      className="btn btn-sm"
+                      disabled={safePage >= totalPages - 1}
+                      onClick={() => setPeerPage(safePage + 1)}
+                      style={{ fontSize: 11, padding: "3px 10px", opacity: safePage >= totalPages - 1 ? 0.4 : 1 }}
+                    >
+                      Next ▶
+                    </button>
+                  </div>
                 )}
-              </div>
-            ))}
-          </div>
+              </>
+            );
+          })()}
         </div>
       )}
 
-      {/* Connected Remotes List */}
+      {/* Connected Remotes List (paginated) */}
       {remotes.length === 0 ? (
         <div className="glass-sm" style={{
           padding: "20px", textAlign: "center", borderRadius: "var(--radius)", color: "var(--text-muted)", fontSize: 13,
@@ -1184,66 +1288,101 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {remotes.map(r => (
-            <div key={r.id} className="glass-sm" style={{
-              display: "flex", alignItems: "center", gap: 10,
-              padding: "10px 14px", borderRadius: "var(--radius-sm)",
-              border: r.status === "connected" ? "1px solid rgba(34,197,94,0.2)" : "1px solid transparent",
-            }}>
-              {/* Status dot */}
-              <span style={{
-                width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
-                background: r.status === "connected" ? "#22c55e"
-                  : r.status === "connecting" ? "#eab308"
-                  : r.status === "error" ? "#ef4444" : "#6b7280",
-                boxShadow: r.status === "connected" ? "0 0 6px rgba(34,197,94,0.4)" : "none",
-              }} />
-
-              {/* Info */}
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
-                  {r.name}
-                  <span style={{
-                    fontSize: 10, padding: "1px 6px", borderRadius: 8,
-                    background: r.mode === "p2p-visible" ? "rgba(34,197,94,0.15)" : "rgba(139,92,246,0.15)",
-                    color: r.mode === "p2p-visible" ? "#22c55e" : "#8b5cf6",
-                    fontWeight: 500,
+          {(() => {
+            const totalPages = Math.max(1, Math.ceil(remotes.length / REMOTES_PER_PAGE));
+            const safePage = Math.min(remotePage, totalPages - 1);
+            const pageRemotes = remotes.slice(safePage * REMOTES_PER_PAGE, (safePage + 1) * REMOTES_PER_PAGE);
+            return (
+              <>
+                {pageRemotes.map(r => (
+                  <div key={r.id} className="glass-sm" style={{
+                    display: "flex", alignItems: "center", gap: 10,
+                    padding: "10px 14px", borderRadius: "var(--radius-sm)",
+                    border: r.status === "connected" ? "1px solid rgba(34,197,94,0.2)" : "1px solid transparent",
                   }}>
-                    {r.mode === "p2p-visible" ? "Visible" : r.mode === "p2p-anonymous" ? "Anonymous" : "Relay"}
-                  </span>
-                </div>
-                <div style={{ fontSize: 11, color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 8, marginTop: 2 }}>
-                  <span>{r.address}</span>
-                  {r.status === "connected" && <span style={{ color: "#22c55e" }}>● {r.latency}ms</span>}
-                  {r.status === "disconnected" && <span style={{ color: "#6b7280" }}>Offline</span>}
-                  {r.services.length > 0 && (
-                    <span style={{ color: "var(--text-muted)" }}>
-                      — {r.services.slice(0, 2).join(", ")}{r.services.length > 2 ? ` +${r.services.length - 2}` : ""}
-                    </span>
-                  )}
-                </div>
-              </div>
+                    {/* Status dot */}
+                    <span style={{
+                      width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
+                      background: r.status === "connected" ? "#22c55e"
+                        : r.status === "connecting" ? "#eab308"
+                        : r.status === "error" ? "#ef4444" : "#6b7280",
+                      boxShadow: r.status === "connected" ? "0 0 6px rgba(34,197,94,0.4)" : "none",
+                    }} />
 
-              {/* Actions */}
-              <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-                {r.status === "disconnected" ? (
-                  <button className="btn btn-icon btn-sm" onClick={() => handleConnectDirect(r.address, r.name)}
-                    title="Reconnect" style={{ color: "#22c55e" }}>
-                    <Link2 size={14} />
-                  </button>
-                ) : (
-                  <button className="btn btn-icon btn-sm" onClick={() => handleDisconnectRemote(r.id)}
-                    title="Disconnect" style={{ color: "#ef4444" }}>
-                    <Unlink size={14} />
-                  </button>
+                    {/* Info */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
+                        {r.name}
+                        <span style={{
+                          fontSize: 10, padding: "1px 6px", borderRadius: 8,
+                          background: r.mode === "p2p-visible" ? "rgba(34,197,94,0.15)" : "rgba(139,92,246,0.15)",
+                          color: r.mode === "p2p-visible" ? "#22c55e" : "#8b5cf6",
+                          fontWeight: 500,
+                        }}>
+                          {r.mode === "p2p-visible" ? "Visible" : r.mode === "p2p-anonymous" ? "Anonymous" : "Relay"}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 8, marginTop: 2 }}>
+                        <span>{r.address}</span>
+                        {r.status === "connected" && <span style={{ color: "#22c55e" }}>● {r.latency}ms</span>}
+                        {r.status === "disconnected" && <span style={{ color: "#6b7280" }}>Offline</span>}
+                        {r.services.length > 0 && (
+                          <span style={{ color: "var(--text-muted)" }}>
+                            — {r.services.slice(0, 2).join(", ")}{r.services.length > 2 ? ` +${r.services.length - 2}` : ""}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Actions */}
+                    <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+                      {r.status === "disconnected" ? (
+                        <button className="btn btn-icon btn-sm" onClick={() => handleConnectDirect(r.address, r.name)}
+                          title="Reconnect" style={{ color: "#22c55e" }}>
+                          <Link2 size={14} />
+                        </button>
+                      ) : (
+                        <button className="btn btn-icon btn-sm" onClick={() => handleDisconnectRemote(r.id)}
+                          title="Disconnect" style={{ color: "#ef4444" }}>
+                          <Unlink size={14} />
+                        </button>
+                      )}
+                      <button className="btn btn-icon btn-sm" onClick={() => handleRemoveRemote(r.id)}
+                        title="Remove" style={{ color: "var(--text-muted)" }}>
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                {totalPages > 1 && (
+                  <div style={{
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+                    marginTop: 4, paddingTop: 8,
+                  }}>
+                    <button
+                      className="btn btn-sm"
+                      disabled={safePage === 0}
+                      onClick={() => setRemotePage(safePage - 1)}
+                      style={{ fontSize: 11, padding: "3px 10px", opacity: safePage === 0 ? 0.4 : 1 }}
+                    >
+                      ◀ Prev
+                    </button>
+                    <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                      Page {safePage + 1} of {totalPages}
+                    </span>
+                    <button
+                      className="btn btn-sm"
+                      disabled={safePage >= totalPages - 1}
+                      onClick={() => setRemotePage(safePage + 1)}
+                      style={{ fontSize: 11, padding: "3px 10px", opacity: safePage >= totalPages - 1 ? 0.4 : 1 }}
+                    >
+                      Next ▶
+                    </button>
+                  </div>
                 )}
-                <button className="btn btn-icon btn-sm" onClick={() => handleRemoveRemote(r.id)}
-                  title="Remove" style={{ color: "var(--text-muted)" }}>
-                  ✕
-                </button>
-              </div>
-            </div>
-          ))}
+              </>
+            );
+          })()}
         </div>
       )}
     </div>

@@ -11,7 +11,7 @@ const { execSync, exec } = require("child_process");
 const { json, parseBody, serveFile } = require("./helpers.cjs");
 const config = require("./config.cjs");
 const { SHARE_DIR } = config;
-const { hostedServices, localPeers, peers, addHostedService } = require("./state.cjs");
+const { hostedServices, localPeers, peers, addHostedService, getDomainRecord, setDomainRecord, listDomainRecords } = require("./state.cjs");
 
 function registerRoutes(router) {
   // ── Tor ──────────────────────────────────────────────────────────────────────
@@ -158,6 +158,62 @@ function registerRoutes(router) {
     json(res, 200, { status: "ok", count: projects.length, projects });
   });
 
+  /* ── Auto-assign .dweb domain helper ─────────────────── */
+  function autoAssignDomain(projectName, port) {
+    // Sanitize project name into a valid domain name
+    const domainName = projectName
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .replace(/--+/g, "-")
+      .slice(0, 63);
+
+    // Must be at least 3 chars
+    const finalName = domainName.length < 3 ? domainName + "-dweb" : domainName;
+
+    // The service path on the dweb server (e.g. /project/hello-dweb)
+    const routeName = projectName.replace(/[^a-zA-Z0-9-_]/g, "_");
+    const servicePath = `/project/${routeName}`;
+
+    // Check if already registered
+    const existing = getDomainRecord(finalName);
+    if (existing) {
+      // Already registered — just update the binding
+      if (port) {
+        const updated = { ...existing, port, path: servicePath, address: config.LOCAL_IPS[0] || "127.0.0.1", service_name: projectName };
+        setDomainRecord(finalName, updated);
+        addHostedService(projectName, "Domain", port, `http://127.0.0.1:${port}`);
+      }
+      return { name: finalName, auto: false, path: servicePath };
+    }
+
+    // Auto-register as free tier and bind
+    const crypto = require("crypto");
+    const OWNER_KEY = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
+    const now = new Date();
+    const expires = new Date(now.getTime() + 90 * 86400000).toISOString();
+    const record = {
+      owner_key: OWNER_KEY,
+      address: config.LOCAL_IPS[0] || "127.0.0.1",
+      path: servicePath,
+      tier: "free",
+      tierInfo: { label: "Free", price: 0, ttlDays: 90, permanent: false, customDomain: false, ssl: false, description: "Basic .dweb domain, 90-day expiry" },
+      service_name: projectName,
+      port: port || null,
+      custom_domain: null,
+      registered_at: now.toISOString(),
+      expires_at: expires,
+      auto_renew: false,
+      active: true,
+      paid_until: null,
+      local_ip: config.LOCAL_IPS[0] || "127.0.0.1",
+    };
+    setDomainRecord(finalName, record);
+    addHostedService(projectName, "Domain", port, `http://127.0.0.1:${port}`);
+    console.log(`  [domains] Auto-registered "${finalName}.dweb" for project "${projectName}"`);
+    return { name: finalName, auto: true, path: servicePath };
+  }
+
   router.post("/api/publish", async (req, res) => {
     const body = await parseBody(req);
     const { name, type, files } = body;
@@ -176,10 +232,25 @@ function registerRoutes(router) {
     }
     addHostedService(name, type || "Web App", config.PORT, `http://localhost:${config.PORT}/project/${name.replace(/[^a-zA-Z0-9-_]/g, "_")}`);
     const routeName = name.replace(/[^a-zA-Z0-9-_]/g, "_");
+    const projectUrl = `http://localhost:${config.PORT}/project/${routeName}`;
+
+    // Auto-assign a .dweb domain if requested (default: true)
+    const autoDomain = body.auto_domain !== false;
+    let domainResult = null;
+    if (autoDomain) {
+      domainResult = autoAssignDomain(name, config.PORT);
+    }
+
     console.log(`  [deploy] Published "${name}" → /project/${routeName}`);
     json(res, 201, {
-      status: "ok", project: { name, route: `/project/${routeName}`, path: projectDir },
-      url: `http://localhost:${config.PORT}/project/${routeName}`,
+      status: "ok",
+      project: { name, route: `/project/${routeName}`, path: projectDir },
+      url: projectUrl,
+      domain: domainResult ? {
+        name: domainResult.name + ".dweb",
+        url: `dweb://${domainResult.name}.dweb`,
+        auto_registered: domainResult.auto,
+      } : null,
     });
   });
 
