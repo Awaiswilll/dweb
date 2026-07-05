@@ -693,7 +693,6 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
     } catch {}
     return "local";
   });
-  const [peerCount, setPeerCount] = useState(0);
   const [relayStatus, setRelayStatus] = useState<RelayStatus | null>(null);
   const [discoveredPeers, setDiscoveredPeers] = useState<RelayPeer[]>([]);
   const [incomingSignals, setIncomingSignals] = useState<string[]>([]);
@@ -718,7 +717,6 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
       if (!mounted) return;
       setRelayStatus(status);
       setDiscoveredPeers(peers);
-      if (status) setPeerCount(status.peersOnline);
       relayLoaded.current = true;
 
       // Auto-connect any remotes with "connecting" status
@@ -1090,12 +1088,43 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
     );
   }
 
+  /* ─── Compute total dweb instances ───────────────── */
+  const connectedRemotes = remotes.filter(r => r.status === "connected");
+  const discoveredPeerIds = new Set(discoveredPeers.map(p => p.id));
+  const uniqueConnectedRemotes = connectedRemotes.filter(r => !discoveredPeerIds.has(r.peerId));
+  const totalInstances = 1 + discoveredPeers.length + uniqueConnectedRemotes.length;
+  const networkAvailable = relayStatus?.connected || discoveredPeers.length > 0 || connectedRemotes.length > 0;
+  const visiblePeers = discoveredPeers.filter(p => p.mode === "p2p-visible");
+  const anonymousPeers = discoveredPeers.filter(p => p.mode === "p2p-anonymous");
+
   /* ─── Network Section ────────────────────────────────────── */
   const networkSection = (
     <div style={{ marginBottom: 20 }}>
+      {/* Pulse beacon keyframes */}
+      <style>{`
+@keyframes pulse-beacon {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.65; transform: scale(1.35); }
+}
+`}</style>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
         <h3 style={{ fontSize: 15, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
-          <Globe size={16} /> Network
+          <Globe size={16} />
+          Network
+          {/* Total dweb instances with pulse beacon */}
+          <span style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 5, marginLeft: 2 }}
+            title={`${totalInstances} total dweb instance(s) — 1 (this device) + ${discoveredPeers.length} discovered + ${uniqueConnectedRemotes.length} connected remote(s)${!networkAvailable ? " (no network)" : ""}`}>
+            <span style={{
+              width: 8, height: 8, borderRadius: "50%",
+              background: networkAvailable ? "#22c55e" : "#6b7280",
+              boxShadow: networkAvailable ? "0 0 7px rgba(34,197,94,0.6)" : "none",
+              animation: networkAvailable ? "pulse-beacon 2s infinite" : "none",
+              flexShrink: 0,
+            }} />
+            <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>
+              {totalInstances}
+            </span>
+          </span>
         </h3>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           {/* Relay indicator */}
@@ -1154,9 +1183,18 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
         </span>
         <span style={{ color: "var(--text-muted)" }}>|</span>
         <span style={{ display: "flex", alignItems: "center", gap: 4 }}
-          title={peerCount > 0 ? `${peerCount} peer(s) currently connected via P2P. Click Connect to manage.` : "No peers connected. Click Connect to discover peers."}>
+          title={
+            totalInstances > 0
+              ? `${totalInstances} total dweb instance(s)\n  · 1 self\n  · ${discoveredPeers.length} discovered (${visiblePeers.length} visible, ${anonymousPeers.length} anon)\n  · ${uniqueConnectedRemotes.length} connected remote(s)`
+              : "No dweb instances found. Click Connect to discover peers."
+          }>
           <Monitor size={14} />
-          Peers: <strong style={{ color: peerCount > 0 ? "#22c55e" : "var(--text-muted)" }}>{peerCount}</strong>
+          Instances: <strong style={{ color: totalInstances > 0 ? "#22c55e" : "var(--text-muted)" }}>{totalInstances}</strong>
+          {discoveredPeers.length > 0 && (
+            <span style={{ fontSize: 10, color: "var(--text-muted)", marginLeft: 2 }}>
+              ({visiblePeers.length}v · {anonymousPeers.length}a)
+            </span>
+          )}
         </span>
         <span style={{ color: "var(--text-muted)" }}>|</span>
         <span style={{ display: "flex", alignItems: "center", gap: 4, color: relayStatus?.connected ? "#22c55e" : "var(--text-muted)" }}
@@ -1564,7 +1602,7 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
             loadServices(); loadRuntimes();
             // Also refresh relay/network data
             getRelayStatus().then(s => { if (s) setRelayStatus(s); });
-            getRelayPeers().then(p => { setDiscoveredPeers(p); if (p.length > 0) setPeerCount(p.length); });
+            getRelayPeers().then(p => setDiscoveredPeers(p));
           }}>
             <RefreshCw size={14} /> Refresh
           </button>
