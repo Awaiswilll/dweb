@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import type { Service, P2PNetworkStatus, P2PPeer } from "../types";
 import {
-  getRelayStatus, getRelayPeers, sendRelaySignal, pollSignals,
+  sendRelaySignal, pollSignals,
   type RelayPeer, type RelayStatus,
 } from "../relay-client";
 
@@ -705,30 +705,51 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
   const [advancedStatus, setAdvancedStatus] = useState<P2PNetworkStatus | null>(null);
   const [advancedPeers, setAdvancedPeers] = useState<P2PPeer[]>([]);
   const [advancedRefreshing, setAdvancedRefreshing] = useState(false);
+  const [expandedServices, setExpandedServices] = useState<Set<string>>(new Set());
   const PEERS_PER_PAGE = 15;
   const REMOTES_PER_PAGE = 15;
   const relayLoaded = useRef(false);
 
-  // Fetch relay status + peer list periodically
+  // Fetch peer list + status periodically (uses /discover + /dweb-status instead of broken /relay/* routes)
   useEffect(() => {
     let mounted = true;
 
     const fetchRelayData = async () => {
-      const [status, peers] = await Promise.all([
-        getRelayStatus(),
-        getRelayPeers(),
+      const [statusData, discoverData] = await Promise.all([
+        fetch("/dweb-status").then(r => r.ok ? r.json() : null).catch(() => null) as Promise<P2PNetworkStatus | null>,
+        fetch("/discover").then(r => r.ok ? r.json() : null).catch(() => null) as Promise<{ peers: RelayPeer[]; count: number } | null>,
       ]);
       if (!mounted) return;
-      setRelayStatus(status);
-      setDiscoveredPeers(peers);
+
+      // Map /dweb-status to RelayStatus shape
+      if (statusData) {
+        setRelayStatus({
+          connected: statusData.relayConnected,
+          relayAddress: statusData.upstreamRelay || `localhost:${statusData.relayPort}`,
+          error: statusData.relayError,
+          peerId: statusData.peerId,
+          peersOnline: statusData.peersOnline,
+          pendingSignals: 0,
+          localIPs: statusData.localIPs,
+        });
+      }
+
+      // Filter out self from discovered peers
+      if (discoverData) {
+        const selfId = statusData?.peerId;
+        const filtered = selfId
+          ? (discoverData.peers || []).filter(p => p.id !== selfId)
+          : (discoverData.peers || []);
+        setDiscoveredPeers(filtered);
+      }
       relayLoaded.current = true;
 
       // Auto-connect any remotes with "connecting" status
-      if (peers.length > 0) {
+      const currentPeers = discoverData?.peers || [];
+      if (currentPeers.length > 0) {
         setRemotes(prev => prev.map(r => {
           if (r.status !== "connecting") return r;
-          // Look for a matching peer in discovered list
-          const match = peers.find(p =>
+          const match = currentPeers.find(p =>
             p.id === r.peerId || `${p.address}:${p.port}` === r.address
           );
           if (match) {
@@ -880,7 +901,7 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
     const [hoveredMode, setHoveredMode] = useState<"direct" | "relay" | null>(null);
 
     useEffect(() => {
-      getRelayPeers().then(peers => setLocalPeers(peers));
+      fetch("/discover").then(r => r.ok ? r.json() : { peers: [] }).then(d => setLocalPeers(d.peers || [])).catch(() => {});
     }, []);
 
     /* ─── Mode info tooltip content ────────────────────────── */
@@ -1448,23 +1469,68 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
             const totalPages = Math.max(1, Math.ceil(discoveredPeers.length / PEERS_PER_PAGE));
             const safePage = Math.min(peerPage, totalPages - 1);
             const pagePeers = discoveredPeers.slice(safePage * PEERS_PER_PAGE, (safePage + 1) * PEERS_PER_PAGE);
+            const toggleServices = (peerId: string) => {
+              setExpandedServices(prev => {
+                const next = new Set(prev);
+                if (next.has(peerId)) next.delete(peerId);
+                else next.add(peerId);
+                return next;
+              });
+            };
             return (
               <>
-                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  {pagePeers.map(p => (
-                    <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0" }}>
-                      <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#22c55e", flexShrink: 0 }} />
-                      <span style={{ fontWeight: 500 }}>{p.hostname || p.id.slice(0, 16)}</span>
-                      <span style={{ color: "var(--text-muted)" }}>{p.address}:{p.port}</span>
-                      <span style={{ color: "var(--text-muted)", fontSize: 10 }}>{p.mode}</span>
-                      <span style={{ color: "var(--text-muted)", fontSize: 10 }}>{p.platform}</span>
-                      {p.services?.length > 0 && (
-                        <span style={{ color: "var(--text-muted)", fontSize: 10, marginLeft: "auto" }}>
-                          {p.services.join(", ")}
-                        </span>
-                      )}
-                    </div>
-                  ))}
+                <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                  {pagePeers.map(p => {
+                    const svcExpanded = expandedServices.has(p.id);
+                    return (
+                      <div key={p.id} style={{ padding: "4px 0" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#22c55e", flexShrink: 0 }} />
+                          <span style={{ fontWeight: 500 }}>{p.hostname || p.id.slice(0, 16)}</span>
+                          <span style={{ color: "var(--text-muted)" }}>{p.address}:{p.port}</span>
+                          <span style={{ color: "var(--text-muted)", fontSize: 10 }}>{p.mode}</span>
+                          <span style={{ color: "var(--text-muted)", fontSize: 10 }}>{p.platform}</span>
+                          {p.services?.length > 0 && (
+                            <span
+                              onClick={() => toggleServices(p.id)}
+                              title={svcExpanded ? "Collapse services" : "Expand services"}
+                              style={{
+                                color: svcExpanded ? "#22c55e" : "var(--text-muted)",
+                                fontSize: 10, marginLeft: "auto", cursor: "pointer",
+                                display: "flex", alignItems: "center", gap: 4,
+                                padding: "2px 6px", borderRadius: 4,
+                                background: svcExpanded ? "rgba(34,197,94,0.1)" : "transparent",
+                              }}
+                            >
+                              <ChevronRight size={10} style={{
+                                transition: "transform 0.15s",
+                                transform: svcExpanded ? "rotate(90deg)" : "none",
+                              }} />
+                              {svcExpanded ? `${p.services.length} services` : p.services.join(", ")}
+                            </span>
+                          )}
+                        </div>
+                        {/* Expanded service details */}
+                        {svcExpanded && p.services?.length > 0 && (
+                          <div style={{
+                            marginTop: 4, marginLeft: 14, padding: "6px 10px",
+                            background: "rgba(255,255,255,0.03)", borderRadius: "var(--radius-sm)",
+                            fontSize: 10, display: "flex", flexDirection: "column", gap: 3,
+                          }}>
+                            {p.services.map((svc, i) => (
+                              <div key={i} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                <Server size={10} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
+                                <span style={{ fontWeight: 500 }}>{svc}</span>
+                                <span style={{ color: "var(--text-muted)", fontSize: 9 }}>
+                                  peer {p.hostname || p.id.slice(0, 8)} @ {p.address}:{p.port}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
                 {totalPages > 1 && (
                   <div style={{
@@ -1781,11 +1847,29 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
           }}>
             <Plus size={14} /> New Instance
           </button>
-          <button className="btn btn-secondary" onClick={() => {
+          <button className="btn btn-secondary" onClick={async () => {
             loadServices(); loadRuntimes();
-            // Also refresh relay/network data
-            getRelayStatus().then(s => { if (s) setRelayStatus(s); });
-            getRelayPeers().then(p => setDiscoveredPeers(p));
+            // Refresh peer/network data from working endpoints
+            const statusRes = await fetch("/dweb-status").then(r => r.ok ? r.json() : null).catch(() => null);
+            if (statusRes) {
+              setRelayStatus({
+                connected: statusRes.relayConnected,
+                relayAddress: statusRes.upstreamRelay || `localhost:${statusRes.relayPort}`,
+                error: statusRes.relayError,
+                peerId: statusRes.peerId,
+                peersOnline: statusRes.peersOnline,
+                pendingSignals: 0,
+                localIPs: statusRes.localIPs,
+              });
+            }
+            const discoverRes = await fetch("/discover").then(r => r.ok ? r.json() : null).catch(() => null);
+            if (discoverRes) {
+              const selfId = statusRes?.peerId;
+              const filtered = selfId
+                ? (discoverRes.peers || []).filter((p: RelayPeer) => p.id !== selfId)
+                : (discoverRes.peers || []);
+              setDiscoveredPeers(filtered);
+            }
           }}>
             <RefreshCw size={14} /> Refresh
           </button>
