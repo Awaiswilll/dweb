@@ -81,6 +81,12 @@ Every dweb installation is a **node** on a decentralized network:
 - **Multiple online modes** — Local Only, P2P Visible (discoverable), P2P Anonymous (connect out only)
 - **Auto-registration** — Each instance auto-registers as a peer on startup for immediate discoverability
 - **Persistent peer registry** — Peers survive server restarts via disk-backed storage (`/tmp/dweb-peers.json`)
+- **Tor routing** — Optional Tor daemon integration with one-click toggle in the Network header
+  - *Auto-detects* if Tor is installed, shows real-time status (running/installed/unavailable)
+  - *One-click toggle* — Starts/stops Tor daemon (via `kalitorify` or `nohup tor`), server tracks state server-side
+  - *Auto-anonymous* — Enabling Tor auto-switches instance to `p2p-anonymous` mode (Visible would defeat Tor's purpose)
+  - *Status bar indicator* — Purple `Tor: Routing` badge with SOCKS5 proxy address on hover
+  - *Verify endpoint* — `GET /api/tor/test` probes the SOCKS5 proxy port (127.0.0.1:9050) to confirm it's reachable
 - **P2P File Transfer** — Share files directly between instances
 
 ### 🏷️ .dweb Domain System

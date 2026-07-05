@@ -131,6 +131,13 @@ Every dweb installation is a node on a decentralized network:
 | /api/opencode/run | POST | Run opencode CLI command |
 | /fileshare/api/list | GET | List shared files |
 | /fileshare/api/upload | POST | Upload a file |
+| /ping | GET | Health check |
+| /register | POST | Register this instance as a peer |
+| /discover | GET | Discover online peers |
+| /signal | POST | WebRTC signaling exchange |
+| /api/tor/status | GET | Tor installation & routing status |
+| /api/tor/toggle | POST | Start/stop Tor routing |
+| /api/tor/test | GET | Test Tor SOCKS5 proxy reachability |
 
 ---
 
