@@ -345,7 +345,7 @@ export const githubApi = {
 
 /* ─── App View Type ────────────────────────────────────────── */
 
-export type View = "dashboard" | "browser" | "ai-agent" | "domains" | "repositories" | "settings" | "integrations" | "docs" | "p2p-dashboard" | "p2p-transfer";
+export type View = "dashboard" | "browser" | "ai-agent" | "domains" | "repositories" | "settings" | "integrations" | "docs" | "p2p-transfer";
 
 /* ─── P2P Network Types ──────────────────────────────────── */
 

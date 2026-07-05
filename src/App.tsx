@@ -9,7 +9,6 @@ import Repositories from "./views/Repositories";
 import Settings from "./views/Settings";
 import Integrations from "./views/Integrations";
 import Docs from "./views/Docs";
-import P2PDashboard from "./views/P2PDashboard";
 import type { View } from "./types";
 
 import P2PTransfer from "./views/P2PTransfer";
@@ -50,12 +49,12 @@ function AppContent() {
     {
       label: "P2P Connect",
       icon: <Wifi size={14} />,
-      onClick: () => { setCurrentView("p2p-dashboard"); },
+      onClick: () => { setCurrentView("dashboard"); },
     },
     {
       label: "Network Status",
       icon: <Radio size={14} />,
-      onClick: () => addNotification({ type: "info", title: "Network", message: "Relay running on port 49746", duration: 3000 }),
+      onClick: () => addNotification({ type: "info", title: "Network", message: "Relay running on port 49736", duration: 3000 }),
     },
     {
       label: "Refresh",
@@ -81,7 +80,6 @@ function AppContent() {
       case "repositories": return <Repositories />;
       case "docs": return <Docs />;
       case "settings": return <Settings />;
-      case "p2p-dashboard": return <P2PDashboard />;
       case "p2p-transfer": return <P2PTransfer />;
     }
   };

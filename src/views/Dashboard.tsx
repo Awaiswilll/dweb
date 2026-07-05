@@ -5,9 +5,9 @@ import {
   Plus, RefreshCw, CheckCircle2, FolderGit2,
   ExternalLink, Wrench, Wifi, WifiOff,
   Link2, Unlink, Shield, Monitor, Radio, Users,
-  ChevronDown, ChevronRight, List, Save,
+  ChevronDown, ChevronRight, List, Save, Activity,
 } from "lucide-react";
-import type { Service } from "../types";
+import type { Service, P2PNetworkStatus, P2PPeer } from "../types";
 import {
   getRelayStatus, getRelayPeers, sendRelaySignal, pollSignals,
   type RelayPeer, type RelayStatus,
@@ -701,6 +701,10 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
   const [togglingTor, setTogglingTor] = useState(false);
   const [peerPage, setPeerPage] = useState(0);
   const [remotePage, setRemotePage] = useState(0);
+  const [showAdvancedDetails, setShowAdvancedDetails] = useState(false);
+  const [advancedStatus, setAdvancedStatus] = useState<P2PNetworkStatus | null>(null);
+  const [advancedPeers, setAdvancedPeers] = useState<P2PPeer[]>([]);
+  const [advancedRefreshing, setAdvancedRefreshing] = useState(false);
   const PEERS_PER_PAGE = 15;
   const REMOTES_PER_PAGE = 15;
   const relayLoaded = useRef(false);
@@ -768,6 +772,26 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
   useEffect(() => {
     saveRemotes(remotes);
   }, [remotes]);
+
+  // Fetch advanced network details when panel is expanded
+  useEffect(() => {
+    if (!showAdvancedDetails) return;
+    let mounted = true;
+    const fetchAdvanced = async () => {
+      setAdvancedRefreshing(true);
+      const [statusData, discoverData] = await Promise.all([
+        fetch("/dweb-status").then(r => r.ok ? r.json() : null).catch(() => null) as Promise<P2PNetworkStatus | null>,
+        fetch("/discover").then(r => r.ok ? r.json() : null).catch(() => null) as Promise<{ peers: P2PPeer[]; count: number } | null>,
+      ]);
+      if (!mounted) return;
+      if (statusData) setAdvancedStatus(statusData);
+      if (discoverData) setAdvancedPeers(discoverData.peers || []);
+      setAdvancedRefreshing(false);
+    };
+    fetchAdvanced();
+    const interval = setInterval(fetchAdvanced, 15000);
+    return () => { mounted = false; clearInterval(interval); };
+  }, [showAdvancedDetails]);
 
   // Persist online mode to localStorage so it survives tab switches
   useEffect(() => {
@@ -1097,6 +1121,27 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
   const visiblePeers = discoveredPeers.filter(p => p.mode === "p2p-visible");
   const anonymousPeers = discoveredPeers.filter(p => p.mode === "p2p-anonymous");
 
+  const formatUptime = (seconds: number): string => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    if (h > 0) return `${h}h ${m}m ${s}s`;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
+  };
+
+  const advancedEndpoints = [
+    ["GET", "/ping", "Health check"],
+    ["GET", "/dweb-status", "Instance health & P2P status"],
+    ["POST", "/register", "Register this instance as a peer"],
+    ["GET", "/discover", "Discover online peers"],
+    ["POST", "/signal", "WebRTC signaling exchange"],
+    ["GET", "/relay/status", "Relay connection status"],
+    ["GET", "/relay/peers", "List relay-connected peers"],
+    ["GET", "/collab/services", "P2P-discovered remote services"],
+    ["GET", "/collab/sessions", "Shared collaboration sessions"],
+  ];
+
   /* ─── Network Section ────────────────────────────────────── */
   const networkSection = (
     <div style={{ marginBottom: 20 }}>
@@ -1251,6 +1296,144 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
           </div>
         </div>
       )}
+
+      {/* ── Advanced Network Details (collapsible) ─────────────── */}
+      <div className="glass-sm" style={{
+        borderRadius: "var(--radius-sm)", marginBottom: 10, overflow: "hidden",
+        border: showAdvancedDetails ? "1px solid var(--border)" : "1px solid transparent",
+      }}>
+        <div
+          onClick={() => setShowAdvancedDetails(!showAdvancedDetails)}
+          style={{
+            display: "flex", alignItems: "center", gap: 8,
+            padding: "8px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer",
+            userSelect: "none", background: showAdvancedDetails ? "var(--bg-tertiary)" : "transparent",
+          }}
+        >
+          <span style={{ display: "flex", transition: "transform 0.15s", transform: showAdvancedDetails ? "rotate(90deg)" : "none" }}>
+            <ChevronRight size={14} />
+          </span>
+          <Activity size={14} />
+          Advanced Network Details
+          {advancedStatus && (
+            <span style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 400, marginLeft: "auto" }}>
+              {showAdvancedDetails ? "click to collapse" : `Peer: ${advancedStatus.peerId?.slice(0, 14)}…`}
+            </span>
+          )}
+        </div>
+        {showAdvancedDetails && (
+          <div style={{ padding: "8px 14px 14px", borderTop: "1px solid var(--border)", fontSize: 12 }}>
+            {/* Status cards (2x2 grid) */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
+              <div className="glass-sm" style={{ padding: "10px 12px", borderRadius: "var(--radius-sm)" }}>
+                <div style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 2, display: "flex", alignItems: "center", gap: 4 }}>
+                  <Users size={11} /> Peers Online
+                </div>
+                <div style={{ fontSize: 20, fontWeight: 700 }}>{advancedStatus?.peersOnline ?? "—"}</div>
+                <div style={{ fontSize: 9, color: "var(--text-muted)", marginTop: 2 }}>
+                  {advancedPeers.length > 0 ? `${advancedPeers.length} discovered via /discover` : "—"}
+                </div>
+              </div>
+              <div className="glass-sm" style={{ padding: "10px 12px", borderRadius: "var(--radius-sm)" }}>
+                <div style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 2, display: "flex", alignItems: "center", gap: 4 }}>
+                  <Activity size={11} /> Uptime
+                </div>
+                <div style={{ fontSize: 20, fontWeight: 700 }}>{advancedStatus ? formatUptime(advancedStatus.uptime) : "—"}</div>
+              </div>
+              <div className="glass-sm" style={{ padding: "10px 12px", borderRadius: "var(--radius-sm)" }}>
+                <div style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 2, display: "flex", alignItems: "center", gap: 4 }}>
+                  <Server size={11} /> Services
+                </div>
+                <div style={{ fontSize: 20, fontWeight: 700 }}>{(advancedStatus?.services || []).length}</div>
+                <div style={{ fontSize: 9, color: "var(--text-muted)", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {(advancedStatus?.services || []).join(", ") || "—"}
+                </div>
+              </div>
+              <div className="glass-sm" style={{ padding: "10px 12px", borderRadius: "var(--radius-sm)" }}>
+                <div style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 2, display: "flex", alignItems: "center", gap: 4 }}>
+                  <Wifi size={11} /> Relay
+                </div>
+                <div style={{ fontSize: 20, fontWeight: 700, color: advancedStatus?.relayConnected ? "#22c55e" : "#6b7280" }}>
+                  {advancedStatus?.relayConnected ? "Connected" : "Standalone"}
+                </div>
+                <div style={{ fontSize: 9, color: "var(--text-muted)", marginTop: 2 }}>
+                  {advancedStatus?.upstreamRelay ? `via ${advancedStatus.upstreamRelay}` : "This node"}
+                </div>
+              </div>
+            </div>
+
+            {/* Network info */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 16px", marginBottom: 12, fontSize: 11 }}>
+              <div><span style={{ color: "var(--text-muted)" }}>Peer ID</span> <code style={{ fontSize: 10 }}>{advancedStatus?.peerId || "—"}</code></div>
+              <div><span style={{ color: "var(--text-muted)" }}>Web IDE Port</span> {advancedStatus?.port || "—"}</div>
+              <div><span style={{ color: "var(--text-muted)" }}>Relay Port</span> {advancedStatus?.relayPort || "—"}</div>
+              <div><span style={{ color: "var(--text-muted)" }}>Mode</span> {advancedStatus?.mode || "—"}</div>
+              <div style={{ gridColumn: "1 / -1" }}>
+                <span style={{ color: "var(--text-muted)" }}>Local IPs</span> {(advancedStatus?.localIPs || []).join(", ") || "—"}
+              </div>
+              <div style={{ gridColumn: "1 / -1" }}>
+                <span style={{ color: "var(--text-muted)" }}>Platform</span> {advancedStatus?.hostname || "—"} (Linux)
+              </div>
+            </div>
+
+            {/* Register Peer + Refresh row */}
+            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+              <button className="btn btn-primary btn-sm" onClick={async () => {
+                try {
+                  const res = await fetch("/register", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      id: `peer-${Date.now()}`,
+                      address: `${window.location.hostname}:${window.location.port}`,
+                      publicKey: "auto-registered",
+                    }),
+                  });
+                  const data = await res.json();
+                  if (data.status === "ok") setConnectionMsg({ type: "success", text: `Peer registered: ${data.peerId}` });
+                } catch (e) {
+                  setConnectionMsg({ type: "error", text: `Registration failed: ${e}` });
+                }
+              }}>
+                <Wifi size={12} /> Register Peer
+              </button>
+              <button className="btn btn-secondary btn-sm" onClick={() => {
+                fetch("/dweb-status").then(r => r.ok && r.json()).then(d => d && setAdvancedStatus(d)).catch(() => {});
+                fetch("/discover").then(r => r.ok && r.json()).then(d => d && setAdvancedPeers(d.peers || [])).catch(() => {});
+              }} disabled={advancedRefreshing}>
+                <RefreshCw size={12} className={advancedRefreshing ? "spin" : ""} /> Refresh
+              </button>
+            </div>
+
+            {/* API Endpoints table */}
+            <div style={{ fontWeight: 600, marginBottom: 6, fontSize: 11, display: "flex", alignItems: "center", gap: 4 }}>
+              <Code size={12} /> P2P API Endpoints
+            </div>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", fontSize: 10, borderCollapse: "collapse" }}>
+                <thead>
+                  <tr style={{ borderBottom: "1px solid var(--border)", color: "var(--text-muted)" }}>
+                    <th style={{ textAlign: "left", padding: "4px 6px" }}>Method</th>
+                    <th style={{ textAlign: "left", padding: "4px 6px" }}>Endpoint</th>
+                    <th style={{ textAlign: "left", padding: "4px 6px" }}>Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {advancedEndpoints.map(([method, ep, desc]) => (
+                    <tr key={ep} style={{ borderBottom: "1px solid var(--border-subtle)" }}>
+                      <td style={{ padding: "4px 6px" }}>
+                        <span className="nav-badge" style={{ fontSize: 9 }}>{method}</span>
+                      </td>
+                      <td style={{ padding: "4px 6px", fontFamily: "monospace", fontSize: 10 }}>{ep}</td>
+                      <td style={{ padding: "4px 6px", color: "var(--text-secondary)" }}>{desc}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Discovered peers from relay (paginated) */}
       {discoveredPeers.length > 0 && (
