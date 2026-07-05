@@ -532,8 +532,9 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
 
   const handleTorToggle = async () => {
     setTogglingTor(true);
+    const wasRunning = torStatus?.running ?? false;
+    const action = wasRunning ? "stop" : "start";
     try {
-      const action = torStatus?.running ? "stop" : "start";
       const resp = await fetch("/api/tor/toggle", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -541,7 +542,18 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
       });
       const data = await resp.json();
       if (data.status === "ok") {
-        setTorStatus(prev => prev ? { ...prev, running: action === "start" } : prev);
+        // Update Tor status from server response
+        setTorStatus(prev => prev ? {
+          ...prev,
+          running: action === "start",
+          torEnabled: data.torEnabled ?? action === "start",
+          torProxy: data.torProxy ?? prev.torProxy,
+        } : prev);
+        // When Tor is enabled, automatically switch to anonymous P2P mode
+        // (Tor provides anonymity, so Visible would defeat the purpose)
+        if (action === "start") {
+          setOnlineMode("p2p-anonymous");
+        }
         setConnectionMsg({ type: "success", text: data.message });
       }
     } catch (e) {
@@ -697,7 +709,7 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
   const [discoveredPeers, setDiscoveredPeers] = useState<RelayPeer[]>([]);
   const [incomingSignals, setIncomingSignals] = useState<string[]>([]);
   const [connectionMsg, setConnectionMsg] = useState<{ type: "success" | "error" | "info"; text: string } | null>(null);
-  const [torStatus, setTorStatus] = useState<{ installed: boolean; running: boolean; kalitorifyAvailable: boolean } | null>(null);
+  const [torStatus, setTorStatus] = useState<{ installed: boolean; running: boolean; kalitorifyAvailable: boolean; torEnabled?: boolean; torProxy?: string } | null>(null);
   const [togglingTor, setTogglingTor] = useState(false);
   const [peerPage, setPeerPage] = useState(0);
   const [remotePage, setRemotePage] = useState(0);
@@ -1221,7 +1233,9 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
                 }}
                 title={m === "local" ? "Local Only — no P2P connectivity"
                   : m === "p2p-visible" ? "P2P Visible — other peers can discover and connect to you"
-                  : "P2P Anonymous — you see peers but they cannot discover you"}
+                  : torStatus?.running
+                    ? "P2P Anonymous via Tor — traffic routed through Tor SOCKS5 proxy"
+                    : "P2P Anonymous — you see peers but they cannot discover you"}
               >
                 {modeIcon[m]}
                 {m === "local" ? "Local" : m === "p2p-visible" ? "Visible" : "Anonymous"}
@@ -1252,7 +1266,7 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
                 !torStatus.installed
                   ? "Tor is not installed — install tor to enable anonymous routing"
                   : torStatus.running
-                    ? "Tor routing active — click to disable"
+                    ? `Tor routing active via ${torStatus.torProxy || "SOCKS5 :9050"} — click to disable\nP2P mode forced to Anonymous`
                     : "Tor installed — click to enable anonymous P2P routing"
               }
             >
@@ -1282,9 +1296,15 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
         <span style={{ display: "flex", alignItems: "center", gap: 4, color: onlineMode === "local" ? "var(--text-muted)" : "#22c55e" }}
           title={onlineMode === "local" ? "Local only mode — not visible to peers"
             : onlineMode === "p2p-visible" ? "Visible to all peers on the network"
+            : torStatus?.running ? "Anonymous via Tor — Tor SOCKS5 proxy active"
             : "Anonymous mode — visible but identity not shared"}>
           {onlineMode === "local" ? <WifiOff size={14} /> : <Wifi size={14} />}
           Mode: <strong>{onlineMode === "local" ? "Local Only" : onlineMode === "p2p-visible" ? "P2P Visible" : "P2P Anonymous"}</strong>
+          {torStatus?.running && onlineMode === "p2p-anonymous" && (
+            <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 8, background: "rgba(126,34,206,0.15)", color: "#7c3aed", marginLeft: 2 }}>
+              via Tor
+            </span>
+          )}
         </span>
         <span style={{ color: "var(--text-muted)" }}>|</span>
         <span style={{ display: "flex", alignItems: "center", gap: 4 }}
@@ -1309,6 +1329,17 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
           <Radio size={14} />
           Relay: <strong>{relayStatus?.connected ? "Connected" : "Offline"}</strong>
         </span>
+        {/* Tor routing indicator — shown in status bar when Tor is running */}
+        {torStatus?.running && (
+          <>
+            <span style={{ color: "var(--text-muted)" }}>|</span>
+            <span style={{ display: "flex", alignItems: "center", gap: 4, color: "#7c3aed" }}
+              title={`Tor routing active\nProxy: ${torStatus.torProxy || "socks5://127.0.0.1:9050"}\nP2P mode forced to Anonymous`}>
+              <Shield size={14} />
+              Tor: <strong>Routing</strong>
+            </span>
+          </>
+        )}
         {incomingSignals.length > 0 && (
           <>
             <span style={{ color: "var(--text-muted)" }}>|</span>

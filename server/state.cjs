@@ -122,6 +122,15 @@ function restorePeers() {
   }
 }
 
+// ─── Tor State ─────────────────────────────────────────────────────────────────
+
+let torEnabled = false;
+const TOR_PROXY = "socks5://127.0.0.1:9050";
+
+function setTorEnabled(v) { torEnabled = v; }
+function isTorEnabled() { return torEnabled; }
+function getTorProxy() { return TOR_PROXY; }
+
 // ─── Cleanup ───────────────────────────────────────────────────────────────────
 
 function cleanupStalePeers() {
@@ -206,4 +215,6 @@ module.exports = {
   // Domain registry
   domainRegistry, getDomainRecord, setDomainRecord, deleteDomainRecord, listDomainRecords,
   restoreDomains, saveDomains,
+  // Tor state
+  setTorEnabled, isTorEnabled, getTorProxy,
 };

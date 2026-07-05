@@ -11,7 +11,8 @@ const { execSync, exec } = require("child_process");
 const { json, parseBody, serveFile } = require("./helpers.cjs");
 const config = require("./config.cjs");
 const { SHARE_DIR } = config;
-const { hostedServices, localPeers, peers, addHostedService, getDomainRecord, setDomainRecord, listDomainRecords } = require("./state.cjs");
+const { hostedServices, localPeers, peers, addHostedService, getDomainRecord, setDomainRecord, listDomainRecords,
+  setTorEnabled, isTorEnabled, getTorProxy } = require("./state.cjs");
 
 function registerRoutes(router) {
   // ── Tor ──────────────────────────────────────────────────────────────────────
@@ -22,7 +23,11 @@ function registerRoutes(router) {
     try { execSync("pgrep -x tor 2>/dev/null", { timeout: 3000 }); running = true; } catch {}
     let kalitorifyAvailable = false;
     try { execSync("which kalitorify 2>/dev/null", { timeout: 3000 }); kalitorifyAvailable = true; } catch {}
-    json(res, 200, { status: "ok", installed, running, kalitorifyAvailable, torProxy: "socks5://127.0.0.1:9050" });
+    json(res, 200, {
+      status: "ok", installed, running, kalitorifyAvailable,
+      torEnabled: isTorEnabled(),
+      torProxy: getTorProxy(),
+    });
   });
 
   router.post("/api/tor/toggle", async (req, res) => {
@@ -30,19 +35,64 @@ function registerRoutes(router) {
     const { action } = body;
     try {
       if (action === "start") {
-        try { execSync("sudo kalitorify --tor 2>/dev/null", { timeout: 10000 }); }
-        catch { execSync("nohup tor > /dev/null 2>&1 &", { timeout: 5000 }); }
-        json(res, 200, { status: "ok", message: "Tor routing enabled", torProxy: "socks5://127.0.0.1:9050" });
+        // 1) Try kalitorify (full OS-level Tor routing)
+        // 2) Fall back to nohup tor (just the daemon + SOCKS5 proxy)
+        try {
+          await new Promise((resolve, reject) => {
+            exec("sudo kalitorify --tor", { timeout: 10000 }, (err) => err ? reject(err) : resolve());
+          });
+        } catch {
+          await new Promise((resolve, reject) => {
+            exec("nohup tor > /dev/null 2>&1 &", { timeout: 5000 }, (err) => err ? reject(err) : resolve());
+          });
+        }
+        setTorEnabled(true);
+        json(res, 200, { status: "ok", message: "Tor routing enabled", torEnabled: true, torProxy: getTorProxy() });
       } else if (action === "stop") {
-        try { execSync("sudo kalitorify --clearnet 2>/dev/null", { timeout: 10000 }); } catch {}
-        try { execSync("pkill -x tor 2>/dev/null", { timeout: 3000 }); } catch {}
-        json(res, 200, { status: "ok", message: "Tor routing disabled" });
+        try {
+          await new Promise((resolve, reject) => {
+            exec("sudo kalitorify --clearnet", { timeout: 10000 }, (err) => err ? reject(err) : resolve());
+          });
+        } catch {}
+        try {
+          await new Promise((resolve, reject) => {
+            exec("pkill -x tor", { timeout: 3000 }, (err) => err ? reject(err) : resolve());
+          });
+        } catch {}
+        setTorEnabled(false);
+        json(res, 200, { status: "ok", message: "Tor routing disabled", torEnabled: false });
       } else {
         json(res, 400, { error: "Invalid action. Use 'start' or 'stop'." });
       }
     } catch (e) {
       json(res, 500, { error: e.message });
     }
+  });
+
+  // ── Tor Proxy Test ──────────────────────────────────────────────────────────
+  router.get("/api/tor/test", async (req, res) => {
+    const enabled = isTorEnabled();
+    const proxy = getTorProxy();
+    // Try to connect to Tor's SOCKS5 control port to verify the proxy is alive
+    let proxyReachable = false;
+    try {
+      await new Promise((resolve, reject) => {
+        const s = net.createConnection({ host: "127.0.0.1", port: 9050, timeout: 3000 }, () => {
+          proxyReachable = true;
+          s.end();
+          resolve();
+        });
+        s.on("error", reject);
+        s.on("timeout", () => { s.destroy(); reject(new Error("timeout")); });
+      });
+    } catch {}
+    json(res, 200, {
+      status: "ok",
+      torEnabled: enabled,
+      torProxy: proxy,
+      proxyReachable,
+      daemonRunning: proxyReachable, // SOCKS5 listener running = tor daemon is up
+    });
   });
 
   // ── Instance Management ──────────────────────────────────────────────────────
