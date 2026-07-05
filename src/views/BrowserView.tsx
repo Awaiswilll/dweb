@@ -16,8 +16,8 @@ interface Bookmark {
 }
 
 const DEFAULT_BOOKMARKS: Bookmark[] = [
-  { url: "dweb://welcome.dweb", title: "Welcome to dweb", added: Date.now() - 86400000 },
-  { url: "dweb://getting-started.dweb", title: "Getting Started Guide", added: Date.now() - 172800000 },
+  { url: "/welcome", title: "Welcome to dweb", added: Date.now() - 86400000 },
+  { url: "/docs", title: "Documentation", added: Date.now() - 172800000 },
 ];
 
 const TUTORIALS: Tutorial[] = [

@@ -1,8 +1,8 @@
-# dweb OS — Your Decentralized Operating System
+# dweb — P2P Self-Hosting OS
 
 > **One install. Every stack. Your own internet.**
 
-dweb OS is a **minimalist Linux-based operating system** designed for peer-to-peer connectivity, self-hosting, and building applications across any technology stack. It transforms any Windows 11 machine, Linux box, or bare-metal server into a **personal cloud** — a decentralized node on the dweb network where you own your services, your domains, and your data.
+dweb is a **self-hosted P2P dev portal** that transforms any machine into a **personal cloud** — a decentralized node where you own your services, your domains, and your data. Built-in AI agents help you build, host, and publish any web architecture from your own machine, accessible to the world via P2P.
 
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-WSL%20%7C%20Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)]()
@@ -10,197 +10,145 @@ dweb OS is a **minimalist Linux-based operating system** designed for peer-to-pe
 [![TypeScript](https://img.shields.io/badge/typescript-5.5-blue)]()
 [![React](https://img.shields.io/badge/react-19-61dafb)]()
 [![Rust](https://img.shields.io/badge/rust-tauri%20v2-dea584)]()
-[![AI Models](https://img.shields.io/badge/AI-15%2B%20providers%20%7C%20100%2B%20free%20models-7C3AED)]()
-[![Microsoft Store](https://img.shields.io/badge/Microsoft%20Store-Name%20Reserved-0078D4)]()
+[![AI Models](https://img.shields.io/badge/AI-15%2B%20providers-7C3AED)]()
 [![GitHub Release](https://img.shields.io/github/v/release/Awaiswilll/dweb?include_prereleases&label=release)]()
 [![GitHub Issues](https://img.shields.io/github/issues/Awaiswilll/dweb)]()
-[![GitHub Discussions](https://img.shields.io/github/discussions/Awaiswilll/dweb)]()
 
 ---
 
-## The Problem dweb OS Solves
+## What is dweb?
 
-Today's developers face a fragmented reality:
-
-- **Cloud platforms** lock you into vendor ecosystems (AWS, Vercel, Heroku)
-- **AI coding tools** require expensive subscriptions and send your code to third parties
-- **Self-hosting** is complex — Docker, nginx, SSL, DNS, reverse proxies
-- **P2P networking** is powerful but inaccessible to most developers
-- **Domain ownership** is centralized and costs money per domain
-
-**dweb OS unifies all of this into one installable system.** No cloud vendor. No subscription. No complexity. Just your machine, your services, your network.
-
----
-
-## What is dweb OS?
-
-dweb OS is **not just an app** — it's a complete operating environment built on Alpine Linux that provides:
+dweb is **not just an app** — it's a complete self-hosting environment that provides:
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                       dweb OS                                │
-│  ┌───────────┐  ┌───────────┐  ┌──────────────────────────┐ │
-│  │  Dev OS   │  │  P2P Net  │  │      AI Build Engine     │ │
-│  │           │  │           │  │                          │ │
-│  │ Services  │  │ HyperDHT  │  │  15+ Providers           │ │
-│ │ Domains   │  │ WebRTC    │  │  100+ Free Models         │ │
-│  │ Runtimes  │  │ Relay     │  │  Ollama + Nemotron        │ │
-│  │ File Sys  │  │ Mesh      │  │  Local + Cloud            │ │
-│  └───────────┘  └───────────┘  └──────────────────────────┘ │
-│                                                             │
-│  ┌───────────────────────────────────────────────────────┐  │
-│  │              Browser Portal (port 49737)              │  │
-│  │  Dashboard │ AI Agent │ Browser │ Domains │ Repos    │  │
-│  └───────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                         dweb Portal                           │
+│  ┌───────────┐  ┌───────────┐  ┌───────────────────────────┐ │
+│  │  Services │  │  P2P Net  │  │      AI Build Engine       │ │
+│  │           │  │           │  │                           │ │
+│  │ Static    │  │ HyperDHT  │  │  15+ Providers            │ │
+│  │ Node.js   │  │ WebRTC    │  │  100+ Free Models         │ │
+│  │ Python    │  │ Relay     │  │  Ollama + Nemotron         │ │
+│  │ PHP/Go    │  │ Mesh      │  │  Local + Cloud            │ │
+│  │ File Svr  │  │ P2P File  │  │  OpenCode CLI             │ │
+│  └───────────┘  └───────────┘  └───────────────────────────┘ │
+│                                                              │
+│  ┌────────────────────────────────────────────────────────┐  │
+│  │           Browser Portal (port 49737)                   │  │
+│  │  Dashboard │ AI Agent │ Browser │ Domains │ Docs      │  │
+│  │  Settings  │ Integrations │ P2P Transfer │ Repos      │  │
+│  └────────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────┘
 ```
-
-### Three Layers of dweb OS
-
-#### Layer 1: The Operating System
-A **minimalist Alpine Linux distribution** optimized for development workloads. Runs as:
-- **WSL distro** on Windows 11 (install from Microsoft Store)
-- **Native Linux** on any bare-metal or VM
-- **Docker container** for quick testing
-- **Tauri desktop app** for Windows-native experience
-
-#### Layer 2: The P2P Network
-Every dweb OS installation is a **node** on a decentralized network powered by:
-- **HyperDHT** — Distributed hash table for peer discovery and routing
-- **WebRTC** — Direct encrypted connections between peers
-- **Relay Daemon** — Bootstrap and signaling for NAT traversal
-- **WebSocket + HTTP fallback** — Works behind any firewall
-
-Your node can host services that other dweb users access directly — no central server, no CDN, no cloud provider.
-
-#### Layer 3: The AI Build Engine
-A **multi-provider AI agent** that scaffolds, generates, and deploys full-stack applications from natural language:
-- **15+ AI providers** — Ollama, NVIDIA NIM, Groq, Gemini, DeepSeek, Mistral, OpenAI, Anthropic, and more
-- **100+ free models** — No API key needed for most providers
-- **Offline-capable** — Ollama runs 100% locally on your GPU
-- **NVIDIA Nemotron** — Free access to NVIDIA's open-weight models via NIM API
 
 ---
 
 ## Screenshots
 
-| Dashboard | AI Agent | Domains |
+| Dashboard | AI Agent | P2P Instances |
 |:---:|:---:|:---:|
-| ![Dashboard](screenshots/dashboard.png) | ![AI Agent](screenshots/ai-agent.png) | ![Domains](screenshots/domains.png) |
+| ![Dashboard](screenshots/dashboard.png) | ![AI Agent](screenshots/ai-agent.png) | ![P2P Instances](screenshots/2-instances.png) |
 
-| Browser | Repositories | Integrations |
+| Browser | P2P Network | Customizable Page |
 |:---:|:---:|:---:|
-| ![Browser](screenshots/browser.png) | ![Repositories](screenshots/repositories.png) | ![Integrations](screenshots/integrations.png) |
+| ![Browser](screenshots/browser.png) | ![P2P](screenshots/p2p.png) | ![Static Page](screenshots/static-page.png) |
+
+| Domains | Docs | Settings |
+|:---:|:---:|:---:|
+| ![Domains](screenshots/domains.png) | ![Docs](screenshots/docs.png) | ![Settings](screenshots/settings.png) |
 
 ---
 
 ## Core Features
 
-### 🖥️ Dev Portal Dashboard
-A browser-based desktop environment to manage everything:
-- Start/stop services with one click
-- Monitor CPU, memory, and port usage
-- View logs and manage deployments
-- Access your dweb OS from any browser on the network
+### 🖥️ Service Management Dashboard
+Start/stop services with one click, monitor CPU/memory/ports, view logs:
+- **Static Sites** — Serve any HTML/CSS/JS folder
+- **Node.js APIs** — Express, Fastify, and more
+- **Python Web Apps** — Flask, FastAPI, Django
+- **PHP Sites** — WordPress, Laravel, or plain PHP
+- **File Browser** — Upload, manage, and share files through your browser
+- **Custom Services** — Any port, any stack
 
-### 🌐 P2P Networking
-Connect directly with other dweb OS nodes:
-- **Peer discovery** via HyperDHT — find other nodes automatically
-- **Direct connections** via WebRTC — encrypted, no middleman
-- **Relay fallback** — works behind NAT and firewalls
-- **Mesh networking** — your node routes traffic for the network
+### 🌐 P2P Networking & Discovery
+Every dweb installation is a **node** on a decentralized network:
+- **Peer discovery** — Find other dweb nodes automatically
+- **Direct connections** — WebRTC encrypted P2P links
+- **Relay fallback** — WebSocket + HTTP polling for NAT traversal
+- **P2P File Transfer** — Share files directly between instances
+- **Multi-instance** — Run multiple peers, access each other's services
 
 ### 🏷️ .dweb Domain System
 Register and manage domains on the decentralized network:
 - **Free tier** — 1 `.dweb` domain, basic P2P hosting
-- **Premium tier** ($3/mo) — 5 domains, relay cache (always online)
-- **Business tier** ($10/mo) — unlimited domains, cloud shift, priority support
+- **Premium tier** ($3/mo) — 5 domains, relay cache
+- **Business tier** ($10/mo) — unlimited domains, cloud shift
 
-### 🤖 AI Build Agent
+### 🤖 AI Build Agent with 15+ Providers
 Generate full-stack applications from natural language:
-- "Build a blog with React, Node.js, and PostgreSQL"
-- "Create a FastAPI CRUD API with authentication"
-- "Generate a PHP admin dashboard with Chart.js"
+- **15+ AI providers**: Ollama, NVIDIA NIM, Groq, Gemini, DeepSeek, Mistral, OpenAI, Anthropic, Together, OpenRouter, HuggingFace, Fireworks, Cohere, Cerebras, xAI, Hyperbolic
+- **100+ free models** — No API key needed for most providers
+- **Offline-capable** — Ollama runs 100% locally
+- **OpenCode CLI integration** — Full agentic coding workflow
 
-Supports **any stack**: React, Vue, Svelte, Angular, FastAPI, Django, Flask, Express, Fastify, Gin, Rails, Laravel, Go, Ruby, PHP, Python, Node.js, and more.
+### 📁 P2P File Sharing
+Drag-and-drop file sharing between dweb instances:
+- Upload files via browser
+- Share directly to P2P peers
+- Download shared files from any instance
+- File discovery across the P2P network
 
-### 📁 File Browser
-Upload, manage, and share files through your browser — no FTP, no S3, just your machine.
-
-### 🔀 Git Integration
-Full Git workflow with GitHub OAuth:
-- Clone repositories from GitHub, GitLab, Bitbucket
-- Branch, commit, push from the dashboard
-- Import repos directly into your dweb OS workspace
-
-### ☁️ Cloud Deployment
-One-click deploy to external platforms when you need them:
-- **AWS S3** — Static site hosting
-- **Netlify** — Full-stack deployments
-- **Vercel** — Serverless functions and edge deployments
+### 🔧 Built-in Browser with dweb Protocol
+Full browser tab with `dweb://` protocol support:
+- Browse the web within dweb
+- Tutorials for building sites, APIs, and PHP apps
+- Bookmark manager
+- Multiple search engines
 
 ---
 
-## How dweb OS Works
-
-### Installation Flow
-
-```
-┌──────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
-│  Windows 11  │────▶│  Install     │────▶│  dweb OS     │────▶│  Browser     │
-│  / Linux /   │     │  WSL / MSIX  │     │  Starts      │     │  Portal      │
-│  Mac / Docker│     │  / Docker    │     │  (port 49737)│     │  Ready       │
-└──────────────┘     └──────────────┘     └──────────────┘     └──────────────┘
-```
+## How dweb Works
 
 ### Runtime Architecture
 
 ```
-┌───────────────────────────────────────────────────────────┐
-│                    Browser (port 49737)                    │
-│              Access from any device on network             │
-└─────────────────────────┬─────────────────────────────────┘
+┌────────────────────────────────────────────────────────────┐
+│                    Browser (port 49737)                     │
+│              Access from any device on network              │
+└─────────────────────────┬──────────────────────────────────┘
                           │
-┌─────────────────────────▼─────────────────────────────────┐
-│                   dweb OS Core                              │
+┌─────────────────────────▼──────────────────────────────────┐
+│                   dweb Core (Node.js)                       │
 │                                                             │
-│  ┌──────────────────────────┐  ┌─────────────────────────┐ │
-│  │   React Frontend         │  │   Node.js Server        │ │
-│  │   (Vite + TypeScript)    │  │   (dweb-server.cjs)     │ │
-│  │                          │  │                         │ │
-│  │  Dashboard  BrowserView  │  │  Static serving         │ │
-│  │  AI Agent   Domains      │  │  AI API proxy (15+)     │ │
-│  │  Repos      Integrations │  │  WebRTC signaling       │ │
-│  │  Settings   Docs         │  │  Rate limiting          │ │
-│  └──────────────────────────┘  └──────────┬──────────────┘ │
-│                                            │                │
-│  ┌─────────────────────────────────────────▼──────────────┐ │
-│  │              Tauri Desktop Shell (optional)             │ │
-│  │  Rust backend: P2P (HyperDHT), domains (sled),        │ │
-│  │  cloud deployment (AWS SigV4, Netlify, Vercel),       │ │
-│  │  git integration, sandboxed process execution          │ │
-│  └────────────────────────────────────────────────────────┘ │
+│  ┌────────────────────────────┐  ┌──────────────────────┐  │
+│  │   React Frontend (Vite)    │  │   API Modules        │  │
+│  │   TypeScript + React 19    │  │   server/*.cjs       │  │
+│  │                            │  │                      │  │
+│  │  Dashboard  BrowserView    │  │  api-services.cjs    │  │
+│  │  AI Agent   Domains        │  │  api-relay.cjs       │  │
+│  │  Repos      Integrations   │  │  api-collab.cjs      │  │
+│  │  Settings   Docs           │  │  api-fileshare.cjs   │  │
+│  │  P2P Transfer              │  │  api-opencode.cjs    │  │
+│  └────────────────────────────┘  │  api-ollama.cjs      │  │
+│                                   │  api-system.cjs      │  │
+│  ┌────────────────────────────┐  │  router.cjs           │  │
+│  │   Core Modules             │  │  state.cjs            │  │
+│  │   index.cjs (entry)       │  │  discovery.cjs        │  │
+│  │   config.cjs               │  │  relay-tcp.cjs        │  │
+│  │   helpers.cjs              │  │  helpers.cjs          │  │
+│  └────────────────────────────┘  └──────────────────────┘  │
 │                                                             │
 │  ┌────────────────────────────────────────────────────────┐ │
 │  │              P2P Relay Daemon (port 49736)              │ │
-│  │  dweb-relay.cjs — bootstrap, discovery, signaling      │ │
-│  │  WebSocket push + HTTP polling fallback + TCP relay    │ │
+│  │  tools/dweb-relay.cjs — discovery, signaling           │ │
+│  │  WebSocket push + HTTP polling + TCP relay             │ │
 │  └────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────┘
-
-          ┌─────────────────────────────────────┐
-          │         AI Providers (15+)           │
-          │  Ollama │ NVIDIA NIM │ Groq │ Gemini │
-          │  DeepSeek │ Together │ OpenRouter   │
-          │  Mistral │ Fireworks │ Cohere │ xAI  │
-          │  HuggingFace │ Cerebras │ Hyperbolic │
-          └─────────────────────────────────────┘
-
-          ┌─────────────────────────────────────┐
-          │         Other dweb OS Nodes          │
-          │  ← P2P →  ← P2P →  ← P2P →         │
-          │  Your services accessible to peers   │
-          └─────────────────────────────────────┘
+│                                                             │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │         Tauri Desktop Shell (optional)                  │ │
+│  │  Rust backend: P2P (HyperDHT), domains, git, AI       │ │
+│  └────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -216,27 +164,20 @@ git clone https://github.com/Awaiswilll/dweb.git
 cd dweb
 npm install
 npm run build
-node tools/dweb-server.cjs
+node server/index.cjs
 ```
 
-Open **http://localhost:49737** in your browser. Your dweb OS is running.
+Open **http://localhost:49737** in your browser. Your dweb portal is running.
 
-### Option 2: Windows WSL Distro (Recommended for Windows)
+### Option 2: Development Mode (with HMR)
 
-**Prerequisites:** Windows 10/11 with WSL2 enabled
-
-```powershell
-# Import the dweb OS distro
-wsl --import dweb C:\dweb dweb-distro.tar.gz --version 2
-
-# Start dweb OS
-wsl -d dweb
-
-# Or run the import script
-.\packaging\wsl\import-dweb-wsl.ps1
+```bash
+git clone https://github.com/Awaiswilll/dweb.git
+cd dweb
+npm install
+npm run dev          # Vite dev server on port 5173
+node server/index.cjs  # API server on port 49737
 ```
-
-Access at **http://localhost:49737** from any Windows browser.
 
 ### Option 3: Windows Native App (Tauri Desktop)
 
@@ -251,33 +192,7 @@ npx tauri build
 
 Installer output: `src-tauri\target\release\bundle\nsis\dweb_x64-setup.exe`
 
-### Option 4: Microsoft Store (Coming Soon)
-
-**Status:** App name "dweb" reserved in Microsoft Partner Center.
-
-Once published:
-```powershell
-# Install from Microsoft Store
-ms-windows-store://pdp/?ProductId=<product-id>
-```
-
-### Option 5: Linux (Native)
-
-```bash
-# Install system dependencies (Ubuntu/Debian)
-sudo apt-get update
-sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
-  librsvg2-dev patchelf libssl-dev
-
-# Build and run
-git clone https://github.com/Awaiswilll/dweb.git
-cd dweb
-npm install
-npm run build
-node tools/dweb-server.cjs
-```
-
-### Option 6: Docker
+### Option 4: Docker
 
 ```bash
 docker run -d \
@@ -288,21 +203,9 @@ docker run -d \
   dweb/dweb:latest
 ```
 
-### Option 7: Build WSL Distro from Source
-
-```bash
-# Build the Alpine Linux-based dweb OS distro
-bash packaging/wsl/build-wsl-distro.sh
-
-# Output: packaging/wsl/dweb-distro.tar.gz
-# Import: wsl --import dweb <install-location> dweb-distro.tar.gz
-```
-
 ---
 
 ## AI Models — 15+ Providers, 100+ Free Models
-
-dweb OS ships with **15+ AI providers** and **100+ free models**. No single point of failure — switch providers instantly.
 
 ### Free / No API Key Required
 
@@ -314,7 +217,7 @@ dweb OS ships with **15+ AI providers** and **100+ free models**. No single poin
 | **Together AI** | 6+ models | Free tier for popular open models |
 | **OpenRouter** | 7+ models | Free tier aggregates multiple providers |
 | **Hugging Face** | 5+ models | Free inference API |
-| **NVIDIA NIM** | 13+ models | Free tier includes **Nemotron** models |
+| **NVIDIA NIM** | 13+ models | Free tier includes Nemotron models |
 | **Cerebras** | 4+ models | Free tier, ultra-fast CS-2 chips |
 | **DeepSeek** | 3+ models | Free/cheap API, excellent code models |
 | **Hyperbolic** | 5+ models | Free tier for open models |
@@ -330,86 +233,95 @@ dweb OS ships with **15+ AI providers** and **100+ free models**. No single poin
 | **Cohere** | $5 credit | Command R+, Command R |
 | **xAI (Grok)** | Free tier | Grok 2, Grok 2 Vision |
 
-### NVIDIA Nemotron Models (Free via NIM)
-
-Nemotron is NVIDIA's family of open-weight models, available **free** through the NVIDIA NIM API:
-
-| Model | Size | Best For |
-|-------|------|----------|
-| **Nemotron Mini 4B** | 4B | Fast responses, low latency |
-| **Nemotron 8B** | 8B | Balanced general tasks |
-| **Nemotron 70B** | 70B | Complex reasoning, code generation |
-| **Nemotron 4 340B** | 340B | Maximum capability, research |
-
-To use Nemotron:
-1. Get a free API key at [build.nvidia.com](https://build.nvidia.com)
-2. Add NVIDIA NIM as a provider in dweb OS Settings → AI Models
-3. Select any Nemotron model and start building
-
 ---
 
 ## Tech Stack
 
 | Layer | Technology |
 |-------|-----------|
-| **Base OS** | Alpine Linux (minimal, secure, <100MB) |
 | **Frontend** | React 19, TypeScript 5.5, Vite 6, React Router 7, Lucide React |
-| **Backend** | Node.js (zero-dependency HTTP server), Express-like routing |
+| **Backend** | Node.js modular server (server/*.cjs) |
 | **Desktop** | Tauri v2 (Rust) — optional desktop shell |
-| **P2P** | HyperDHT, WebRTC, WebSocket relay, HTTP fallback |
-| **AI** | 15+ providers: Ollama, NVIDIA NIM (Nemotron), Groq, Gemini, DeepSeek, Mistral, OpenAI, Anthropic, Together, OpenRouter, HuggingFace, Fireworks, Cohere, Cerebras, xAI, Hyperbolic |
-| **Database** | sled (embedded Rust), localStorage fallback |
+| **P2P** | HyperDHT, WebRTC, WebSocket relay, HTTP polling, TCP relay |
+| **AI** | 15+ providers: Ollama, NVIDIA NIM, Groq, Gemini, DeepSeek, Mistral, OpenAI, Anthropic, Together, OpenRouter, HuggingFace, Fireworks, Cohere, Cerebras, xAI, Hyperbolic |
+| **Database** | sled (embedded Rust), localStorage |
 | **Packaging** | WSL distro, MSIX (Store), NSIS (Windows), DMG (macOS), AppImage/DEB (Linux), Docker |
 
 ---
 
-## .dweb Domain Tiers
+## API Endpoints
 
-| Tier | Price | Features |
-|------|-------|----------|
-| **Free** | $0 | 1 .dweb domain, basic P2P hosting |
-| **Premium** | $3/mo | 5 domains, relay cache (always online) |
-| **Business** | $10/mo | Unlimited domains, cloud shift, priority support |
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/services` | GET | List running services |
+| `/api/service/start` | POST | Start a new service |
+| `/api/service/stop` | POST | Stop a running service |
+| `/api/domain/services` | GET | List P2P-discovered remote services |
+| `/collab/services` | GET | List P2P collaboration services |
+| `/dweb-status` | GET | System status (uptime, peers, mode) |
+| `/api/ollama/status` | GET | Ollama installation status |
+| `/api/opencode/run` | POST | Run opencode CLI command |
+| `/fileshare/api/list` | GET | List shared files |
+| `/fileshare/api/upload` | POST | Upload a file |
+| `/welcome` | GET | Welcome page |
+| `/welcome/source` | GET | Welcome page source |
 
 ---
 
-## Best Use Cases
+## Project Structure
 
-### 1. Personal Cloud Development Environment
-Replace Docker Compose, ngrok, and Heroku with a single install. Start/stop services, view logs, and manage ports — all from your browser.
-
-### 2. AI-Powered Code Generation (Offline)
-Use the built-in AI Build Agent to scaffold full-stack apps from natural language. With Ollama running locally, it works **completely offline** — no internet, no API keys, no data leaving your machine.
-
-### 3. P2P Service Sharing
-Host a service on your dweb OS node and share it directly with other dweb users. No central server, no CDN, no cloud bill. Each node is both client and server.
-
-### 4. Self-Hosted Websites & Portfolios
-Deploy static sites, blogs, and portfolios on your own machine with a `.dweb` domain. Accessible via P2P network or local LAN.
-
-### 5. Developer Demo & Portfolio Environment
-Showcase projects to clients or collaborators by giving them access to your dweb OS portal. Each project gets its own service, domain, and AI-assisted build pipeline.
-
-### 6. Offline-First Development
-With Ollama running locally, the AI Build Agent works without internet. Perfect for air-gapped environments, travel, or privacy-conscious workflows.
-
-### 7. Windows Developer Workstation
-Install dweb OS via WSL distro or native Windows app. Get a full Linux dev environment on Windows 11 without dual-booting or VMs.
-
-### 8. Decentralized Team Infrastructure
-Each team member runs a dweb OS node. Services, files, and code are shared peer-to-peer. No central server to maintain or pay for.
+```
+dweb/
+├── src/                    # React frontend
+│   ├── components/         # Reusable UI components
+│   ├── views/              # Page views
+│   │   ├── Dashboard.tsx   # Service management dashboard
+│   │   ├── AIAgent.tsx     # AI agent with multi-provider support
+│   │   ├── BrowserView.tsx # Built-in browser with dweb:// protocol
+│   │   ├── Domains.tsx     # .dweb domain management
+│   │   ├── Docs.tsx        # In-app documentation
+│   │   ├── Settings.tsx    # App settings
+│   │   ├── Integrations.tsx
+│   │   ├── Repositories.tsx
+│   │   └── P2PTransfer.tsx # P2P file transfer
+│   ├── styles/             # CSS styles
+│   ├── types.ts            # TypeScript definitions
+│   └── relay-client.ts     # P2P relay client
+├── server/                 # Node.js backend (modular)
+│   ├── index.cjs           # Entry point
+│   ├── router.cjs          # Route registration
+│   ├── api-services.cjs    # Service management API
+│   ├── api-relay.cjs       # P2P relay endpoints
+│   ├── api-collab.cjs      # Collaboration API
+│   ├── api-fileshare.cjs   # File sharing API
+│   ├── api-opencode.cjs    # OpenCode CLI integration
+│   ├── api-ollama.cjs      # Ollama status API
+│   ├── api-system.cjs      # System status API
+│   ├── state.cjs           # Shared state (hosted services, peers)
+│   ├── config.cjs          # Configuration
+│   ├── discovery.cjs       # P2P peer discovery
+│   ├── relay-tcp.cjs       # TCP relay
+│   └── helpers.cjs         # Utility functions
+├── src-tauri/              # Rust/Tauri desktop backend
+├── tools/                  # Utility scripts
+│   ├── dweb-server.cjs     # Legacy monolith (for reference)
+│   └── dweb-relay.cjs      # P2P relay daemon
+├── packaging/              # Distribution packages
+├── welcome/                # Welcome page HTML
+└── screenshots/            # App screenshots
+```
 
 ---
 
 ## Development
 
 ```bash
-# Frontend only (HMR)
+# Frontend development (HMR)
 npm run dev
 
 # Type check
-npm run lint
 npm run typecheck
+npm run lint
 
 # Production build
 npm run build
@@ -419,78 +331,75 @@ npm test
 
 # Run tests with coverage
 npm run test:coverage
-
-# Tauri desktop app
-npx tauri dev
-npx tauri build
 ```
 
-### Project Structure
+### Testing
 
+dweb uses [Vitest](https://vitest.dev/) for unit and integration tests:
+
+```bash
+# Run all tests
+npm test
+
+# Watch mode for TDD
+npm run test:watch
+
+# With coverage
+npm run test:coverage
 ```
-dweb/
-├── src/                    # React frontend
-│   ├── components/         # Reusable UI components
-│   ├── views/              # Page views (Dashboard, AI Agent, etc.)
-│   ├── styles/             # CSS styles
-│   ├── types.ts            # TypeScript type definitions
-│   ├── safe-invoke.ts      # Tauri IPC wrapper
-│   └── relay-client.ts     # P2P relay client
-├── src-tauri/              # Rust/Tauri desktop backend
-│   ├── src/
-│   │   ├── lib.rs          # Main Tauri commands
-│   │   ├── ai.rs           # AI provider integration
-│   │   ├── p2p.rs          # P2P networking (HyperDHT)
-│   │   ├── domain.rs       # .dweb domain management
-│   │   ├── git.rs          # Git operations
-│   │   ├── github.rs       # GitHub OAuth & API
-│   │   ├── cloud.rs        # Cloud deployment (AWS, Netlify, Vercel)
-│   │   ├── sandbox.rs      # Sandboxed process execution
-│   │   ├── stack.rs        # Stack scaffolding
-│   │   ├── database.rs     # Sled embedded DB
-│   │   └── config.rs       # Configuration management
-│   └── tauri.conf.json     # Tauri configuration
-├── tools/                  # Server-side scripts
-│   ├── dweb-server.cjs     # Main HTTP server (port 49737)
-│   ├── dweb-relay.cjs      # P2P relay daemon (port 49736)
-│   └── connectivity-test.cjs
-├── packaging/              # Distribution packages
-│   ├── wsl/                # WSL distro builder (Alpine Linux)
-│   │   ├── build-wsl-distro.sh
-│   │   ├── import-dweb-wsl.ps1
-│   │   └── Dockerfile
-│   └── win32/              # Windows packaging
-│       ├── build-msix.ps1
-│       ├── dweb-desktop/
-│       └── dweb-wsl-distro/
-└── .github/workflows/      # CI/CD
-    └── build.yml           # Multi-platform build pipeline
-```
+
+See [WINDOWS-TESTING.md](WINDOWS-TESTING.md) for Windows-specific testing instructions.
 
 ---
 
-## Marketplace & Distribution
+## Best Use Cases
 
-| Platform | Status | Link |
-|----------|--------|------|
-| **Microsoft Store** | Name Reserved | [dweb](https://apps.microsoft.com) |
-| **GitHub Releases** | Active | [Releases](https://github.com/Awaiswilll/dweb/releases) |
-| **Website** | Planned | [https://dweb.dev](https://dweb.dev) |
-| **Docker Hub** | Planned | [dweb/dweb](https://hub.docker.com/r/dweb/dweb) |
+### 1. Personal Cloud Development Environment
+Replace Docker Compose, ngrok, and Heroku with a single install. Start/stop services, view logs, and manage ports — all from your browser.
+
+### 2. AI-Powered Code Generation
+Use the built-in AI Build Agent to scaffold full-stack apps from natural language. With Ollama running locally, it works **completely offline**.
+
+### 3. P2P Service Sharing
+Host a service on your dweb node and share it directly with other dweb users across the P2P network. No central server, no CDN, no cloud bill.
+
+### 4. Multi-Instance Collaboration
+Run multiple dweb instances on different machines. Each instance discovers the others via P2P relay, and services are accessible across instances.
+
+### 5. P2P File Sharing
+Drag-and-drop file sharing between dweb instances. Files are transferred directly P2P, stored locally on the receiving instance.
+
+### 6. Self-Hosted Websites & Portfolios
+Deploy static sites, blogs, and portfolios on your own machine with a `.dweb` domain.
+
+### 7. Offline-First Development
+With Ollama running locally, the AI Build Agent works without internet. Perfect for air-gapped environments or privacy-conscious workflows.
+
+---
+
+## Business Model
+
+| Tier | Price | Features |
+|------|-------|----------|
+| **Free** | $0 | 1 .dweb domain, basic P2P hosting, community support |
+| **Premium** | $3/mo | 5 domains, relay cache (always online), priority support |
+| **Business** | $10/mo | Unlimited domains, cloud shift, SLA |
+
+See [BUSINESS-PLAN.md](BUSINESS-PLAN.md) for the complete business model.
 
 ---
 
 ## Contributing
 
-dweb OS is open source (MIT License) and built by the community. We're looking for contributors in:
+dweb is open source (MIT License). We welcome contributions in:
 
-- 🐧 **WSL Distro** — Alpine Linux packaging, optimization, and testing
-- 🪟 **Windows Packaging** — MSIX, NSIS, Microsoft Store submission
-- 🤖 **AI Providers** — Adding new AI provider integrations and model catalogs
-- 🌐 **P2P Networking** — HyperDHT improvements, NAT traversal, relay optimization
-- 🎨 **UI/UX** — Dashboard polish, accessibility (WCAG 2.2), themes
-- 📝 **Documentation** — Guides, tutorials, API docs, architecture docs
-- 🧪 **Testing** — Unit, integration, and E2E tests (Vitest + Playwright)
+- 🐧 **WSL Distro** — Alpine Linux packaging
+- 🪟 **Windows Packaging** — MSIX, NSIS, Microsoft Store
+- 🤖 **AI Providers** — New provider integrations and model catalogs
+- 🌐 **P2P Networking** — HyperDHT improvements, NAT traversal
+- 🎨 **UI/UX** — Dashboard polish, accessibility, themes
+- 📝 **Documentation** — Guides, tutorials, API docs
+- 🧪 **Testing** — Unit, integration, and E2E tests
 
 ### Getting Started
 
@@ -502,7 +411,7 @@ cd dweb
 # 2. Install dependencies
 npm install
 
-# 3. Start development server
+# 3. Start development
 npm run dev
 
 # 4. Run tests
@@ -520,38 +429,11 @@ git push origin feature/your-feature
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
 
-### Good First Issues
-
-Look for issues labeled `good-first-issue` on our [GitHub Issues](https://github.com/Awaiswilll/dweb/issues) page. We currently have **5 good-first-issue** tasks ready for community contributions:
-
-- [Theme toggle](https://github.com/Awaiswilll/dweb/issues/1) — Add dark/light mode to Settings
-- [Mobile responsive design](https://github.com/Awaiswilll/dweb/issues/2) — Make dashboard work on phones
-- [Service health monitoring](https://github.com/Awaiswilll/dweb/issues/3) — Health indicators on Dashboard
-- [P2P status indicator](https://github.com/Awaiswilll/dweb/issues/4) — Peer connection status in navbar
-- [Keyboard shortcuts](https://github.com/Awaiswilll/dweb/issues/5) — Productivity hotkeys
-
-### Testing
-
-See [WINDOWS-TESTING.md](WINDOWS-TESTING.md) for instructions on testing the WSL distro, Windows portable, and desktop app on Windows.
-
----
-
-## Business Plan
-
-See [BUSINESS-PLAN.md](BUSINESS-PLAN.md) for the complete business model, monetization strategy, and roadmap.
-
-**Revenue Model:**
-- **Free tier** — 1 domain, basic P2P, community support
-- **Premium** ($3/mo) — 5 domains, relay cache, priority support
-- **Business** ($10/mo) — Unlimited domains, cloud shift, SLA
-
 ---
 
 ## Changelog
 
 See [CHANGELOG.md](CHANGELOG.md) for version history and recent changes.
-
----
 
 ## License
 
@@ -564,5 +446,5 @@ MIT — see [LICENSE](LICENSE) for details.
 </p>
 
 <p align="center">
-  <strong>dweb OS — One install. Every stack. Your own internet.</strong>
+  <strong>dweb — One install. Every stack. Your own internet.</strong>
 </p>
