@@ -1228,6 +1228,45 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
               </button>
             ))}
           </div>
+          {/* Tor toggle — compact pill next to mode buttons */}
+          {torStatus !== null && (
+            <button
+              onClick={handleTorToggle}
+              disabled={!torStatus.installed || togglingTor}
+              style={{
+                padding: "5px 12px",
+                border: "none",
+                borderRadius: "var(--radius-sm)",
+                background: torStatus.running ? "#7c3aed" : "transparent",
+                color: torStatus.running ? "#fff" : "var(--text-muted)",
+                cursor: torStatus.installed ? "pointer" : "not-allowed",
+                fontSize: 11,
+                fontWeight: torStatus.running ? 600 : 400,
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
+                opacity: torStatus.installed ? 1 : 0.5,
+                transition: "background 0.15s",
+              }}
+              title={
+                !torStatus.installed
+                  ? "Tor is not installed — install tor to enable anonymous routing"
+                  : torStatus.running
+                    ? "Tor routing active — click to disable"
+                    : "Tor installed — click to enable anonymous P2P routing"
+              }
+            >
+              <Shield size={12} />
+              {togglingTor ? "..." : torStatus.running ? "Tor" : "Tor"}
+              {torStatus.installed && (
+                <span style={{
+                  width: 6, height: 6, borderRadius: "50%",
+                  background: torStatus.running ? "#a78bfa" : "#6b7280",
+                  marginLeft: 2,
+                }} />
+              )}
+            </button>
+          )}
           <button className="btn btn-secondary btn-sm" onClick={() => setShowConnectModal(true)}>
             <Link2 size={12} /> Connect
           </button>
@@ -1280,43 +1319,6 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
           </>
         )}
       </div>
-
-      {/* Tor Network toggle */}
-      {torStatus !== null && (
-        <div className="glass-sm" style={{
-          display: "flex", alignItems: "center", gap: 12,
-          padding: "8px 14px", borderRadius: "var(--radius-sm)",
-          marginBottom: 10, fontSize: 12,
-          border: torStatus?.running ? "1px solid rgba(126,34,206,0.3)" : "1px solid transparent",
-        }}>
-          <span style={{
-            width: 8, height: 8, borderRadius: "50%",
-            background: torStatus.running ? "#7c3aed" : torStatus.installed ? "#6b7280" : "#374151",
-            boxShadow: torStatus.running ? "0 0 6px rgba(126,34,206,0.5)" : "none",
-          }} />
-          <span style={{ fontWeight: 600 }}>Tor</span>
-          <span style={{ color: "var(--text-muted)" }}>
-            {torStatus.running ? "Routing enabled" : torStatus.installed ? "Installed, inactive" : "Not available"}
-          </span>
-          {torStatus.kalitorifyAvailable && (
-            <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 8, background: "rgba(126,34,206,0.15)", color: "#7c3aed" }}>
-              kalitorify
-            </span>
-          )}
-          <div style={{ marginLeft: "auto" }}>
-            <button className="btn btn-sm" onClick={handleTorToggle} disabled={!torStatus.installed || togglingTor}
-              style={{
-                fontSize: 11, padding: "4px 12px",
-                background: torStatus.running ? "rgba(239,68,68,0.1)" : "rgba(126,34,206,0.1)",
-                border: `1px solid ${torStatus.running ? "rgba(239,68,68,0.3)" : "rgba(126,34,206,0.3)"}`,
-                color: torStatus.running ? "#ef4444" : "#7c3aed",
-                cursor: torStatus.installed ? "pointer" : "not-allowed", opacity: torStatus.installed ? 1 : 0.5,
-              }}>
-              {togglingTor ? "..." : torStatus.running ? "Disconnect" : "Connect via Tor"}
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* ── Advanced Network Details (collapsible) ─────────────── */}
       <div className="glass-sm" style={{
