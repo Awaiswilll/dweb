@@ -326,6 +326,31 @@ function registerRoutes(router) {
     console.log(`  [service] Stopped "${name}" on port ${svc.port}`);
     json(res, 200, { status: "ok", message: `Service "${name}" stopped` });
   });
+
+  // POST /api/service/customize — save customized HTML source for a service
+  router.post("/api/service/customize", async (req, res) => {
+    const body = await parseBody(req);
+    const { name, content } = body;
+
+    if (!name) return json(res, 400, { status: "error", error: "Missing service name" });
+    if (typeof content !== "string") return json(res, 400, { status: "error", error: "Missing content body" });
+
+    const svc = runningServices.get(name);
+    if (!svc) return json(res, 404, { status: "error", error: `Service "${name}" not found or not running` });
+
+    const serveDir = svc.dir;
+    if (!serveDir || !fs.existsSync(serveDir)) {
+      return json(res, 400, { status: "error", error: `Service "${name}" has no writable directory` });
+    }
+
+    try {
+      fs.writeFileSync(path.join(serveDir, "index.html"), content, "utf8");
+      console.log(`  [service] Customized page for "${name}" in ${serveDir}`);
+      json(res, 200, { status: "ok", message: `Page for "${name}" updated` });
+    } catch (e) {
+      json(res, 500, { status: "error", error: `Failed to write: ${e.message}` });
+    }
+  });
 }
 
 module.exports = { registerRoutes, runningServices, restoreServices };

@@ -376,12 +376,23 @@ const DEFAULT_SERVICES: Service[] = [
 
 /* ─── Service Access URLs ─────────────────────────────────── */
 function getServiceUrl(svc: Service): string {
-  return svc.url || `${window.location.origin}/welcome`;
+  if (svc.url) return svc.url;
+  // For running services with a specific port, point directly to the service's own server
+  if (svc.running && svc.port) {
+    return `${window.location.origin}/service-proxy/${svc.port}`;
+  }
+  // Default fallback for built-in pages
+  if (svc.name === "My Static Website") return `${window.location.origin}/welcome`;
+  if (svc.name === "File Share") return `${window.location.origin}/fileshare`;
+  return `${window.location.origin}/welcome`;
 }
 
 function getServiceSourceUrl(svc: Service): string | null {
-  if (svc.name === "My Static Website") return `${window.location.origin}/welcome/source`;
-  if (svc.name === "File Share") return `${window.location.origin}/fileshare/api/source`;
+  // For running services, fetch the actual rendered page from the service's own server
+  // so the user edits the real content
+  if (svc.running && svc.port) {
+    return getServiceUrl(svc);
+  }
   return null;
 }
 
@@ -415,6 +426,13 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
   const [showNetworkExpanded, setShowNetworkExpanded] = useState(false);
   const [editingUrlFor, setEditingUrlFor] = useState<string | null>(null);
   const [urlEditValue, setUrlEditValue] = useState("");
+  const [previewService, setPreviewService] = useState<Service | null>(null);
+  const [previewTab, setPreviewTab] = useState<"preview" | "source" | "customize">("preview");
+  const [customizeSource, setCustomizeSource] = useState("");
+  const [customizeLoading, setCustomizeLoading] = useState(false);
+  const [customizeSaving, setCustomizeSaving] = useState(false);
+  const [domainRegistering, setDomainRegistering] = useState(false);
+  const [serviceVersion, setServiceVersion] = useState(0);
 
   const loadServices = async () => {
     setLoadingServices(true);
@@ -1803,8 +1821,15 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
             <div
               key={svc.name}
               className={`service-pill ${svc.running ? "running" : "stopped"} pill-clickable`}
-              onClick={() => setEditService(svc as Service & { dir?: string })}
-              title="Click to edit service configuration"
+              onClick={() => {
+                if (svc.running) {
+                  setPreviewService(svc);
+                  setPreviewTab("preview");
+                } else {
+                  setEditService(svc as Service & { dir?: string });
+                }
+              }}
+              title={svc.running ? "Click to preview this service" : "Click to edit service configuration"}
             >
               <span className={`pill-dot ${svc.running ? "live" : "dead"}`} />
               <span className="pill-name">{svc.name}</span>
@@ -1894,6 +1919,218 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
     </div>
   );
 
+  /* ─── Service Preview Modal ────────────────────────────── */
+  const servicePreviewModal = previewService ? (
+    <div
+      style={{
+        position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 1000,
+        display: "flex", alignItems: "center", justifyContent: "center", padding: 16,
+      }}
+      onClick={(e) => { if (e.target === e.currentTarget) setPreviewService(null); }}
+    >
+      <div className="glass" style={{
+        width: 760, maxWidth: "100%", maxHeight: "90vh",
+        padding: 0, borderRadius: "var(--radius-lg)", overflow: "hidden",
+        display: "flex", flexDirection: "column",
+      }}>
+        {/* ── Header ── */}
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "12px 16px", borderBottom: "1px solid rgba(255,255,255,0.06)",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <Activity size={15} />
+            <span style={{ fontWeight: 600, fontSize: 14 }}>{previewService.name}</span>
+            <span className="pill-port">:{previewService.port}</span>
+            {isDefaultService(previewService.name) && (
+              <span className="pill-badge">built-in</span>
+            )}
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button className="btn btn-secondary btn-sm" style={{ height: 26, fontSize: 11, padding: "0 10px" }}
+              onClick={() => { window.open(getServiceUrl(previewService), '_blank'); }}>
+              <ExternalLink size={11} /> Open
+            </button>
+            <button className="btn btn-primary btn-sm" style={{ height: 26, fontSize: 11, padding: "0 10px" }}
+              onClick={() => setPreviewService(null)}>
+              ✕ Close
+            </button>
+          </div>
+        </div>
+
+        {/* ── Tab bar ── */}
+        <div style={{ display: "flex", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+          {(["preview", "source", "customize"] as const).map(tab => (
+            <button key={tab}
+              onClick={() => {
+                setPreviewTab(tab);
+                if (tab === "source" || tab === "customize") {
+                  setCustomizeLoading(true);
+                  const srcUrl = getServiceSourceUrl(previewService);
+                  if (srcUrl) {
+                    fetch(srcUrl).then(r => r.text()).then(html => {
+                      setCustomizeSource(html);
+                      setCustomizeLoading(false);
+                    }).catch(() => {
+                      setCustomizeSource("<!-- Failed to load source -->");
+                      setCustomizeLoading(false);
+                    });
+                  } else {
+                    setCustomizeSource("<!-- No source URL available for this service -->");
+                    setCustomizeLoading(false);
+                  }
+                }
+              }}
+              style={{
+                flex: 1, padding: "10px 16px", border: "none", cursor: "pointer",
+                background: previewTab === tab ? "rgba(59,130,246,0.1)" : "transparent",
+                color: previewTab === tab ? "var(--accent-blue)" : "var(--text-muted)",
+                fontWeight: previewTab === tab ? 600 : 400, fontSize: 12,
+                borderBottom: previewTab === tab ? "2px solid var(--accent-blue)" : "2px solid transparent",
+                transition: "all 0.15s",
+              }}
+            >
+              {tab === "preview" ? "👁 Preview" : tab === "source" ? "📄 Source" : "✏️ Customize"}
+            </button>
+          ))}
+        </div>
+
+        {/* ── Tab content ── */}
+        <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+          {previewTab === "preview" && (
+            <iframe
+              key={`preview-${previewService.name}-${serviceVersion}`}
+              src={getServiceUrl(previewService)}
+              style={{ width: "100%", height: 500, border: "none", display: "block", background: "#fff" }}
+              title={`${previewService.name} preview`}
+              sandbox="allow-scripts allow-same-origin"
+            />
+          )}
+          {previewTab === "source" && (
+            <div style={{ padding: 16 }}>
+              {customizeLoading ? (
+                <div className="loading-pulse" style={{ padding: "20px 0" }}><span /></div>
+              ) : (
+                <pre style={{
+                  fontSize: 11, lineHeight: 1.5, overflow: "auto", maxHeight: 440,
+                  background: "rgba(0,0,0,0.3)", padding: 12, borderRadius: "var(--radius-sm)",
+                  color: "var(--text-primary)", whiteSpace: "pre-wrap", wordBreak: "break-all",
+                }}>{customizeSource}</pre>
+              )}
+            </div>
+          )}
+          {previewTab === "customize" && (
+            <div style={{ padding: 16 }}>
+              <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 10 }}>
+                Edit the HTML source below and save to update this service's page.
+              </p>
+              {customizeLoading ? (
+                <div className="loading-pulse" style={{ padding: "20px 0" }}><span /></div>
+              ) : (
+                <>
+                  <textarea
+                    value={customizeSource}
+                    onChange={(e) => setCustomizeSource(e.target.value)}
+                    style={{
+                      width: "100%", height: 360, fontSize: 11, fontFamily: "'Courier New', monospace",
+                      background: "rgba(0,0,0,0.3)", color: "var(--text-primary)",
+                      border: "1px solid rgba(255,255,255,0.1)", borderRadius: "var(--radius-sm)",
+                      padding: 12, resize: "vertical", outline: "none",
+                    }}
+                    spellCheck={false}
+                  />
+                  <div style={{ display: "flex", gap: 8, marginTop: 10, justifyContent: "flex-end" }}>
+                    <button className="btn btn-secondary btn-sm"
+                      onClick={() => setPreviewService(null)}
+                      style={{ height: 28, fontSize: 11, padding: "0 14px" }}>
+                      Cancel
+                    </button>
+                    <button className="btn btn-primary btn-sm"
+                      disabled={customizeSaving}
+                      onClick={async () => {
+                        setCustomizeSaving(true);
+                        try {
+                          const resp = await fetch("/api/service/customize", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ name: previewService.name, content: customizeSource }),
+                          });
+                          const data = await resp.json();
+                          if (data.status === "ok") {
+                            setConnectionMsg({ type: "success", text: `"${previewService.name}" page updated!` });
+                            setServiceVersion(v => v + 1);
+                            setPreviewTab("preview");
+                          } else {
+                            setConnectionMsg({ type: "error", text: data.error || "Save failed" });
+                          }
+                        } catch (err: any) {
+                          setConnectionMsg({ type: "error", text: `Save failed: ${err.message}` });
+                        }
+                        setCustomizeSaving(false);
+                      }}
+                      style={{ height: 28, fontSize: 11, padding: "0 14px" }}>
+                      {customizeSaving ? "Saving..." : "💾 Save Changes"}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* ── Footer actions ── */}
+        <div style={{
+          display: "flex", gap: 8, padding: "10px 16px",
+          borderTop: "1px solid rgba(255,255,255,0.06)",
+          justifyContent: "space-between", alignItems: "center",
+        }}>
+          <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+            Service URL: <code style={{ fontSize: 10 }}>{getServiceUrl(previewService)}</code>
+          </span>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button className="btn btn-secondary btn-sm"
+              disabled={domainRegistering}
+              onClick={async () => {
+                setDomainRegistering(true);
+                try {
+                  const domainName = previewService.name.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || "my-service";
+                  // Register domain
+                  const regResp = await fetch("/api/domain/register", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ name: domainName, tier: "free" }),
+                  });
+                  const regData = await regResp.json();
+                  if (regResp.ok || regResp.status === 409) {
+                    // Already exists or created — bind it
+                    const bindResp = await fetch("/api/domain/bind", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ name: domainName, service_name: previewService.name }),
+                    });
+                    const bindData = await bindResp.json();
+                    if (bindResp.ok) {
+                      setConnectionMsg({ type: "success", text: `✨ Hosted at https://${domainName}.dweb !` });
+                    } else {
+                      setConnectionMsg({ type: "error", text: bindData.error || "Bind failed" });
+                    }
+                  } else {
+                    setConnectionMsg({ type: "error", text: regData.error || "Registration failed" });
+                  }
+                } catch (err: any) {
+                  setConnectionMsg({ type: "error", text: `Domain error: ${err.message}` });
+                }
+                setDomainRegistering(false);
+              }}
+              style={{ height: 28, fontSize: 11, padding: "0 12px" }}>
+              <Globe size={11} /> {domainRegistering ? "Claiming..." : "Host on .dweb"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
   /* ─── Render ────────────────────────────────────────────── */
   return (
     <div className="view-container dashboard">
@@ -1978,6 +2215,8 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
       {showConnectModal && (
         <ConnectModal onClose={() => setShowConnectModal(false)} />
       )}
+
+      {servicePreviewModal}
     </div>
   );
 }

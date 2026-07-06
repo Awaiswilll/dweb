@@ -28,6 +28,10 @@ export default defineConfig(async () => ({
       "/api": { target: "http://localhost:49737", changeOrigin: true },
       "/relay": { target: "http://localhost:49737", changeOrigin: true },
       "/signal": { target: "http://localhost:49737", changeOrigin: true },
+      "/welcome": { target: "http://localhost:49737", changeOrigin: true },
+      "/fileshare": { target: "http://localhost:49737", changeOrigin: true },
+      "/service-proxy/30999": { target: "http://localhost:30999", changeOrigin: true, rewrite: (p) => p.replace(/^\/service-proxy\/\d+/, "") },
+      "/service-proxy/30998": { target: "http://localhost:30998", changeOrigin: true, rewrite: (p) => p.replace(/^\/service-proxy\/\d+/, "") },
     },
   },
 }));
