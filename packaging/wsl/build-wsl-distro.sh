@@ -5,7 +5,7 @@
 #  Creates a minimal Alpine Linux rootfs with:
 #    - Node.js + npm
 #    - dweb-server (pre-built frontend + tools)
-#    - opencode CLI (global npm install)
+#    - pm2 process manager (global npm install)
 #    - Ollama (local AI, downloaded but not running during build)
 #    - WSL init scripts for auto-start
 #
@@ -232,37 +232,46 @@ chmod +x "$ROOTFS/opt/dweb/dweb.cjs"
 chroot "$ROOTFS" /bin/sh -c 'chown -R dweb:dweb /opt/dweb'
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  STEP 5: Install opencode CLI globally
+#  STEP 5: Install global npm tools (optional)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-info "Installing opencode CLI..."
+info "Installing global npm tools (optional)..."
 
+# Install common global tools that dweb users may want
 chroot "$ROOTFS" /bin/sh -c '
-  npm install -g @opencode/cli 2>&1 || \
-  npm install -g opencode 2>&1 || \
-  warn "opencode CLI could not be installed — check the package name"
-' || warn "opencode CLI install failed (non-fatal)"
+  npm install -g pm2 2>&1 || true
+' || true
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  STEP 6: Install Ollama
+#  STEP 6: Install Ollama (optional — requires network in chroot)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-info "Installing Ollama..."
+info "Attempting Ollama install (may fail without network in chroot)..."
 
+# Ollama install is best done post-WSL-install by the user for reliability.
+# We attempt it here but don't block the build if it fails.
 chroot "$ROOTFS" /bin/sh -c '
-  # Download and run the official Ollama install script
-  curl -fsSL https://ollama.com/install.sh | sh 2>&1 || \
-  warn "Ollama install failed — check network"
-' || warn "Ollama install skipped (non-fatal)"
+  if curl -sf --max-time 10 https://ollama.com &>/dev/null; then
+    curl -fsSL https://ollama.com/install.sh | sh 2>&1 || \
+    echo "[dweb] Ollama install script failed — install manually later: curl -fsSL https://ollama.com/install.sh | sh"
+  else
+    echo "[dweb] No network in chroot — skipping Ollama install"
+    echo "[dweb] Install manually: curl -fsSL https://ollama.com/install.sh | sh"
+  fi
+' || true
 
-# Create Ollama data directory
+# Create Ollama data directory for future use
 mkdir -p "$ROOTFS/opt/ollama"
+chmod 777 "$ROOTFS/opt/ollama" 2>/dev/null || true
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  STEP 7: Create WSL init scripts
 # ═══════════════════════════════════════════════════════════════════════════════
 
 info "Creating WSL init scripts..."
+
+# Ensure /etc/init.d directory exists
+mkdir -p "$ROOTFS/etc/init.d"
 
 # ── /etc/init.d/dweb — OpenRC service script ────────────────────────────
 cat > "$ROOTFS/etc/init.d/dweb" <<'INIT'
@@ -491,10 +500,38 @@ if [ -f "$TARBALL_OUT" ]; then
   info "✅ WSL distro tarball created: $TARBALL_OUT"
   info "   Size: $FINAL_SIZE"
   info ""
+  info "=== Tarball Verification ==="
+
+  # Check for critical files
+  MISSING=""
+  for f in "etc/wsl.conf" "etc/rc.local" "etc/init.d/dweb" "etc/profile.d/dweb.sh" "usr/bin/node" "opt/dweb/dweb.cjs" "opt/dweb/tools/dweb-server.cjs" "opt/dweb/dist/index.html"; do
+    if tar tzf "$TARBALL_OUT" 2>/dev/null | grep -q "^\./$f$"; then
+      info "  ✓ $f"
+    else
+      warn "  ✗ $f — MISSING"
+      MISSING="$MISSING $f"
+    fi
+  done
+
+  # Check for optional files
+  for f in "usr/bin/ollama" "usr/local/bin/pm2"; do
+    if tar tzf "$TARBALL_OUT" 2>/dev/null | grep -q "^\./$f$"; then
+      info "  ~ $f (optional)"
+    fi
+  done
+
+  if [ -n "$MISSING" ]; then
+    warn "⚠ Some expected files are missing:$MISSING"
+  else
+    info "✅ All critical files present"
+  fi
+
+  info ""
   info "To import into WSL on Windows:"
   info "   wsl --import dweb ./dweb-wsl/ $TARBALL_OUT --version 2"
   info "   wsl -d dweb"
   info "   Open http://localhost:49737"
+  info "   One-liner (from Linux): ./import-dweb-wsl.ps1  (run inside PowerShell)"
 else
   err "Failed to create tarball"
 fi

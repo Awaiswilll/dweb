@@ -17,7 +17,7 @@
 #>
 
 param(
-  [string]$TarballUrl = "https://github.com/dweb/dweb/releases/latest/download/dweb-wsl-rootfs.tar.gz",
+  [string]$TarballUrl = "https://github.com/Awaiswilll/dweb/releases/latest/download/dweb-wsl-rootfs.tar.gz",
   [string]$DistroName = "dweb",
   [string]$InstallDir = "./dweb-wsl",
   [string]$TarballPath = ""
@@ -223,7 +223,7 @@ Write-Host "  Inside WSL:" -ForegroundColor White
 Write-Host "    dweb-logs          # View server logs" -ForegroundColor Gray
 Write-Host "    dweb-status        # Check server status" -ForegroundColor Gray
 Write-Host "    dweb-restart       # Restart dweb-server" -ForegroundColor Gray
-Write-Host "    opencode --help    # Use opencode CLI" -ForegroundColor Gray
+Write-Host "    pm2 list           # Process manager" -ForegroundColor Gray
 Write-Host ""
-Write-Host "  Need help? https://github.com/dweb/dweb/issues" -ForegroundColor Yellow
+Write-Host "  Need help? https://github.com/Awaiswilll/dweb/issues" -ForegroundColor Yellow
 Write-Host ""

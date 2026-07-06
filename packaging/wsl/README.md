@@ -1,6 +1,6 @@
 # dweb WSL Distro
 
-**dweb** packaged as an Alpine Linux-based WSL (Windows Subsystem for Linux) distribution. Includes dweb-server, opencode CLI, and Ollama for local AI — all pre-configured and ready to use.
+**dweb** packaged as an Alpine Linux-based WSL (Windows Subsystem for Linux) distribution. Includes dweb-server with P2P networking, AI agent, and web IDE — all pre-configured and ready to use.
 
 ## Requirements
 
@@ -15,7 +15,7 @@
 
 ```powershell
 # Download and run the import script
-curl -O https://github.com/dweb/dweb/releases/latest/download/import-dweb-wsl.ps1
+curl -O https://github.com/Awaiswilll/dweb/releases/latest/download/import-dweb-wsl.ps1
 .\import-dweb-wsl.ps1
 ```
 
@@ -23,7 +23,7 @@ curl -O https://github.com/dweb/dweb/releases/latest/download/import-dweb-wsl.ps
 
 ```powershell
 # Download the tarball
-curl -LO https://github.com/dweb/dweb/releases/latest/download/dweb-wsl-rootfs.tar.gz
+curl -LO https://github.com/Awaiswilll/dweb/releases/latest/download/dweb-wsl-rootfs.tar.gz
 
 # Import into WSL
 wsl --import dweb ./dweb-wsl/ ./dweb-wsl-rootfs.tar.gz --version 2
@@ -36,7 +36,7 @@ wsl -d dweb
 
 ```bash
 # Clone the repo
-git clone https://github.com/dweb/dweb.git
+git clone https://github.com/Awaiswilll/dweb.git
 cd dweb
 
 # Build the frontend
@@ -64,9 +64,10 @@ http://localhost:49737
 | Component | Description |
 |-----------|-------------|
 | **dweb-server** | P2P Dev + Hosting Platform — serves the React frontend on port 49737 |
-| **opencode CLI** | AI-assisted coding in your terminal |
-| **Ollama** | Local AI model runner (download models with `ollama pull <model>`) |
-| **Alpine Linux** | Lightweight, secure base operating system |
+| **AI Agent** | 100+ free AI models across 15+ providers (OpenAI, Anthropic, Google, Groq, more) |
+| **P2P Networking** | Peer-to-peer relay, domain resolution, cross-instance communication |
+| **pm2** | Production process manager (pre-installed) |
+| **Alpine Linux** | Lightweight, secure base operating system (~38MB rootfs) |
 
 ## Usage
 
@@ -89,28 +90,26 @@ sudo rc-service dweb stop
 sudo rc-service dweb restart
 ```
 
-### Using opencode CLI
+### Using pm2 Process Manager
 
 ```bash
-opencode --help
-opencode "explain this code"
-opencode --model claude-3.5-sonnet
+pm2 list                    # List all processes
+pm2 logs                    # View logs
+pm2 monit                   # Monitor processes
 ```
 
-### Managing Ollama
+### Ollama (Local AI — Optional)
+
+Ollama is not pre-installed to keep the distro size minimal. Install it on first use:
 
 ```bash
-# Check Ollama status
-ollama ps
+curl -fsSL https://ollama.com/install.sh | sh
+```
 
-# Pull a model
+Then pull your first model:
+
+```bash
 ollama pull llama3.2
-
-# Run a model interactively
-ollama run llama3.2
-
-# List downloaded models
-ollama list
 ```
 
 ### File System

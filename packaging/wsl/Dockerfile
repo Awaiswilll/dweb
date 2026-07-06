@@ -1,9 +1,9 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Dockerfile — dweb WSL Rootfs Builder
 #
-#  Builds a minimal Alpine Linux rootfs with dweb-server, opencode CLI,
-#  and Ollama. The resulting filesystem can be exported as a tarball for
-#  `wsl --import`.
+#  Builds a minimal Alpine Linux rootfs with dweb-server, pm2,
+#  and Ollama (optional). The resulting filesystem can be exported as a
+#  tarball for `wsl --import`.
 #
 #  Usage:
 #    docker build -t dweb-wsl .
@@ -23,7 +23,7 @@ RUN apk add --no-cache git
 
 # Copy only package files for dependency caching
 COPY package.json package-lock.json* ./
-RUN npm ci --omit=dev 2>/dev/null || npm install
+RUN npm ci 2>/dev/null || npm install
 
 # Copy source and build
 COPY tsconfig.json tsconfig.node.json vite.config.ts ./
@@ -58,9 +58,9 @@ RUN apk add --no-cache \
   && rm -rf /var/cache/apk/* \
   && rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/info/* \
   && echo "Verifying Node.js is musl-linked..." \
-  && readelf -l /usr/bin/node 2>/dev/null | grep -q '/lib/ld-musl' \
-    && echo "✓ musl-linked" \
-    || echo "⚠ WARNING: Node.js is NOT musl-linked — will fail in WSL"
+  && ldd /usr/bin/node 2>/dev/null | grep -q 'ld-musl' \
+    && echo "✓ musl-linked (ldd confirms ld-musl)" \
+    || echo "⚠ WARNING: Node.js may not be musl-linked — check 'ldd /usr/bin/node'"
 
 # ── Create dweb user ──────────────────────────────────────────────────────────
 RUN addgroup -g 1000 dweb \
@@ -74,14 +74,12 @@ COPY tools/ /opt/dweb/tools/
 COPY dweb.cjs package.json start-server.sh* /opt/dweb/
 RUN chmod +x /opt/dweb/dweb.cjs /opt/dweb/start-server.sh 2>/dev/null || true
 
-# ── Install opencode CLI ──────────────────────────────────────────────────────
-RUN npm install -g @opencode/cli 2>/dev/null \
-  || npm install -g opencode 2>/dev/null \
-  || echo "Warning: opencode CLI could not be installed"
+# ── Install global npm tools (pm2 for process management) ─────────────────────
+RUN npm install -g pm2 2>/dev/null || echo "pm2 install skipped (non-essential)"
 
-# ── Install Ollama ────────────────────────────────────────────────────────────
-RUN curl -fsSL https://ollama.com/install.sh | sh 2>/dev/null \
-  || echo "Warning: Ollama installation failed"
+# ── Install Ollama (optional — skipped in Docker, user runs post-install) ─────
+RUN echo "Ollama skipped in Docker build. Install manually:" \
+  && echo "  curl -fsSL https://ollama.com/install.sh | sh"
 
 # ── WSL init scripts ──────────────────────────────────────────────────────────
 
