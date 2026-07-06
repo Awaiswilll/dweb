@@ -3,6 +3,7 @@ use futures::StreamExt;
 use hyperdht::{adht::Dht, Keypair};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;

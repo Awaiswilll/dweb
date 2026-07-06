@@ -10,8 +10,10 @@
 
 use crate::ai::ProviderConfig;
 use serde::{Deserialize, Serialize};
-use sha2::Digest;
 use std::path::PathBuf;
+
+#[cfg(feature = "encryption")]
+use sha2::Digest;
 
 // ─── Encryption helpers ─────────────────────────────────────────────────────
 
