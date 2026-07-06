@@ -20,5 +20,14 @@ export default defineConfig(async () => ({
     watch: {
       ignored: ["**/src-tauri/**"],
     },
+    proxy: {
+      "/dweb-status": { target: "http://localhost:49737", changeOrigin: true },
+      "/discover": { target: "http://localhost:49737", changeOrigin: true },
+      "/register": { target: "http://localhost:49737", changeOrigin: true },
+      "/ping": { target: "http://localhost:49737", changeOrigin: true },
+      "/api": { target: "http://localhost:49737", changeOrigin: true },
+      "/relay": { target: "http://localhost:49737", changeOrigin: true },
+      "/signal": { target: "http://localhost:49737", changeOrigin: true },
+    },
   },
 }));

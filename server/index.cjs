@@ -125,6 +125,29 @@ async function main() {
   console.log(`  [services] Auto-registered: "My Static Website" → /welcome`);
   console.log(`  [services] Auto-registered: "File Share" → /fileshare`);
 
+  // Auto-start managed services so they appear in /api/services
+  try {
+    const { registerRoutes: svcRoutes, runningServices } = require("./api-services.cjs");
+    if (!runningServices.has("My Static Website")) {
+      const resp = await fetch(`http://localhost:${PORT}/api/service/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "My Static Website", type: "Static Site", port: 30999 }),
+      });
+      if (resp.ok) console.log(`  [services] Auto-started: "My Static Website" on port 30999`);
+    }
+    if (!runningServices.has("File Share")) {
+      const resp = await fetch(`http://localhost:${PORT}/api/service/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "File Share", type: "File Browser", port: 30998 }),
+      });
+      if (resp.ok) console.log(`  [services] Auto-started: "File Share" on port 30998`);
+    }
+  } catch (e) {
+    console.log(`  [services] Auto-start failed: ${e.message}`);
+  }
+
   printBanner();
 
   // Restore managed services from disk

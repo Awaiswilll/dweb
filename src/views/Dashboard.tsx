@@ -412,6 +412,7 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editService, setEditService] = useState<(Service & { dir?: string }) | null>(null);
   const [runtimesExpanded, setRuntimesExpanded] = useState(false);
+  const [showNetworkExpanded, setShowNetworkExpanded] = useState(false);
   const [editingUrlFor, setEditingUrlFor] = useState<string | null>(null);
   const [urlEditValue, setUrlEditValue] = useState("");
 
@@ -479,49 +480,51 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
   useEffect(() => {
     (async () => {
       await loadServices();
-      // Auto-start managed "My Static Website" if not already running as a managed service
-      // Check if the backend API has it
+      // Auto-start managed services if not already running
       try {
         const resp = await fetch(`${window.location.origin}/api/services`);
         const data = await resp.json();
-        const hasManagedStatic = data?.services?.some((s: any) => s.name === "My Static Website");
-        if (!hasManagedStatic) {
-          const startResp = await fetch(`${window.location.origin}/api/service/start`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name: "My Static Website", type: "Static Site", port: 30999 }),
-          });
-          if (startResp.ok) {
-            const svcData = await startResp.json();
-            if (svcData?.service) {
-              const svc = svcData.service;
-              // Update local service state
+        const serviceMap = new Map<string, any>((data?.services || []).map((s: any) => [s.name, s] as [string, any]));
+
+        const defaults = [
+          { name: "My Static Website", type: "Static Site", port: 30999 },
+          { name: "File Share", type: "File Browser", port: 30998 },
+        ];
+
+        for (const def of defaults) {
+          if (!serviceMap.has(def.name)) {
+            const startResp = await fetch(`${window.location.origin}/api/service/start`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(def),
+            });
+            if (startResp.ok) {
+              const svcData = await startResp.json();
+              if (svcData?.service) {
+                setServices(prev => {
+                  const next = prev.map(s =>
+                    s.name === def.name
+                      ? { ...s, port: svcData.service.port, running: true, url: svcData.service.url || `http://localhost:${svcData.service.port}` }
+                      : s
+                  );
+                  try { localStorage.setItem(SERVICES_STORAGE_KEY, JSON.stringify(next)); } catch {}
+                  return next;
+                });
+              }
+            }
+          } else {
+            const managed = serviceMap.get(def.name);
+            if (managed) {
               setServices(prev => {
                 const next = prev.map(s =>
-                  s.name === "My Static Website"
-                    ? { ...s, port: svc.port, running: true, url: svc.url || `http://localhost:${svc.port}` }
+                  s.name === def.name
+                    ? { ...s, port: managed.port, url: `http://localhost:${managed.port}` }
                     : s
                 );
                 try { localStorage.setItem(SERVICES_STORAGE_KEY, JSON.stringify(next)); } catch {}
                 return next;
               });
             }
-            setConnectionMsg({ type: "success", text: "My Static Website is now running and P2P-discoverable" });
-          }
-        } else {
-          // Update URL from managed service
-          const managed = data.services.find((s: any) => s.name === "My Static Website");
-          if (managed) {
-            const url = `http://localhost:${managed.port}`;
-            setServices(prev => {
-              const next = prev.map(s =>
-                s.name === "My Static Website"
-                  ? { ...s, port: managed.port, url }
-                  : s
-              );
-              try { localStorage.setItem(SERVICES_STORAGE_KEY, JSON.stringify(next)); } catch {}
-              return next;
-            });
           }
         }
       } catch {}
@@ -714,7 +717,7 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
   const [peerPage, setPeerPage] = useState(0);
   const [remotePage, setRemotePage] = useState(0);
   const [showAdvancedDetails, setShowAdvancedDetails] = useState(false);
-  const [showServices, setShowServices] = useState(true);
+  const [showServices, setShowServices] = useState(false);
   const [advancedStatus, setAdvancedStatus] = useState<P2PNetworkStatus | null>(null);
   const [advancedRefreshing, setAdvancedRefreshing] = useState(false);
   const [expandedServices, setExpandedServices] = useState<Set<string>>(new Set());
@@ -744,6 +747,9 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
           pendingSignals: 0,
           localIPs: statusData.localIPs,
         });
+        // Also populate advancedStatus so P2P Connections info grid
+        // has data immediately when expanded
+        setAdvancedStatus(statusData);
       }
 
       // Filter out self from discovered peers
@@ -1183,7 +1189,7 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
     return `${s}s`;
   };
 
-  /* ─── Network Section ────────────────────────────────────── */
+  /* ─── Network Section (collapsible) ──────────────────────── */
   const networkSection = (
     <div style={{ marginBottom: 20 }}>
       {/* Pulse beacon keyframes */}
@@ -1193,115 +1199,43 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
   50% { opacity: 0.65; transform: scale(1.35); }
 }
 `}</style>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-        <h3 style={{ fontSize: 15, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
-          <Globe size={16} />
-          Network
-          {/* Total dweb instances with pulse beacon */}
-          <span style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 5, marginLeft: 2 }}
-            title={`${totalInstances} total dweb instance(s) — 1 (this device) + ${discoveredPeers.length} discovered + ${uniqueConnectedRemotes.length} connected remote(s)${!networkAvailable ? " (no network)" : ""}`}>
-            <span style={{
-              width: 8, height: 8, borderRadius: "50%",
-              background: networkAvailable ? "#22c55e" : "#6b7280",
-              boxShadow: networkAvailable ? "0 0 7px rgba(34,197,94,0.6)" : "none",
-              animation: networkAvailable ? "pulse-beacon 2s infinite" : "none",
-              flexShrink: 0,
-            }} />
-            <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>
-              {totalInstances}
-            </span>
-          </span>
-        </h3>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          {/* Relay indicator */}
-          {relayStatus && (
-            <span style={{ fontSize: 11, display: "flex", alignItems: "center", gap: 4, color: relayStatus.connected ? "#22c55e" : "#6b7280" }}>
-              <Radio size={12} />
-              {relayStatus.connected ? "Relay: " + relayStatus.peersOnline + " peers" : "No relay"}
-            </span>
-          )}
-          {/* Online Mode Switcher */}
-          <div className="glass-sm" style={{ display: "flex", borderRadius: "var(--radius-sm)", overflow: "hidden" }}>
-            {(["local", "p2p-visible", "p2p-anonymous"] as OnlineMode[]).map(m => (
-              <button
-                key={m}
-                onClick={() => setOnlineMode(m)}
-                style={{
-                  padding: "5px 12px",
-                  border: "none",
-                  background: onlineMode === m ? modeColor[m] : "transparent",
-                  color: onlineMode === m ? "#fff" : "var(--text-muted)",
-                  cursor: "pointer",
-                  fontSize: 11,
-                  fontWeight: onlineMode === m ? 600 : 400,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 4,
-                  transition: "background 0.15s",
-                }}
-                title={m === "local" ? "Local Only — no P2P connectivity"
-                  : m === "p2p-visible" ? "P2P Visible — other peers can discover and connect to you"
-                  : torStatus?.running
-                    ? "P2P Anonymous via Tor — traffic routed through Tor SOCKS5 proxy"
-                    : "P2P Anonymous — you see peers but they cannot discover you"}
-              >
-                {modeIcon[m]}
-                {m === "local" ? "Local" : m === "p2p-visible" ? "Visible" : "Anonymous"}
-              </button>
-            ))}
-          </div>
-          {/* Tor toggle — compact pill next to mode buttons */}
-          {torStatus !== null && (
-            <button
-              onClick={handleTorToggle}
-              disabled={!torStatus.installed || togglingTor}
-              style={{
-                padding: "5px 12px",
-                border: "none",
-                borderRadius: "var(--radius-sm)",
-                background: torStatus.running ? "#7c3aed" : "transparent",
-                color: torStatus.running ? "#fff" : "var(--text-muted)",
-                cursor: torStatus.installed ? "pointer" : "not-allowed",
-                fontSize: 11,
-                fontWeight: torStatus.running ? 600 : 400,
-                display: "flex",
-                alignItems: "center",
-                gap: 4,
-                opacity: torStatus.installed ? 1 : 0.5,
-                transition: "background 0.15s",
-              }}
-              title={
-                !torStatus.installed
-                  ? "Tor is not installed — install tor to enable anonymous routing"
-                  : torStatus.running
-                    ? `Tor routing active via ${torStatus.torProxy || "SOCKS5 :9050"} — click to disable\nP2P mode forced to Anonymous`
-                    : "Tor installed — click to enable anonymous P2P routing"
-              }
-            >
-              <Shield size={12} />
-              {togglingTor ? "..." : torStatus.running ? "Tor" : "Tor"}
-              {torStatus.installed && (
-                <span style={{
-                  width: 6, height: 6, borderRadius: "50%",
-                  background: torStatus.running ? "#a78bfa" : "#6b7280",
-                  marginLeft: 2,
-                }} />
-              )}
-            </button>
-          )}
-          <button className="btn btn-secondary btn-sm" onClick={() => setShowConnectModal(true)}>
-            <Link2 size={12} /> Connect
-          </button>
-        </div>
-      </div>
-
-      {/* Network status bar */}
-      <div className="glass-sm" style={{
-        display: "flex", alignItems: "center", gap: 16,
-        padding: "8px 14px", borderRadius: "var(--radius-sm)",
-        marginBottom: 10, fontSize: 12,
+      {/* ── Collapsible Network Bar ── */}
+      <div className={showNetworkExpanded ? "glossy-card" : "glass-sm"} style={{
+        borderRadius: "var(--radius-sm)", overflow: "hidden",
+        border: showNetworkExpanded ? "1px solid var(--border)" : "1px solid transparent",
+        padding: 0,
       }}>
-        <span style={{ display: "flex", alignItems: "center", gap: 4, color: onlineMode === "local" ? "var(--text-muted)" : "#22c55e" }}
+        {/* ── Header (always visible) ── */}
+        <div
+          onClick={() => setShowNetworkExpanded(!showNetworkExpanded)}
+          className="glossy-header"
+          style={{ cursor: "pointer", userSelect: "none", padding: "8px 14px" }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ display: "flex", transition: "transform 0.15s", transform: showNetworkExpanded ? "rotate(90deg)" : "none" }}>
+              <ChevronRight size={14} />
+            </span>
+            <Globe size={14} />
+            <span style={{ fontSize: 13, fontWeight: 600 }}>Network</span>
+            {/* Pulse beacon + instance count */}
+            <span style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 4 }}
+              title={`${totalInstances} total dweb instance(s) — 1 (this device) + ${discoveredPeers.length} discovered + ${uniqueConnectedRemotes.length} connected remote(s)${!networkAvailable ? " (no network)" : ""}`}>
+              <span style={{
+                width: 7, height: 7, borderRadius: "50%",
+                background: networkAvailable ? "#22c55e" : "#6b7280",
+                boxShadow: networkAvailable ? "0 0 6px rgba(34,197,94,0.6)" : "none",
+                animation: networkAvailable ? "pulse-beacon 2s infinite" : "none",
+                flexShrink: 0,
+              }} />
+              <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>
+                {totalInstances}
+              </span>
+            </span>
+          </div>
+
+          {/* Network info in header */}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 5, fontSize: 12 }}>
+            <span style={{ display: "flex", alignItems: "center", gap: 4, color: onlineMode === "local" ? "var(--text-muted)" : "#22c55e" }}
           title={onlineMode === "local" ? "Local only mode — not visible to peers"
             : onlineMode === "p2p-visible" ? "Visible to all peers on the network"
             : torStatus?.running ? "Anonymous via Tor — Tor SOCKS5 proxy active"
@@ -1368,325 +1302,454 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
             </span>
           </>
         )}
-      </div>
+          </div>
+        </div>
 
-      {/* ── P2P Connections (collapsible) ──────────────────────── */}
-      <div className="glass-sm" style={{
+        {/* Collapsed summary (when not expanded) */}
+        {!showNetworkExpanded && advancedStatus && (
+          <span style={{ fontSize: 11, color: "var(--text-muted)", marginLeft: 4 }}>
+            {discoveredPeers.length} peer(s) · {uniqueConnectedRemotes.length} connected
+          </span>
+        )}
+
+        {/* ── Expanded content ── */}
+        {showNetworkExpanded && (
+        <div style={{ padding: "10px 14px 14px", borderTop: "1px solid var(--border)", fontSize: 13 }}>
+          {/* Mode buttons + Tor + Connect */}
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
+            {/* Online Mode Switcher */}
+            <div className="glossy-card" style={{ display: "flex", borderRadius: "var(--radius-sm)", overflow: "hidden", padding: 0, gap: 0 }}>
+              {(["local", "p2p-visible", "p2p-anonymous"] as OnlineMode[]).map(m => (
+                <button
+                  key={m}
+                  onClick={() => setOnlineMode(m)}
+                  style={{
+                    padding: "5px 12px",
+                    border: "none",
+                    background: onlineMode === m ? modeColor[m] : "transparent",
+                    color: onlineMode === m ? "#fff" : "var(--text-muted)",
+                    cursor: "pointer",
+                    fontSize: 12,
+                    fontWeight: onlineMode === m ? 600 : 400,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 4,
+                    transition: "background 0.15s",
+                  }}
+                  title={m === "local" ? "Local Only — no P2P connectivity"
+                    : m === "p2p-visible" ? "P2P Visible — other peers can discover and connect to you"
+                    : torStatus?.running
+                      ? "P2P Anonymous via Tor — traffic routed through Tor SOCKS5 proxy"
+                      : "P2P Anonymous — you see peers but they cannot discover you"}
+                >
+                  {modeIcon[m]}
+                  {m === "local" ? "Local" : m === "p2p-visible" ? "Visible" : "Anonymous"}
+                </button>
+              ))}
+            </div>
+            {/* Tor toggle */}
+            {torStatus !== null && (
+              <button
+                onClick={handleTorToggle}
+                disabled={!torStatus.installed || togglingTor}
+                style={{
+                  padding: "5px 12px",
+                  border: "none",
+                  borderRadius: "var(--radius-sm)",
+                  background: torStatus.running ? "#7c3aed" : "transparent",
+                  color: torStatus.running ? "#fff" : "var(--text-muted)",
+                  cursor: torStatus.installed ? "pointer" : "not-allowed",
+                  fontSize: 12,
+                  fontWeight: torStatus.running ? 600 : 400,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 4,
+                  opacity: torStatus.installed ? 1 : 0.5,
+                  transition: "background 0.15s",
+                }}
+                title={
+                  !torStatus.installed
+                    ? "Tor is not installed — install tor to enable anonymous routing"
+                    : torStatus.running
+                      ? `Tor routing active via ${torStatus.torProxy || "SOCKS5 :9050"} — click to disable\nP2P mode forced to Anonymous`
+                      : "Tor installed — click to enable anonymous P2P routing"
+                }
+              >
+                <Shield size={12} />
+                {togglingTor ? "..." : torStatus.running ? "Tor" : "Tor"}
+                {torStatus.installed && (
+                  <span style={{
+                    width: 6, height: 6, borderRadius: "50%",
+                    background: torStatus.running ? "#a78bfa" : "#6b7280",
+                    marginLeft: 2,
+                  }} />
+                )}
+              </button>
+            )}
+            <button className="btn btn-secondary btn-sm" onClick={() => setShowConnectModal(true)} style={{ fontSize: 12 }}>
+              <Link2 size={12} /> Connect
+            </button>
+          </div>
+
+          {/* Full status bar (all details) */}
+          <div style={{
+            display: "flex", alignItems: "center", gap: 16,
+            padding: "8px 12px", borderRadius: "var(--radius-sm)",
+            fontSize: 12, border: "1px solid var(--border)",
+          }}>
+            <span style={{ display: "flex", alignItems: "center", gap: 4, color: onlineMode === "local" ? "var(--text-muted)" : "#22c55e" }}
+              title={onlineMode === "local" ? "Local only mode — not visible to peers"
+                : onlineMode === "p2p-visible" ? "Visible to all peers on the network"
+                : torStatus?.running ? "Anonymous via Tor — Tor SOCKS5 proxy active"
+                : "Anonymous mode — visible but identity not shared"}>
+              {onlineMode === "local" ? <WifiOff size={14} /> : <Wifi size={14} />}
+              Mode: <strong>{onlineMode === "local" ? "Local Only" : onlineMode === "p2p-visible" ? "P2P Visible" : "P2P Anonymous"}</strong>
+              {torStatus?.running && onlineMode === "p2p-anonymous" && (
+                <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 8, background: "rgba(126,34,206,0.15)", color: "#7c3aed", marginLeft: 2 }}>
+                  via Tor
+                </span>
+              )}
+            </span>
+            <span style={{ color: "var(--text-muted)" }}>|</span>
+            <span style={{ display: "flex", alignItems: "center", gap: 4 }}
+              title={
+                totalInstances > 0
+                  ? `${totalInstances} total dweb instance(s)\n  · 1 self\n  · ${discoveredPeers.length} discovered (${visiblePeers.length} visible, ${anonymousPeers.length} anon)\n  · ${uniqueConnectedRemotes.length} connected remote(s)`
+                  : "No dweb instances found. Click Connect to discover peers."
+              }>
+              <Monitor size={14} />
+              Instances: <strong style={{ color: totalInstances > 0 ? "#22c55e" : "var(--text-muted)" }}>{totalInstances}</strong>
+              {discoveredPeers.length > 0 && (
+                <span style={{ fontSize: 10, color: "var(--text-muted)", marginLeft: 2 }}>
+                  ({visiblePeers.length}v · {anonymousPeers.length}a)
+                </span>
+              )}
+            </span>
+            {advancedStatus && (
+              <>
+                <span style={{ color: "var(--text-muted)" }}>|</span>
+                <span style={{ display: "flex", alignItems: "center", gap: 4, color: "var(--text)" }}
+                  title={`Server uptime: ${formatUptime(advancedStatus.uptime)}`}>
+                  <Activity size={14} />
+                  <strong>{formatUptime(advancedStatus.uptime)}</strong>
+                </span>
+              </>
+            )}
+            <span style={{ color: "var(--text-muted)" }}>|</span>
+            <span style={{ display: "flex", alignItems: "center", gap: 4, color: relayStatus?.connected ? "#22c55e" : "var(--text-muted)" }}
+              title={relayStatus?.connected
+                ? `Relay connected at ${relayStatus.relayAddress} — ${relayStatus.peersOnline} peer(s) online. P2P data flows directly after signaling.`
+                : "Relay not connected. Only direct P2P connections are available."}>
+              <Radio size={14} />
+              Relay: <strong>{relayStatus?.connected ? "Connected" : "Offline"}</strong>
+            </span>
+            {torStatus?.running && (
+              <>
+                <span style={{ color: "var(--text-muted)" }}>|</span>
+                <span style={{ display: "flex", alignItems: "center", gap: 4, color: "#7c3aed" }}
+                  title={`Tor routing active\nProxy: ${torStatus.torProxy || "socks5://127.0.0.1:9050"}\nP2P mode forced to Anonymous`}>
+                  <Shield size={14} />
+                  Tor: <strong>Routing</strong>
+                </span>
+              </>
+            )}
+            {incomingSignals.length > 0 && (
+              <>
+                <span style={{ color: "var(--text-muted)" }}>|</span>
+                <span style={{ display: "flex", alignItems: "center", gap: 4, color: "#8b5cf6" }}>
+                  <Users size={14} />
+                  Signals: <strong>{incomingSignals.length}</strong>
+                </span>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+      </div>
+    </div>
+  );
+  const p2pSection = (
+      <div className={showAdvancedDetails ? "glossy-card" : "glass-sm"} style={{
         borderRadius: "var(--radius-sm)", marginBottom: 10, overflow: "hidden",
         border: showAdvancedDetails ? "1px solid var(--border)" : "1px solid transparent",
+        padding: 0,
       }}>
+        {/* ── Header bar: info + Register always visible ── */}
         <div
           onClick={() => setShowAdvancedDetails(!showAdvancedDetails)}
+          className="glossy-header"
           style={{
-            display: "flex", alignItems: "center", gap: 8,
-            padding: "8px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer",
-            userSelect: "none", background: showAdvancedDetails ? "var(--bg-tertiary)" : "transparent",
+            cursor: "pointer", userSelect: "none", padding: "8px 14px",
           }}
         >
-          <span style={{ display: "flex", transition: "transform 0.15s", transform: showAdvancedDetails ? "rotate(90deg)" : "none" }}>
-            <ChevronRight size={14} />
-          </span>
-          <Activity size={14} />
-          P2P Connections
-          {advancedStatus && (
-            <span style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 400, marginLeft: "auto" }}>
-              {showAdvancedDetails ? "click to collapse" : `${discoveredPeers.length} peer(s) · ${uniqueConnectedRemotes.length} connected`}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ display: "flex", transition: "transform 0.15s", transform: showAdvancedDetails ? "rotate(90deg)" : "none" }}>
+              <ChevronRight size={14} />
             </span>
-          )}
-        </div>
-        {showAdvancedDetails && (
-          <div style={{ padding: "8px 14px 14px", borderTop: "1px solid var(--border)", fontSize: 12 }}>
-            {/* Network info */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 16px", marginBottom: 12, fontSize: 11 }}>
-              <div><span style={{ color: "var(--text-muted)" }}>Peer ID</span> <code style={{ fontSize: 10 }}>{advancedStatus?.peerId || "—"}</code></div>
-              <div><span style={{ color: "var(--text-muted)" }}>Web IDE Port</span> {advancedStatus?.port || "—"}</div>
-              <div><span style={{ color: "var(--text-muted)" }}>Relay Port</span> {advancedStatus?.relayPort || "—"}</div>
-              <div><span style={{ color: "var(--text-muted)" }}>Mode</span> {advancedStatus?.mode || "—"}</div>
-              <div style={{ gridColumn: "1 / -1" }}>
-                <span style={{ color: "var(--text-muted)" }}>Local IPs</span> {(advancedStatus?.localIPs || []).join(", ") || "—"}
-              </div>
-              <div style={{ gridColumn: "1 / -1" }}>
-                <span style={{ color: "var(--text-muted)" }}>Platform</span> {advancedStatus?.hostname || "—"} (Linux)
-              </div>
-            </div>
+            <Activity size={14} />
+            <span style={{ fontSize: 13, fontWeight: 600 }}>P2P Connections</span>
+          </div>
 
-            {/* Register Peer + Refresh row */}
-            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-              <button className="btn btn-primary btn-sm" onClick={async () => {
-                try {
-                  const res = await fetch("/register", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                      id: `peer-${Date.now()}`,
-                      address: `${window.location.hostname}:${window.location.port}`,
-                      publicKey: "auto-registered",
-                    }),
-                  });
-                  const data = await res.json();
-                  if (data.status === "ok") setConnectionMsg({ type: "success", text: `Peer registered: ${data.peerId}` });
-                } catch (e) {
-                  setConnectionMsg({ type: "error", text: `Registration failed: ${e}` });
-                }
+          {/* Network info + Register inline in header */}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 6, fontSize: 12 }}>
+            <span><span style={{ color: "var(--text-muted)" }}>Peer ID</span> <code style={{ fontSize: 11, background: "rgba(255,255,255,0.06)", padding: "1px 5px", borderRadius: 3 }}>{advancedStatus?.peerId || "—"}</code></span>
+            <span style={{ color: "var(--text-muted)" }}>·</span>
+            <span><span style={{ color: "var(--text-muted)" }}>Port</span> <strong>{advancedStatus?.port || "—"}</strong></span>
+            <span style={{ color: "var(--text-muted)" }}>·</span>
+            <span><span style={{ color: "var(--text-muted)" }}>Relay</span> <strong>{advancedStatus?.relayPort || "—"}</strong></span>
+            <span style={{ color: "var(--text-muted)" }}>·</span>
+            <span><span style={{ color: "var(--text-muted)" }}>Mode</span> <strong>{advancedStatus?.mode || "—"}</strong></span>
+            <span style={{ color: "var(--text-muted)" }}>·</span>
+            <span><span style={{ color: "var(--text-muted)" }}>IPs</span> <strong>{(advancedStatus?.localIPs || []).join(", ") || "—"}</strong></span>
+            <span style={{ color: "var(--text-muted)" }}>·</span>
+            <span><span style={{ color: "var(--text-muted)" }}>Platform</span> <strong>{advancedStatus?.platform || advancedStatus?.hostname || "—"}</strong></span>
+
+            {/* Register Peer button */}
+            <button className="btn btn-primary btn-sm" style={{ marginLeft: "auto", height: 24, fontSize: 11, padding: "0 10px" }}
+              onClick={(e) => {
+                e.stopPropagation();
+                fetch("/register", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    id: `peer-${Date.now()}`,
+                    address: `${window.location.hostname}:${window.location.port}`,
+                    publicKey: "auto-registered",
+                  }),
+                }).then(r => r.json()).then(d => {
+                  if (d.status === "ok") setConnectionMsg({ type: "success", text: `Peer registered: ${d.peerId}` });
+                }).catch(e => setConnectionMsg({ type: "error", text: `Registration failed: ${e}` }));
               }}>
-                <Wifi size={12} /> Register Peer
-              </button>
-              <button className="btn btn-secondary btn-sm" onClick={() => {
+              <Wifi size={10} /> Register
+            </button>
+            {/* Refresh button */}
+            <button className="btn btn-secondary btn-sm" style={{ height: 24, fontSize: 11, padding: "0 10px" }}
+              onClick={(e) => {
+                e.stopPropagation();
                 fetch("/dweb-status").then(r => r.ok && r.json()).then(d => d && setAdvancedStatus(d)).catch(() => {});
               }} disabled={advancedRefreshing}>
-                <RefreshCw size={12} className={advancedRefreshing ? "spin" : ""} /> Refresh
-              </button>
-            </div>
+              <RefreshCw size={10} className={advancedRefreshing ? "spin" : ""} />
+            </button>
+            {/* New Instance button */}
+            <button className="btn btn-secondary btn-sm" style={{ height: 24, fontSize: 11, padding: "0 10px" }}
+              onClick={async (e) => {
+                e.stopPropagation();
+                try {
+                  const resp = await fetch("/api/instance/spawn", { method: "POST" });
+                  const data = await resp.json();
+                  if (data.status === "ok") {
+                    setConnectionMsg({ type: "success", text: `Opened new instance on port ${data.port}` });
+                    window.open(data.url, "_blank");
+                  } else {
+                    setConnectionMsg({ type: "error", text: `Failed: ${data.error}` });
+                  }
+                } catch (err) {
+                  setConnectionMsg({ type: "error", text: `Failed to spawn: ${err}` });
+                }
+              }}>
+              <Plus size={10} /> New Instance
+            </button>
 
-            {/* ── Incoming Connection Requests ── */}
+            {!showAdvancedDetails && advancedStatus && (
+              <span style={{ fontSize: 12, color: "var(--text-muted)", marginLeft: 4 }}>
+                {discoveredPeers.length} peer(s) · {uniqueConnectedRemotes.length} connected
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* ── Expanded content: parallel columns ── */}
+        {showAdvancedDetails && (
+          <div style={{ padding: "10px 14px 14px", borderTop: "1px solid var(--border)", fontSize: 13 }}>
+
+            {/* ── Incoming Requests (full width if any) ── */}
             {incomingSignals.length > 0 && (
-              <div style={{ marginBottom: 12 }}>
-                <div style={{ fontWeight: 600, marginBottom: 6, fontSize: 11, display: "flex", alignItems: "center", gap: 4 }}>
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ fontWeight: 600, marginBottom: 6, fontSize: 12, display: "flex", alignItems: "center", gap: 4 }}>
                   <Users size={12} /> Incoming Requests ({incomingSignals.length})
                 </div>
-                {incomingSignals.map((sig, i) => (
-                  <div key={i} style={{
-                    display: "flex", alignItems: "center", justifyContent: "space-between",
-                    padding: "6px 10px", marginBottom: 4, borderRadius: "var(--radius-sm)",
-                    background: "rgba(139,92,246,0.1)", fontSize: 11, border: "1px solid rgba(139,92,246,0.2)",
-                  }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <Users size={12} style={{ color: "#8b5cf6" }} />
-                      <span>Connection request from <strong>{sig}</strong></span>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  {incomingSignals.map((sig, i) => (
+                    <div key={i} style={{
+                      display: "flex", alignItems: "center", justifyContent: "space-between",
+                      padding: "6px 10px", borderRadius: "var(--radius-sm)",
+                      background: "rgba(139,92,246,0.1)", fontSize: 11, border: "1px solid rgba(139,92,246,0.2)",
+                    }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <Users size={12} style={{ color: "#8b5cf6" }} />
+                        <span>Connection request from <strong>{sig}</strong></span>
+                      </div>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button className="btn btn-sm" onClick={() => handleAcceptConnection(sig)}
+                          style={{ fontSize: 10, color: "#22c55e", padding: "2px 10px" }}>Accept</button>
+                        <button className="btn btn-sm" onClick={() => handleRejectConnection(sig)}
+                          style={{ fontSize: 10, color: "#ef4444", padding: "2px 10px" }}>Reject</button>
+                      </div>
                     </div>
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <button className="btn btn-sm" onClick={() => handleAcceptConnection(sig)}
-                        style={{ fontSize: 10, color: "#22c55e", padding: "2px 10px" }}>
-                        Accept
-                      </button>
-                      <button className="btn btn-sm" onClick={() => handleRejectConnection(sig)}
-                        style={{ fontSize: 10, color: "#ef4444", padding: "2px 10px" }}>
-                        Reject
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
             )}
 
-            {/* ── Discovered Peers ── */}
-            <div style={{ marginBottom: 12 }}>
-              <div style={{ fontWeight: 600, marginBottom: 6, fontSize: 11, display: "flex", alignItems: "center", gap: 4 }}>
-                <Radio size={12} /> Discoverable Peers ({discoveredPeers.length})
-              </div>
-              {discoveredPeers.length === 0 ? (
-                <div style={{ padding: "8px 0", textAlign: "center", color: "var(--text-muted)", fontSize: 10 }}>
-                  No peers discovered yet. Click <strong>Refresh</strong> to scan the network.
+            {/* ── Parallel columns: Discoverable Peers | Connected Remotes ── */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+
+              {/* ── LEFT: Discoverable Peers ── */}
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontWeight: 600, marginBottom: 6, fontSize: 12, display: "flex", alignItems: "center", gap: 4 }}>
+                  <Radio size={12} /> Discoverable Peers ({discoveredPeers.length})
                 </div>
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                  {(() => {
-                    const totalPages = Math.max(1, Math.ceil(discoveredPeers.length / PEERS_PER_PAGE));
-                    const safePage = Math.min(peerPage, totalPages - 1);
-                    const pagePeers = discoveredPeers.slice(safePage * PEERS_PER_PAGE, (safePage + 1) * PEERS_PER_PAGE);
-                    const toggleServices = (peerId: string) => {
-                      setExpandedServices(prev => {
-                        const next = new Set(prev);
-                        if (next.has(peerId)) next.delete(peerId);
-                        else next.add(peerId);
-                        return next;
-                      });
-                    };
-                    return (
-                      <>
-                        {pagePeers.map(p => {
-                          const svcExpanded = expandedServices.has(p.id);
-                          return (
-                            <div key={p.id} style={{ padding: "4px 0", display: "flex", flexDirection: "column" }}>
-                              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11 }}>
-                                <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#22c55e", flexShrink: 0 }} />
-                                <span style={{ fontWeight: 500 }}>{p.hostname || p.id.slice(0, 16)}</span>
-                                <span style={{ color: "var(--text-muted)" }}>{p.address}:{p.port}</span>
-                                <span style={{ color: "var(--text-muted)", fontSize: 10 }}>{p.mode}</span>
-                                <span style={{ color: "var(--text-muted)", fontSize: 10 }}>{p.platform}</span>
-                                {p.services?.length > 0 && (
-                                  <span onClick={() => toggleServices(p.id)}
-                                    title={svcExpanded ? "Collapse services" : "Expand services"}
-                                    style={{
-                                      color: svcExpanded ? "#22c55e" : "var(--text-muted)",
-                                      fontSize: 10, marginLeft: "auto", cursor: "pointer",
-                                      display: "flex", alignItems: "center", gap: 4,
-                                      padding: "2px 6px", borderRadius: 4,
-                                      background: svcExpanded ? "rgba(34,197,94,0.1)" : "transparent",
-                                    }}>
-                                    <ChevronRight size={10} style={{ transition: "transform 0.15s", transform: svcExpanded ? "rotate(90deg)" : "none" }} />
-                                    {svcExpanded ? `${p.services.length} services` : p.services.join(", ")}
+                {discoveredPeers.length === 0 ? (
+                  <div style={{ padding: "8px 0", textAlign: "center", color: "var(--text-muted)", fontSize: 10 }}>
+                    No peers discovered yet. Click <strong>Refresh</strong> to scan.
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 2, maxHeight: 320, overflowY: "auto" }}>
+                    {(() => {
+                      const totalPages = Math.max(1, Math.ceil(discoveredPeers.length / PEERS_PER_PAGE));
+                      const safePage = Math.min(peerPage, totalPages - 1);
+                      const pagePeers = discoveredPeers.slice(safePage * PEERS_PER_PAGE, (safePage + 1) * PEERS_PER_PAGE);
+                      return (
+                        <>
+                          {pagePeers.map(p => {
+                            const svcExpanded = expandedServices.has(p.id);
+                            return (
+                              <div key={p.id} style={{ padding: "3px 0" }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
+                                  <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#22c55e", flexShrink: 0 }} />
+                                  <span style={{ fontWeight: 500, fontSize: 12, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                    {p.hostname || p.id.slice(0, 12)}
                                   </span>
-                                )}
-                                {/* Send Request button */}
-                                <button className="btn btn-sm" onClick={() => {
-                                  const addr = `${p.address}:${p.port}`;
-                                  handleConnectDirect(addr, p.hostname || p.id);
-                                  sendRelaySignal(p.id, "offer").catch(() => {});
-                                }}
-                                  title="Send connection request"
-                                  style={{ fontSize: 10, padding: "2px 8px", color: "#22c55e" }}>
-                                  <Link2 size={10} /> Request
-                                </button>
-                              </div>
-                              {/* Expanded service details */}
-                              {svcExpanded && p.services?.length > 0 && (
-                                <div style={{
-                                  marginTop: 4, marginLeft: 14, padding: "6px 10px",
-                                  background: "rgba(255,255,255,0.03)", borderRadius: "var(--radius-sm)",
-                                  fontSize: 10, display: "flex", flexDirection: "column", gap: 3,
-                                }}>
-                                  {p.services.map((svc, i) => (
-                                    <div key={i} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                                      <Server size={10} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
-                                      <span style={{ fontWeight: 500 }}>{svc}</span>
-                                      <span style={{ color: "var(--text-muted)", fontSize: 9 }}>
-                                        peer {p.hostname || p.id.slice(0, 8)} @ {p.address}:{p.port}
-                                      </span>
-                                    </div>
-                                  ))}
+                                  <span style={{ color: "var(--text-muted)", fontSize: 10 }}>{p.address}:{p.port}</span>
+                                  {p.services?.length > 0 && (
+                                    <span onClick={() => {
+                                      setExpandedServices(prev => { const n = new Set(prev); if (n.has(p.id)) n.delete(p.id); else n.add(p.id); return n; });
+                                    }} style={{ color: "var(--text-muted)", fontSize: 10, cursor: "pointer", marginLeft: "auto", display: "flex", alignItems: "center", gap: 2 }}>
+                                      <ChevronRight size={8} style={{ transition: "transform 0.15s", transform: svcExpanded ? "rotate(90deg)" : "none" }} />
+                                      {p.services.length}
+                                    </span>
+                                  )}
+                                  <button className="btn btn-sm" onClick={() => {
+                                    handleConnectDirect(`${p.address}:${p.port}`, p.hostname || p.id);
+                                    sendRelaySignal(p.id, "offer").catch(() => {});
+                                  }} title="Send connection request"
+                                    style={{ fontSize: 10, padding: "1px 6px", color: "#22c55e" }}>
+                                    <Link2 size={8} />
+                                  </button>
                                 </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                        {totalPages > 1 && (
-                          <div style={{
-                            display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-                            marginTop: 6, paddingTop: 6, borderTop: "1px solid var(--border-subtle)",
-                          }}>
-                            <button className="btn btn-sm" disabled={safePage === 0}
-                              onClick={() => setPeerPage(safePage - 1)}
-                              style={{ fontSize: 10, padding: "2px 8px", opacity: safePage === 0 ? 0.4 : 1 }}>
-                              ◀ Prev
-                            </button>
-                            <span style={{ fontSize: 10, color: "var(--text-muted)" }}>
-                              Page {safePage + 1} of {totalPages}
-                            </span>
-                            <button className="btn btn-sm" disabled={safePage >= totalPages - 1}
-                              onClick={() => setPeerPage(safePage + 1)}
-                              style={{ fontSize: 10, padding: "2px 8px", opacity: safePage >= totalPages - 1 ? 0.4 : 1 }}>
-                              Next ▶
-                            </button>
-                          </div>
-                        )}
-                      </>
-                    );
-                  })()}
-                </div>
-              )}
-            </div>
-
-            {/* ── Connected Remotes ── */}
-            <div style={{ marginBottom: 0 }}>
-              <div style={{ fontWeight: 600, marginBottom: 6, fontSize: 11, display: "flex", alignItems: "center", gap: 4 }}>
-                <Link2 size={12} /> Connected Remotes ({remotes.length})
-              </div>
-              {remotes.length === 0 ? (
-                <div style={{ padding: "8px 0", textAlign: "center", color: "var(--text-muted)", fontSize: 10 }}>
-                  No remote instances connected. Click <strong>Request</strong> on a discoverable peer above.
-                </div>
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  {(() => {
-                    const totalPages = Math.max(1, Math.ceil(remotes.length / REMOTES_PER_PAGE));
-                    const safePage = Math.min(remotePage, totalPages - 1);
-                    const pageRemotes = remotes.slice(safePage * REMOTES_PER_PAGE, (safePage + 1) * REMOTES_PER_PAGE);
-                    return (
-                      <>
-                        {pageRemotes.map(r => (
-                          <div key={r.id} style={{
-                            display: "flex", alignItems: "center", gap: 8,
-                            padding: "6px 10px", borderRadius: "var(--radius-sm)", fontSize: 11,
-                            background: r.status === "connected" ? "rgba(34,197,94,0.05)" : "transparent",
-                            border: r.status === "connected" ? "1px solid rgba(34,197,94,0.15)" : "1px solid transparent",
-                          }}>
-                            {/* Status dot */}
-                            <span style={{
-                              width: 6, height: 6, borderRadius: "50%", flexShrink: 0,
-                              background: r.status === "connected" ? "#22c55e"
-                                : r.status === "connecting" ? "#eab308"
-                                : r.status === "error" ? "#ef4444" : "#6b7280",
-                              boxShadow: r.status === "connected" ? "0 0 4px rgba(34,197,94,0.4)" : "none",
-                            }} />
-                            {/* Info */}
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={{ fontSize: 12, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
-                                {r.name}
-                                <span style={{
-                                  fontSize: 9, padding: "1px 5px", borderRadius: 6,
-                                  background: r.mode === "p2p-visible" ? "rgba(34,197,94,0.15)" : "rgba(139,92,246,0.15)",
-                                  color: r.mode === "p2p-visible" ? "#22c55e" : "#8b5cf6",
-                                  fontWeight: 500,
-                                }}>
-                                  {r.mode === "p2p-visible" ? "Visible" : r.mode === "p2p-anonymous" ? "Anonymous" : "Relay"}
-                                </span>
-                              </div>
-                              <div style={{ fontSize: 10, color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 6, marginTop: 1 }}>
-                                <span>{r.address}</span>
-                                {r.status === "connected" && <span style={{ color: "#22c55e" }}>● {r.latency}ms</span>}
-                                {r.status === "disconnected" && <span style={{ color: "#6b7280" }}>Offline</span>}
-                                {r.services.length > 0 && (
-                                  <span>— {r.services.slice(0, 2).join(", ")}{r.services.length > 2 ? ` +${r.services.length - 2}` : ""}</span>
+                                {svcExpanded && p.services?.length > 0 && (
+                                  <div style={{ marginLeft: 14, marginTop: 2, padding: "3px 6px", background: "rgba(255,255,255,0.03)", borderRadius: "var(--radius-sm)", fontSize: 9, display: "flex", flexDirection: "column", gap: 2 }}>
+                                    {p.services.map((svc, i) => (
+                                      <div key={i} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                                        <Server size={8} style={{ color: "var(--text-muted)" }} />
+                                        <span>{svc}</span>
+                                      </div>
+                                    ))}
+                                  </div>
                                 )}
                               </div>
+                            );
+                          })}
+                          {totalPages > 1 && (
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 4, paddingTop: 4, borderTop: "1px solid var(--border-subtle)" }}>
+                              <button className="btn btn-sm" disabled={safePage === 0}
+                                onClick={() => setPeerPage(safePage - 1)}
+                                style={{ fontSize: 9, padding: "1px 6px", opacity: safePage === 0 ? 0.4 : 1 }}>◀ Prev</button>
+                              <span style={{ fontSize: 9, color: "var(--text-muted)" }}>{safePage + 1}/{totalPages}</span>
+                              <button className="btn btn-sm" disabled={safePage >= totalPages - 1}
+                                onClick={() => setPeerPage(safePage + 1)}
+                                style={{ fontSize: 9, padding: "1px 6px", opacity: safePage >= totalPages - 1 ? 0.4 : 1 }}>Next ▶</button>
                             </div>
-                            {/* Actions */}
-                            <div style={{ display: "flex", gap: 3, flexShrink: 0 }}>
-                              {r.status === "disconnected" ? (
-                                <button className="btn btn-icon btn-sm" onClick={() => handleConnectDirect(r.address, r.name)}
-                                  title="Reconnect" style={{ color: "#22c55e" }}>
-                                  <Link2 size={12} />
-                                </button>
-                              ) : (
-                                <button className="btn btn-icon btn-sm" onClick={() => handleDisconnectRemote(r.id)}
-                                  title="Disconnect" style={{ color: "#ef4444" }}>
-                                  <Unlink size={12} />
-                                </button>
-                              )}
-                              <button className="btn btn-icon btn-sm" onClick={() => handleRemoveRemote(r.id)}
-                                title="Remove" style={{ color: "var(--text-muted)" }}>
-                                ✕
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                        {totalPages > 1 && (
-                          <div style={{
-                            display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-                            marginTop: 4, paddingTop: 4, borderTop: "1px solid var(--border-subtle)",
-                          }}>
-                            <button className="btn btn-sm" disabled={safePage === 0}
-                              onClick={() => setRemotePage(safePage - 1)}
-                              style={{ fontSize: 10, padding: "2px 8px", opacity: safePage === 0 ? 0.4 : 1 }}>
-                              ◀ Prev
-                            </button>
-                            <span style={{ fontSize: 10, color: "var(--text-muted)" }}>
-                              Page {safePage + 1} of {totalPages}
-                            </span>
-                            <button className="btn btn-sm" disabled={safePage >= totalPages - 1}
-                              onClick={() => setRemotePage(safePage + 1)}
-                              style={{ fontSize: 10, padding: "2px 8px", opacity: safePage >= totalPages - 1 ? 0.4 : 1 }}>
-                              Next ▶
-                            </button>
-                          </div>
-                        )}
-                      </>
-                    );
-                  })()}
-                </div>
-              )}
-            </div>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </div>
+                )}
+              </div>
 
+              {/* ── RIGHT: Connected Remotes ── */}
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontWeight: 600, marginBottom: 6, fontSize: 12, display: "flex", alignItems: "center", gap: 4 }}>
+                  <Link2 size={12} /> Connected Remotes ({remotes.length})
+                </div>
+                {remotes.length === 0 ? (
+                  <div style={{ padding: "8px 0", textAlign: "center", color: "var(--text-muted)", fontSize: 12 }}>
+                    No remote instances. Send a <strong>Request</strong> to a peer.
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 3, maxHeight: 320, overflowY: "auto" }}>
+                    {(() => {
+                      const totalPages = Math.max(1, Math.ceil(remotes.length / REMOTES_PER_PAGE));
+                      const safePage = Math.min(remotePage, totalPages - 1);
+                      const pageRemotes = remotes.slice(safePage * REMOTES_PER_PAGE, (safePage + 1) * REMOTES_PER_PAGE);
+                      return (
+                        <>
+                          {pageRemotes.map(r => (
+                            <div key={r.id} style={{
+                              display: "flex", alignItems: "center", gap: 6,
+                              padding: "5px 8px", borderRadius: "var(--radius-sm)", fontSize: 11,
+                              background: r.status === "connected" ? "rgba(34,197,94,0.05)" : "transparent",
+                              border: r.status === "connected" ? "1px solid rgba(34,197,94,0.15)" : "1px solid transparent",
+                            }}>
+                              <span style={{
+                                width: 5, height: 5, borderRadius: "50%", flexShrink: 0,
+                                background: r.status === "connected" ? "#22c55e" : r.status === "connecting" ? "#eab308" : r.status === "error" ? "#ef4444" : "#6b7280",
+                                boxShadow: r.status === "connected" ? "0 0 3px rgba(34,197,94,0.4)" : "none",
+                              }} />
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontSize: 12, fontWeight: 600, display: "flex", alignItems: "center", gap: 4 }}>
+                                  <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.name}</span>
+                                  <span style={{ fontSize: 9, padding: "1px 4px", borderRadius: 4, background: r.mode === "p2p-visible" ? "rgba(34,197,94,0.15)" : "rgba(139,92,246,0.15)", color: r.mode === "p2p-visible" ? "#22c55e" : "#8b5cf6", fontWeight: 500 }}>
+                                    {r.mode === "p2p-visible" ? "Vis" : r.mode === "p2p-anonymous" ? "Anon" : "Relay"}
+                                  </span>
+                                </div>
+                                <div style={{ fontSize: 10, color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 4 }}>
+                                  <span>{r.address}</span>
+                                  {r.status === "connected" && <span style={{ color: "#22c55e" }}>· {r.latency}ms</span>}
+                                  {r.status === "disconnected" && <span style={{ color: "#6b7280" }}>· Offline</span>}
+                                </div>
+                              </div>
+                              <div style={{ display: "flex", gap: 2, flexShrink: 0 }}>
+                                {r.status === "disconnected" ? (
+                                  <button className="btn btn-icon btn-sm" onClick={() => handleConnectDirect(r.address, r.name)}
+                                    title="Reconnect" style={{ color: "#22c55e" }}><Link2 size={10} /></button>
+                                ) : (
+                                  <button className="btn btn-icon btn-sm" onClick={() => handleDisconnectRemote(r.id)}
+                                    title="Disconnect" style={{ color: "#ef4444" }}><Unlink size={10} /></button>
+                                )}
+                                <button className="btn btn-icon btn-sm" onClick={() => handleRemoveRemote(r.id)}
+                                  title="Remove" style={{ color: "var(--text-muted)" }}>✕</button>
+                              </div>
+                            </div>
+                          ))}
+                          {totalPages > 1 && (
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 4, paddingTop: 4, borderTop: "1px solid var(--border-subtle)" }}>
+                              <button className="btn btn-sm" disabled={safePage === 0}
+                                onClick={() => setRemotePage(safePage - 1)}
+                                style={{ fontSize: 9, padding: "1px 6px", opacity: safePage === 0 ? 0.4 : 1 }}>◀ Prev</button>
+                              <span style={{ fontSize: 9, color: "var(--text-muted)" }}>{safePage + 1}/{totalPages}</span>
+                              <button className="btn btn-sm" disabled={safePage >= totalPages - 1}
+                                onClick={() => setRemotePage(safePage + 1)}
+                                style={{ fontSize: 9, padding: "1px 6px", opacity: safePage >= totalPages - 1 ? 0.4 : 1 }}>Next ▶</button>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </div>
+                )}
+              </div>
+
+            </div>
           </div>
         )}
       </div>
-    </div>
   );
 
   /* ─── Runtime Detection Section (compact) ────────────────── */
   const runtimeSection = (
-    <div className="provider-config-card" style={{ marginBottom: 20 }}>
+    <div className="glossy-card provider-config-card" style={{ marginBottom: 20, padding: 0 }}>
       <div
         className="provider-config-header"
         onClick={() => setRuntimesExpanded(!runtimesExpanded)}
@@ -1835,54 +1898,6 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
   return (
     <div className="view-container dashboard">
       <div className="view-header">
-        <div>
-          <h2>Services & Runtimes</h2>
-          <p className="text-muted-sm">Manage your services and detected system runtimes</p>
-        </div>
-        <div className="header-actions" style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-          <button className="btn btn-secondary" onClick={async () => {
-            try {
-              const resp = await fetch("/api/instance/spawn", { method: "POST" });
-              const data = await resp.json();
-              if (data.status === "ok") {
-                setConnectionMsg({ type: "success", text: `Opened new instance on port ${data.port}` });
-                window.open(data.url, "_blank");
-              } else {
-                setConnectionMsg({ type: "error", text: `Failed: ${data.error}` });
-              }
-            } catch (e) {
-              setConnectionMsg({ type: "error", text: `Failed to spawn: ${e}` });
-            }
-          }}>
-            <Plus size={14} /> New Instance
-          </button>
-          <button className="btn btn-secondary" onClick={async () => {
-            loadServices(); loadRuntimes();
-            // Refresh peer/network data from working endpoints
-            const statusRes = await fetch("/dweb-status").then(r => r.ok ? r.json() : null).catch(() => null);
-            if (statusRes) {
-              setRelayStatus({
-                connected: statusRes.relayConnected,
-                relayAddress: statusRes.upstreamRelay || `localhost:${statusRes.relayPort}`,
-                error: statusRes.relayError,
-                peerId: statusRes.peerId,
-                peersOnline: statusRes.peersOnline,
-                pendingSignals: 0,
-                localIPs: statusRes.localIPs,
-              });
-            }
-            const discoverRes = await fetch("/discover").then(r => r.ok ? r.json() : null).catch(() => null);
-            if (discoverRes) {
-              const selfId = statusRes?.peerId;
-              const filtered = selfId
-                ? (discoverRes.peers || []).filter((p: RelayPeer) => p.id !== selfId)
-                : (discoverRes.peers || []);
-              setDiscoveredPeers(filtered);
-            }
-          }}>
-            <RefreshCw size={14} /> Refresh
-          </button>
-        </div>
       </div>
 
       {/* Connection notification toast */}
@@ -1890,12 +1905,14 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
         <div style={{
           position: "fixed", top: 16, right: 16, zIndex: 9999,
           padding: "10px 16px", borderRadius: "var(--radius-sm)",
-          background: connectionMsg.type === "success" ? "rgba(34,197,94,0.15)" : connectionMsg.type === "error" ? "rgba(239,68,68,0.15)" : "rgba(59,130,246,0.15)",
+          background: connectionMsg.type === "success" ? "linear-gradient(135deg, rgba(34,197,94,0.18), rgba(34,197,94,0.08))" : connectionMsg.type === "error" ? "linear-gradient(135deg, rgba(239,68,68,0.18), rgba(239,68,68,0.08))" : "linear-gradient(135deg, rgba(59,130,246,0.18), rgba(59,130,246,0.08))",
           border: `1px solid ${connectionMsg.type === "success" ? "rgba(34,197,94,0.3)" : connectionMsg.type === "error" ? "rgba(239,68,68,0.3)" : "rgba(59,130,246,0.3)"}`,
           color: connectionMsg.type === "success" ? "#22c55e" : connectionMsg.type === "error" ? "#ef4444" : "#3b82f6",
           fontSize: 13, fontWeight: 500, display: "flex", alignItems: "center", gap: 8,
-          boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+          boxShadow: "0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.1)",
           cursor: "pointer",
+          backdropFilter: "blur(16px)",
+          WebkitBackdropFilter: "blur(16px)",
         }} onClick={() => setConnectionMsg(null)}>
           {connectionMsg.type === "success" ? "✓" : connectionMsg.type === "error" ? "✗" : "ℹ"} {connectionMsg.text}
         </div>
@@ -1903,9 +1920,13 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
 
       {networkSection}
 
+      {p2pSection}
+
       {/* ── Services Bar (collapsible) ── */}
-      <div className="services-bar glass" style={{
+      <div className={"glossy-card"} style={{
         overflow: "hidden",
+        marginBottom: 20,
+        padding: "12px 16px",
         border: showServices ? "1px solid var(--border)" : "1px solid transparent",
       }}>
         <div

@@ -305,9 +305,11 @@ body {
 
 .view-container {
   padding: 24px 32px;
-  height: 100%;
+  min-height: 100%;
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
+  scroll-behavior: smooth;
 }
 
 /* Inner wrapper for views that benefit from max-width constraint */
@@ -710,16 +712,49 @@ body {
   flex: 1;
 }
 
-/* ─── Glass ──────────────────────────────────────────────── */
+/* ─── Glass / Glossy ───────────────────────────────────────── */
 .glass {
   background: var(--bg-glass);
   border: 1px solid var(--border);
-  backdrop-filter: blur(12px);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 2px 16px rgba(0,0,0,0.12), inset 0 1px 0 rgba(255,255,255,0.06);
 }
 
 .glass-sm {
   background: var(--bg-glass);
   border: 1px solid var(--border-subtle);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 1px 8px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.04);
+}
+
+.glossy-card {
+  background: linear-gradient(135deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow:
+    0 4px 24px rgba(0,0,0,0.15),
+    inset 0 1px 0 rgba(255,255,255,0.08),
+    inset 0 -1px 0 rgba(255,255,255,0.03);
+  transition: box-shadow 0.2s, border-color 0.2s;
+}
+.glossy-card:hover {
+  border-color: rgba(255,255,255,0.12);
+  box-shadow:
+    0 6px 32px rgba(0,0,0,0.2),
+    inset 0 1px 0 rgba(255,255,255,0.1),
+    inset 0 -1px 0 rgba(255,255,255,0.03);
+}
+
+.glossy-header {
+  background: linear-gradient(135deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02));
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.1);
 }
 
 /* ─── Service Grid ────────────────────────────────────────── */

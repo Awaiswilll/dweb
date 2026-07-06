@@ -37,6 +37,8 @@ export interface DomainRecord {
   auto_renew: boolean;
   active: boolean;
   paid_until: string | null;
+  path?: string;
+  expires?: string;
 }
 
 export interface ServiceBinding {
@@ -111,16 +113,6 @@ export interface AIModelInfo {
 export interface StreamToken {
   token: string;
   done: boolean;
-}
-
-export interface SandboxStatus {
-  data_dir: string;
-  instance_port: number;
-  instance_label: string;
-  public_key: string;
-  service_container_active: boolean;
-  process_count: number;
-  platform: string;
 }
 
 export interface GenerationResult {
@@ -369,6 +361,7 @@ export interface P2PPeer {
 export interface P2PNetworkStatus {
   peerId: string;
   hostname: string;
+  platform?: string;
   localIPs: string[];
   port: number;
   relayPort: number;
@@ -391,39 +384,6 @@ export interface Notification {
   timestamp: number;
   duration?: number;
   action?: { label: string; onClick: () => void };
-}
-
-/* ─── Browser Tab Types ──────────────────────────────────── */
-
-export interface BrowserTab {
-  id: string;
-  url: string;
-  title: string;
-  contentHtml: string;
-  loading: boolean;
-  history: string[];
-  historyIndex: number;
-  scrollPosition: number;
-  resolvedDomain: DomainRecord | null;
-  createdAt: number;
-}
-
-/* ─── Getting Started Tutorial ───────────────────────────── */
-
-export interface Tutorial {
-  id: string;
-  title: string;
-  description: string;
-  difficulty: "beginner" | "intermediate" | "advanced";
-  stack: string;
-  estimatedTime: string;
-  steps: TutorialStep[];
-}
-
-export interface TutorialStep {
-  title: string;
-  content: string;
-  code?: string;
 }
 
 /* ─── AI Agent Custom Stack ──────────────────────────────── */
