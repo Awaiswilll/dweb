@@ -2,7 +2,7 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 #  install.sh — Standalone dweb installer for WSL / Alpine Linux
 #
-#  Installs dweb-server, opencode CLI, and optionally Ollama on an existing
+#  Installs dweb-server with pm2, and optionally Ollama on an existing
 #  Alpine Linux WSL instance. Can also be adapted for Debian/Ubuntu.
 #
 #  Usage:
@@ -14,11 +14,11 @@
 set -euo pipefail
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-DWEB_REPO="${DWEB_REPO:-https://github.com/dweb/dweb.git}"
+DWEB_REPO="${DWEB_REPO:-https://github.com/Awaiswilll/dweb.git}"
 DWEB_DIR="${DWEB_DIR:-/opt/dweb}"
 DWEB_PORT="${DWEB_PORT:-49737}"
 INSTALL_OLLAMA="${INSTALL_OLLAMA:-yes}"
-INSTALL_OPENCODE="${INSTALL_OPENCODE:-yes}"
+INSTALL_PM2="${INSTALL_PM2:-yes}"
 
 # ── Colors ────────────────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
@@ -150,22 +150,17 @@ fi
 info "dweb code ready at $DWEB_DIR"
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  STEP 4: Install opencode CLI
+#  STEP 4: Install pm2 process manager
 # ═══════════════════════════════════════════════════════════════════════════════
 
-if [ "$INSTALL_OPENCODE" = "yes" ]; then
-  step "Installing opencode CLI"
+if [ "$INSTALL_PM2" = "yes" ]; then
+  step "Installing pm2 process manager"
 
-  if command -v opencode &>/dev/null; then
-    info "opencode CLI already installed: $(opencode --version 2>/dev/null || echo 'unknown')"
+  if command -v pm2 &>/dev/null; then
+    info "pm2 already installed: $(pm2 --version 2>/dev/null || echo 'unknown')"
   else
-    npm install -g @opencode/cli 2>/dev/null || \
-    npm install -g opencode 2>/dev/null || \
-    warn "opencode CLI install failed. Check the package name on npm."
-
-    if command -v opencode &>/dev/null; then
-      info "opencode CLI installed successfully"
-    fi
+    npm install -g pm2 2>/dev/null || \
+    warn "pm2 install failed (non-essential — dweb will still work)"
   fi
 fi
 
@@ -334,7 +329,7 @@ echo "  Commands:"
 echo "    dweb status     — Check if dweb is running"
 echo "    dweb logs       — View server logs"
 echo "    dweb start|stop — Manage the service"
-echo "    opencode        — AI-assisted coding CLI"
+echo "    pm2 list        — Process manager"
 echo ""
 echo "  Files:"
 echo "    Code:       $DWEB_DIR"
