@@ -1,17 +1,19 @@
-pub mod p2p;
-pub mod domain;
-pub mod stack;
+#![allow(unexpected_cfgs)]
+
 pub mod ai;
 pub mod cloud;
 pub mod config;
 pub mod database;
-pub mod sandbox;
+pub mod domain;
 pub mod git;
 pub mod github;
+pub mod p2p;
+pub mod sandbox;
+pub mod stack;
 
+use once_cell::sync::Lazy;
 use std::path::PathBuf;
 use std::sync::Mutex;
-use once_cell::sync::Lazy;
 
 use serde::{Deserialize, Serialize};
 
@@ -90,9 +92,9 @@ async fn get_services() -> Result<Vec<ServiceStatus>, String> {
         let runtimes = stack::detect_runtimes().await.map_err(|e| e.to_string())?;
         for rt in runtimes {
             if let Some((name, port)) = parse_runtime(&rt) {
-                let _ = stack::add_service(
-                    &name, stack::ServiceType::Runtime, port, "detected", false
-                ).await;
+                let _ =
+                    stack::add_service(&name, stack::ServiceType::Runtime, port, "detected", false)
+                        .await;
             }
         }
         services = stack::list_services().await.map_err(|e| e.to_string())?;
@@ -112,7 +114,9 @@ async fn stop_service(name: String) -> Result<(), String> {
 
 #[tauri::command]
 async fn restart_service(name: String) -> Result<(), String> {
-    stack::stop_service(&name).await.map_err(|e| e.to_string())?;
+    stack::stop_service(&name)
+        .await
+        .map_err(|e| e.to_string())?;
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     stack::start_service(&name).await.map_err(|e| e.to_string())
 }
@@ -185,7 +189,10 @@ async fn resolve_domain(domain: String) -> Result<domain::DomainRecord, String> 
             let _ = crate::database::save_domain_record(&db_record);
             Ok(record)
         }
-        None => Err(format!("Domain '{}' not found on the network. Register it first.", domain)),
+        None => Err(format!(
+            "Domain '{}' not found on the network. Register it first.",
+            domain
+        )),
     }
 }
 
@@ -217,7 +224,9 @@ async fn renew_domain(name: String) -> Result<domain::DomainRecord, String> {
 
 #[tauri::command]
 async fn transfer_domain(name: String, new_owner: String) -> Result<domain::DomainRecord, String> {
-    domain::transfer_domain(&name, &new_owner).await.map_err(|e| e.to_string())
+    domain::transfer_domain(&name, &new_owner)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 // ─── AI Commands ─────────────────────────────────────────────────────────────
@@ -254,7 +263,9 @@ async fn get_active_ai() -> Result<(String, String), String> {
 
 #[tauri::command]
 async fn deploy_to_cloud(provider: String, domain: String) -> Result<String, String> {
-    cloud::deploy(&provider, &domain).await.map_err(|e| e.to_string())
+    cloud::deploy(&provider, &domain)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 // ─── Git / Version Control Commands ──────────────────────────────────────────
@@ -280,7 +291,10 @@ async fn git_stage_all(path: String) -> Result<git::GitOperationResult, String> 
 }
 
 #[tauri::command]
-async fn git_stage_files(path: String, files: Vec<String>) -> Result<git::GitOperationResult, String> {
+async fn git_stage_files(
+    path: String,
+    files: Vec<String>,
+) -> Result<git::GitOperationResult, String> {
     git::stage_files(&std::path::PathBuf::from(&path), files)
 }
 
@@ -341,7 +355,11 @@ async fn git_remotes(path: String) -> Result<Vec<git::RemoteInfo>, String> {
 }
 
 #[tauri::command]
-async fn git_add_remote(path: String, name: String, url: String) -> Result<git::GitOperationResult, String> {
+async fn git_add_remote(
+    path: String,
+    name: String,
+    url: String,
+) -> Result<git::GitOperationResult, String> {
     git::add_remote(&std::path::PathBuf::from(&path), &name, &url)
 }
 
@@ -403,7 +421,13 @@ async fn github_create_repo(
     description: Option<String>,
     private: Option<bool>,
 ) -> Result<github::GitHubRepo, String> {
-    github::create_repo(None, &name, description.as_deref(), private.unwrap_or(false)).await
+    github::create_repo(
+        None,
+        &name,
+        description.as_deref(),
+        private.unwrap_or(false),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -419,19 +443,13 @@ async fn github_download_archive(
         &repo,
         &archive_format.unwrap_or_else(|| "zipball".to_string()),
         branch.as_deref(),
-    ).await
+    )
+    .await
 }
 
 #[tauri::command]
-async fn github_import_repo(
-    full_name: String,
-    dest_path: String,
-) -> Result<git::RepoInfo, String> {
-    github::import_repo(
-        None,
-        &full_name,
-        &std::path::PathBuf::from(&dest_path),
-    ).await
+async fn github_import_repo(full_name: String, dest_path: String) -> Result<git::RepoInfo, String> {
+    github::import_repo(None, &full_name, &std::path::PathBuf::from(&dest_path)).await
 }
 
 // ─── App Entry Point ─────────────────────────────────────────────────────────
@@ -556,9 +574,7 @@ pub fn run_with_args(data_dir: PathBuf, port: u16, name: Option<String>) {
                 #[cfg(desktop)]
                 {
                     use tauri::tray::TrayIconBuilder;
-                    let _tray = TrayIconBuilder::new()
-                        .tooltip(&tray_tooltip)
-                        .build(app)?;
+                    let _tray = TrayIconBuilder::new().tooltip(&tray_tooltip).build(app)?;
                 }
                 Ok(())
             }

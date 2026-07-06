@@ -42,3 +42,10 @@ tools/dweb-launcher.exe
 
 # Test output
 coverage/
+
+# Runtime data
+shared-files/
+SESSION-SUMMARY.md
+
+# Playwright test artifacts
+test-results/

@@ -10,7 +10,7 @@ interface SidebarProps {
 const navItems: { id: View; label: string; icon: React.ReactNode; badge?: string }[] = [
   { id: "dashboard", label: "Dashboard", icon: <Gauge size={20} /> },
   { id: "browser", label: "Browser", icon: <Globe size={20} /> },
-  { id: "ai-agent", label: "AI Agent", icon: <Bot size={20} />, badge: "NEW" },
+  { id: "ai-agent", label: "AI Agent", icon: <Bot size={20} /> },
   { id: "domains", label: "Domains", icon: <Network size={20} /> },
   { id: "docs", label: "Docs", icon: <BookOpen size={20} /> },
   { id: "settings", label: "Settings", icon: <Settings size={20} /> },

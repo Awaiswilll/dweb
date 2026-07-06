@@ -17,34 +17,6 @@ const DEFAULTS: IntegrationConfig[] = [
   { platform: "gitlab",    label: "GitLab",     enabled: false, access_token: "", webhook_url: "",            verified: false, lastTested: null, label_icon: "🦊", color: "#FC6D26" },
 ];
 
-function validate(config: IntegrationConfig): { ok: boolean; msg: string } {
-  switch (config.platform) {
-    case "discord":
-      if (!config.webhook_url) return { ok: false, msg: "Webhook URL is required" };
-      if (!config.webhook_url.startsWith("https://discord.com/api/webhooks/"))
-        return { ok: false, msg: "Invalid Discord webhook URL format" };
-      return { ok: true, msg: "Webhook URL format is valid" };
-    case "whatsapp":
-      if (!config.api_key) return { ok: false, msg: "API Key is required" };
-      if (!config.phone_number_id) return { ok: false, msg: "Phone Number ID is required" };
-      return { ok: true, msg: "WhatsApp credentials look valid" };
-    case "linkedin":
-      if (!config.access_token) return { ok: false, msg: "Access Token is required" };
-      return { ok: true, msg: "Access token is present" };
-    case "telegram":
-      if (!config.bot_token) return { ok: false, msg: "Bot Token is required" };
-      if (!/^\d+:[-_a-zA-Z0-9]+$/.test(config.bot_token))
-        return { ok: false, msg: "Invalid bot token format (expected: 123456:ABC-def)" };
-      return { ok: true, msg: "Bot token format is valid" };
-    case "github":
-      if (!config.access_token) return { ok: false, msg: "Personal Access Token is required" };
-      return { ok: true, msg: "GitHub token looks valid" };
-    case "gitlab":
-      if (!config.access_token) return { ok: false, msg: "Personal Access Token is required" };
-      return { ok: true, msg: "GitLab token looks valid" };
-  }
-}
-
 function load(): IntegrationConfig[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -85,11 +57,11 @@ export default function Integrations() {
     if (!config) return;
     setTesting(platform);
     setTimeout(() => {
-      const result = validate(config);
+      const result = { ok: false, msg: "Not yet implemented — backend service pending" };
       setTestResults(prev => ({ ...prev, [platform]: result }));
-      update(platform, { verified: result.ok, lastTested: new Date().toISOString() });
+      update(platform, { verified: false, lastTested: new Date().toISOString() });
       setTesting(null);
-    }, 600);
+    }, 400);
   };
 
   return (
@@ -128,7 +100,10 @@ export default function Integrations() {
                 <div className="provider-config-title">
                   <span className="provider-icon-large">{meta.icon}</span>
                   <div>
-                    <h5>{config.label}</h5>
+                    <h5>
+                      {config.label}
+                      <span className="badge badge-stub" style={{ fontSize: 10, marginLeft: 6, padding: '1px 6px', borderRadius: 4, background: 'var(--bg-tertiary)', color: 'var(--text-muted)', verticalAlign: 'middle' }}>🔶 Stub</span>
+                    </h5>
                     <span className="text-muted-sm">{meta.description}</span>
                   </div>
                 </div>
@@ -172,7 +147,8 @@ export default function Integrations() {
                     <button
                       className="btn btn-sm btn-secondary"
                       onClick={() => handleTest(config.platform)}
-                      disabled={testing === config.platform}
+                      disabled={true}
+                      title="Backend not yet implemented"
                     >
                       {testing === config.platform ? (
                         <RefreshCw size={14} className="spin" />

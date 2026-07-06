@@ -36,7 +36,7 @@ pub enum ServiceState {
 }
 
 struct SpawnedProcess {
-    pid: u32,
+    pid: Option<u32>,
     child: Child,
 }
 
@@ -51,22 +51,23 @@ static PROCESS_COUNT: AtomicUsize = AtomicUsize::new(0);
 static PROCESSES: LazyLock<Mutex<HashMap<String, ManagedProcess>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-static SERVICES: LazyLock<Mutex<HashMap<String, ManagedService>>> =
-    LazyLock::new(|| {
-        let mut m = HashMap::new();
-        let known: Vec<(&str, ServiceType, u16)> = vec![
-            ("Node.js", ServiceType::Runtime, 3000),
-            ("Python", ServiceType::Runtime, 8000),
-            ("PHP", ServiceType::Runtime, 8080),
-            ("Go", ServiceType::Runtime, 8080),
-            ("Ruby", ServiceType::Runtime, 3000),
-            ("MySQL", ServiceType::Database, 3306),
-            ("PostgreSQL", ServiceType::Database, 5432),
-            ("MongoDB", ServiceType::Database, 27017),
-            ("Redis", ServiceType::Database, 6379),
-        ];
-        for (name, st, port) in known {
-            m.insert(name.to_string(), ManagedService {
+static SERVICES: LazyLock<Mutex<HashMap<String, ManagedService>>> = LazyLock::new(|| {
+    let mut m = HashMap::new();
+    let known: Vec<(&str, ServiceType, u16)> = vec![
+        ("Node.js", ServiceType::Runtime, 3000),
+        ("Python", ServiceType::Runtime, 8000),
+        ("PHP", ServiceType::Runtime, 8080),
+        ("Go", ServiceType::Runtime, 8080),
+        ("Ruby", ServiceType::Runtime, 3000),
+        ("MySQL", ServiceType::Database, 3306),
+        ("PostgreSQL", ServiceType::Database, 5432),
+        ("MongoDB", ServiceType::Database, 27017),
+        ("Redis", ServiceType::Database, 6379),
+    ];
+    for (name, st, port) in known {
+        m.insert(
+            name.to_string(),
+            ManagedService {
                 name: name.to_string(),
                 service_type: st,
                 port,
@@ -77,10 +78,11 @@ static SERVICES: LazyLock<Mutex<HashMap<String, ManagedService>>> =
                 cpu: 0.0,
                 memory: 0,
                 started_at: None,
-            });
-        }
-        Mutex::new(m)
-    });
+            },
+        );
+    }
+    Mutex::new(m)
+});
 
 // ─── Public API ──────────────────────────────────────────────────────────────
 
@@ -92,18 +94,21 @@ pub async fn add_service(
     auto_start: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut services = SERVICES.lock().await;
-    services.insert(name.to_string(), ManagedService {
-        name: name.to_string(),
-        service_type,
-        port,
-        version: version.to_string(),
-        auto_start,
-        status: ServiceState::Stopped,
-        pid: None,
-        cpu: 0.0,
-        memory: 0,
-        started_at: None,
-    });
+    services.insert(
+        name.to_string(),
+        ManagedService {
+            name: name.to_string(),
+            service_type,
+            port,
+            version: version.to_string(),
+            auto_start,
+            status: ServiceState::Stopped,
+            pid: None,
+            cpu: 0.0,
+            memory: 0,
+            started_at: None,
+        },
+    );
     Ok(())
 }
 
@@ -164,13 +169,15 @@ pub async fn start_service(name: &str) -> Result<(), Box<dyn std::error::Error>>
             Ok(sp) => {
                 let now = chrono::Utc::now().to_rfc3339();
                 svc.status = ServiceState::Running;
-                svc.pid = Some(sp.pid);
+                svc.pid = sp.pid;
                 svc.started_at = Some(now);
                 svc.cpu = 0.5;
                 svc.memory = 50 * 1024 * 1024;
                 PROCESS_COUNT.fetch_add(1, Ordering::SeqCst);
 
-                let _ = crate::sandbox::contain_process(sp.pid);
+                if let Some(pid) = sp.pid {
+                    let _ = crate::sandbox::contain_process(pid);
+                }
 
                 Ok((sp.pid, sp.child))
             }
@@ -181,7 +188,7 @@ pub async fn start_service(name: &str) -> Result<(), Box<dyn std::error::Error>>
         }
     };
 
-    let (pid, child) = spawned?;
+    let (_pid, mut child) = spawned?;
 
     let service_name = svc_name.clone();
     let health_task = tokio::spawn(async move {
@@ -217,11 +224,13 @@ pub async fn stop_service(name: &str) -> Result<(), Box<dyn std::error::Error>> 
         if cfg!(target_os = "windows") {
             let _ = Command::new("taskkill")
                 .args(["/PID", &pid.to_string(), "/F"])
-                .output().await;
+                .output()
+                .await;
         } else {
             let _ = Command::new("kill")
                 .args(["-9", &pid.to_string()])
-                .output().await;
+                .output()
+                .await;
         }
     }
 
@@ -251,7 +260,9 @@ pub fn get_process_count() -> usize {
 
 // ─── Process Management ──────────────────────────────────────────────────────
 
-async fn try_start_process(svc: &ManagedService) -> Result<SpawnedProcess, Box<dyn std::error::Error>> {
+async fn try_start_process(
+    svc: &ManagedService,
+) -> Result<SpawnedProcess, Box<dyn std::error::Error>> {
     match svc.name.as_str() {
         "Node.js" => {
             let check = Command::new("node").arg("--version").output().await;
@@ -259,7 +270,7 @@ async fn try_start_process(svc: &ManagedService) -> Result<SpawnedProcess, Box<d
                 return Err("Node.js not found on PATH. Install from https://nodejs.org".into());
             }
             let port = svc.port;
-            let mut child = Command::new("node")
+            let child = Command::new("node")
                 .args([
                     "-e",
                     &format!(
@@ -276,15 +287,25 @@ async fn try_start_process(svc: &ManagedService) -> Result<SpawnedProcess, Box<d
             Ok(SpawnedProcess { pid, child })
         }
         "Python" => {
-            let python_cmd = if Command::new("python3").arg("--version").output().await.is_ok() {
+            let python_cmd = if Command::new("python3")
+                .arg("--version")
+                .output()
+                .await
+                .is_ok()
+            {
                 "python3"
-            } else if Command::new("python").arg("--version").output().await.is_ok() {
+            } else if Command::new("python")
+                .arg("--version")
+                .output()
+                .await
+                .is_ok()
+            {
                 "python"
             } else {
                 return Err("Python not found on PATH".into());
             };
             let port = svc.port;
-            let mut child = Command::new(python_cmd)
+            let child = Command::new(python_cmd)
                 .args(["-m", "http.server", &port.to_string()])
                 .spawn()
                 .map_err(|e| format!("Failed to spawn Python: {}", e))?;
@@ -297,7 +318,7 @@ async fn try_start_process(svc: &ManagedService) -> Result<SpawnedProcess, Box<d
                 return Err("PHP not found on PATH".into());
             }
             let port = svc.port;
-            let mut child = Command::new("php")
+            let child = Command::new("php")
                 .args(["-S", &format!("0.0.0.0:{}", port)])
                 .spawn()
                 .map_err(|e| format!("Failed to spawn PHP: {}", e))?;
@@ -310,16 +331,14 @@ async fn try_start_process(svc: &ManagedService) -> Result<SpawnedProcess, Box<d
                 return Err("Ruby not found on PATH".into());
             }
             let port = svc.port;
-            let mut child = Command::new("ruby")
+            let child = Command::new("ruby")
                 .args(["-run", "-e", "httpd", "--", "-p", &port.to_string()])
                 .spawn()
                 .map_err(|e| format!("Failed to spawn Ruby: {}", e))?;
             let pid = child.id();
             Ok(SpawnedProcess { pid, child })
         }
-        _ => {
-            Err(format!("Cannot auto-start '{}': no spawn handler defined", svc.name).into())
-        }
+        _ => Err(format!("Cannot auto-start '{}': no spawn handler defined", svc.name).into()),
     }
 }
 
@@ -382,12 +401,17 @@ pub async fn detect_databases() -> Result<Vec<String>, Box<dyn std::error::Error
     for (cmd, name, port) in &checks {
         let output = if cfg!(target_os = "windows") {
             Command::new("cmd")
-                .args(["/c", &format!("tasklist /FI \"IMAGENAME eq {}.exe\" 2>NUL", cmd)])
-                .output().await
+                .args([
+                    "/c",
+                    &format!("tasklist /FI \"IMAGENAME eq {}.exe\" 2>NUL", cmd),
+                ])
+                .output()
+                .await
         } else {
             Command::new("sh")
                 .args(["-c", &format!("pgrep -x {} 2>/dev/null", cmd)])
-                .output().await
+                .output()
+                .await
         };
 
         if let Ok(out) = output {

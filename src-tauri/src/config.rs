@@ -12,8 +12,12 @@ use crate::ai::ProviderConfig;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+#[cfg(feature = "encryption")]
+use sha2::Digest;
+
 // ─── Encryption helpers ─────────────────────────────────────────────────────
 
+#[cfg(feature = "encryption")]
 fn derive_encryption_key() -> [u8; 32] {
     let seed = format!("{}-dweb-secret-v1", std::env::consts::ARCH);
     let hash = sha2::Sha256::digest(seed.as_bytes());
@@ -26,7 +30,7 @@ fn derive_encryption_key() -> [u8; 32] {
 fn encrypt_value(plaintext: &str) -> Option<String> {
     use aes_gcm::aead::{Aead, KeyInit};
     use aes_gcm::{Aes256Gcm, Nonce};
-    use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
     use rand::RngCore;
 
     let key = aes_gcm::Key::<Aes256Gcm>::from_slice(&derive_encryption_key());
@@ -49,7 +53,7 @@ fn encrypt_value(plaintext: &str) -> Option<String> {
 fn decrypt_value(ciphertext_b64: &str) -> Option<String> {
     use aes_gcm::aead::{Aead, KeyInit};
     use aes_gcm::{Aes256Gcm, Nonce};
-    use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 
     let combined = BASE64.decode(ciphertext_b64.as_bytes()).ok()?;
     if combined.len() < 12 {
@@ -134,25 +138,25 @@ impl AppConfig {
                 if let Some(val) = cp.aws_access_key.take() {
                     cp.aws_access_key = val
                         .strip_prefix("enc:")
-                        .and_then(|v| decrypt_value(v))
+                        .and_then(decrypt_value)
                         .or(Some(val));
                 }
                 if let Some(val) = cp.aws_secret_key.take() {
                     cp.aws_secret_key = val
                         .strip_prefix("enc:")
-                        .and_then(|v| decrypt_value(v))
+                        .and_then(decrypt_value)
                         .or(Some(val));
                 }
                 if let Some(val) = cp.netlify_token.take() {
                     cp.netlify_token = val
                         .strip_prefix("enc:")
-                        .and_then(|v| decrypt_value(v))
+                        .and_then(decrypt_value)
                         .or(Some(val));
                 }
                 if let Some(val) = cp.vercel_token.take() {
                     cp.vercel_token = val
                         .strip_prefix("enc:")
-                        .and_then(|v| decrypt_value(v))
+                        .and_then(decrypt_value)
                         .or(Some(val));
                 }
 
@@ -176,7 +180,7 @@ impl AppConfig {
             .get_mut("cloud_providers")
             .and_then(|v| v.as_object_mut())
         {
-            for field in &[
+            for field in [
                 "aws_access_key",
                 "aws_secret_key",
                 "netlify_token",

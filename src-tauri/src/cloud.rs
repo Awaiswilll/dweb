@@ -34,8 +34,8 @@ fn hmac_sha256(key: &[u8], data: &[u8]) -> Vec<u8> {
         ipad[i] ^= k[i];
         opad[i] ^= k[i];
     }
-    let inner = Sha256::digest(&[ipad, data.to_vec()].concat());
-    Sha256::digest(&[opad, inner.to_vec()].concat()).to_vec()
+    let inner = Sha256::digest([ipad, data.to_vec()].concat());
+    Sha256::digest([opad, inner.to_vec()].concat()).to_vec()
 }
 
 fn get_signature_key(key: &str, date_stamp: &str, region: &str, service: &str) -> Vec<u8> {
@@ -95,11 +95,7 @@ async fn deploy_aws(domain: &str) -> Result<String, Box<dyn std::error::Error>> 
     );
     let canonical_request = format!(
         "PUT\n{}\n{}\n{}\n{}\n{}",
-        canonical_uri,
-        canonical_querystring,
-        canonical_headers,
-        signed_headers,
-        payload_hash
+        canonical_uri, canonical_querystring, canonical_headers, signed_headers, payload_hash
     );
 
     let algorithm = "AWS4-HMAC-SHA256";
@@ -129,9 +125,7 @@ async fn deploy_aws(domain: &str) -> Result<String, Box<dyn std::error::Error>> 
         .header("Authorization", &authorization);
 
     if !body.is_empty() {
-        req = req
-            .header("Content-Type", "application/xml")
-            .body(body);
+        req = req.header("Content-Type", "application/xml").body(body);
     }
 
     let response = req.send().await?;
@@ -179,10 +173,11 @@ async fn deploy_netlify(domain: &str) -> Result<String, Box<dyn std::error::Erro
 
     if response.status().is_success() {
         let data: serde_json::Value = response.json().await?;
+        let default_url = format!("https://{}.netlify.app", domain);
         let site_url = data["ssl_url"]
             .as_str()
             .or_else(|| data["url"].as_str())
-            .unwrap_or(&format!("https://{}.netlify.app", domain));
+            .unwrap_or(&default_url);
 
         let result = DeploymentResult {
             provider: "Netlify".to_string(),
