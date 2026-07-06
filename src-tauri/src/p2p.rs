@@ -48,7 +48,7 @@ static P2P_MANAGER: Lazy<Arc<Mutex<Option<P2PManager>>>> = Lazy::new(|| Arc::new
 pub async fn init(data_dir: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     // Shut down any existing manager first to kill orphaned tasks
     let mut guard = P2P_MANAGER.lock().await;
-    if let Some(old) = guard.take() {
+    if let Some(mut old) = guard.take() {
         old.shutdown().await;
         log::info!("P2P previous manager shut down");
     }

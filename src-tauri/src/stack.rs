@@ -270,7 +270,7 @@ async fn try_start_process(
                 return Err("Node.js not found on PATH. Install from https://nodejs.org".into());
             }
             let port = svc.port;
-            let mut child = Command::new("node")
+            let child = Command::new("node")
                 .args([
                     "-e",
                     &format!(
@@ -305,7 +305,7 @@ async fn try_start_process(
                 return Err("Python not found on PATH".into());
             };
             let port = svc.port;
-            let mut child = Command::new(python_cmd)
+            let child = Command::new(python_cmd)
                 .args(["-m", "http.server", &port.to_string()])
                 .spawn()
                 .map_err(|e| format!("Failed to spawn Python: {}", e))?;
@@ -318,7 +318,7 @@ async fn try_start_process(
                 return Err("PHP not found on PATH".into());
             }
             let port = svc.port;
-            let mut child = Command::new("php")
+            let child = Command::new("php")
                 .args(["-S", &format!("0.0.0.0:{}", port)])
                 .spawn()
                 .map_err(|e| format!("Failed to spawn PHP: {}", e))?;
@@ -331,7 +331,7 @@ async fn try_start_process(
                 return Err("Ruby not found on PATH".into());
             }
             let port = svc.port;
-            let mut child = Command::new("ruby")
+            let child = Command::new("ruby")
                 .args(["-run", "-e", "httpd", "--", "-p", &port.to_string()])
                 .spawn()
                 .map_err(|e| format!("Failed to spawn Ruby: {}", e))?;
