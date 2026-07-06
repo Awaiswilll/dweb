@@ -46,7 +46,7 @@ const BOOTSTRAP_NODES: &[&str] = &[
 static P2P_MANAGER: Lazy<Arc<Mutex<Option<P2PManager>>>> = Lazy::new(|| Arc::new(Mutex::new(None)));
 
 /// Initialize the global P2P manager (called once at startup).
-pub async fn init(data_dir: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn init(data_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     // Shut down any existing manager first to kill orphaned tasks
     let mut guard = P2P_MANAGER.lock().await;
     if let Some(mut old) = guard.take() {

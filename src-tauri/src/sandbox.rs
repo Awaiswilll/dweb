@@ -40,7 +40,7 @@ impl InstanceIdentity {
         }
     }
 
-    pub fn load_or_create(data_dir: &PathBuf) -> Self {
+    pub fn load_or_create(data_dir: &Path) -> Self {
         let path = data_dir.join("identity.json");
         if let Ok(content) = std::fs::read_to_string(&path) {
             if let Ok(id) = serde_json::from_str(&content) {
@@ -151,7 +151,7 @@ mod ffi {
 static JOB_HANDLE: Mutex<Option<ffi::JobHandle>> = Mutex::new(None);
 
 /// Initialize the sandbox subsystem. Creates/stores instance identity.
-pub fn init(data_dir: &PathBuf) {
+pub fn init(data_dir: &Path) {
     let identity = InstanceIdentity::load_or_create(data_dir);
     log::info!(
         "Sandbox initialized — identity: {}…",
