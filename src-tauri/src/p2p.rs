@@ -143,18 +143,15 @@ impl P2PManager {
 
     /// Abort all tracked background tasks. Call before dropping to prevent
     /// orphaned-task panics in the Tokio runtime.
-    pub async fn shutdown(&self) {
+    pub async fn shutdown(&mut self) {
         for handle in &self.task_handles {
             handle.abort();
         }
-        // Wait briefly for tasks to actually stop
-        for handle in &self.task_handles {
+        // Wait briefly for tasks to actually stop (drain to consume handles)
+        for handle in self.task_handles.drain(..) {
             let _ = handle.await;
         }
-        log::info!(
-            "P2P manager: {} background task(s) aborted",
-            self.task_handles.len()
-        );
+        log::info!("P2P manager: all background tasks shut down");
     }
 
     /// Hex-encoded public key of this node.

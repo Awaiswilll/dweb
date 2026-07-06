@@ -36,7 +36,7 @@ pub enum ServiceState {
 }
 
 struct SpawnedProcess {
-    pid: u32,
+    pid: Option<u32>,
     child: Child,
 }
 
@@ -169,13 +169,15 @@ pub async fn start_service(name: &str) -> Result<(), Box<dyn std::error::Error>>
             Ok(sp) => {
                 let now = chrono::Utc::now().to_rfc3339();
                 svc.status = ServiceState::Running;
-                svc.pid = Some(sp.pid);
+                svc.pid = sp.pid;
                 svc.started_at = Some(now);
                 svc.cpu = 0.5;
                 svc.memory = 50 * 1024 * 1024;
                 PROCESS_COUNT.fetch_add(1, Ordering::SeqCst);
 
-                let _ = crate::sandbox::contain_process(sp.pid);
+                if let Some(pid) = sp.pid {
+                    let _ = crate::sandbox::contain_process(pid);
+                }
 
                 Ok((sp.pid, sp.child))
             }
@@ -186,7 +188,7 @@ pub async fn start_service(name: &str) -> Result<(), Box<dyn std::error::Error>>
         }
     };
 
-    let (pid, child) = spawned?;
+    let (_pid, mut child) = spawned?;
 
     let service_name = svc_name.clone();
     let health_task = tokio::spawn(async move {

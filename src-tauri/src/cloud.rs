@@ -173,10 +173,11 @@ async fn deploy_netlify(domain: &str) -> Result<String, Box<dyn std::error::Erro
 
     if response.status().is_success() {
         let data: serde_json::Value = response.json().await?;
+        let default_url = format!("https://{}.netlify.app", domain);
         let site_url = data["ssl_url"]
             .as_str()
             .or_else(|| data["url"].as_str())
-            .unwrap_or(&format!("https://{}.netlify.app", domain));
+            .unwrap_or(&default_url);
 
         let result = DeploymentResult {
             provider: "Netlify".to_string(),

@@ -1,3 +1,5 @@
+#![allow(unexpected_cfgs)]
+
 pub mod ai;
 pub mod cloud;
 pub mod config;
