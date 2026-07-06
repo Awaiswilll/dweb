@@ -34,8 +34,8 @@ fn hmac_sha256(key: &[u8], data: &[u8]) -> Vec<u8> {
         ipad[i] ^= k[i];
         opad[i] ^= k[i];
     }
-    let inner = Sha256::digest(&[ipad, data.to_vec()].concat());
-    Sha256::digest(&[opad, inner.to_vec()].concat()).to_vec()
+    let inner = Sha256::digest([ipad, data.to_vec()].concat());
+    Sha256::digest([opad, inner.to_vec()].concat()).to_vec()
 }
 
 fn get_signature_key(key: &str, date_stamp: &str, region: &str, service: &str) -> Vec<u8> {

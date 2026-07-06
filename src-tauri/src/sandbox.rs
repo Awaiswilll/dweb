@@ -8,6 +8,7 @@
 //!    access limited to their project directory (planned).
 
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 use std::path::PathBuf;
 
 #[cfg(target_os = "windows")]
@@ -52,7 +53,7 @@ impl InstanceIdentity {
         identity
     }
 
-    pub fn save(&self, data_dir: &PathBuf) -> Result<(), String> {
+    pub fn save(&self, data_dir: &Path) -> Result<(), String> {
         let path = data_dir.join("identity.json");
         let content =
             serde_json::to_string_pretty(self).map_err(|e| format!("Serialize: {}", e))?;

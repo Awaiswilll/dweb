@@ -15,6 +15,7 @@ use std::path::PathBuf;
 
 // ─── Encryption helpers ─────────────────────────────────────────────────────
 
+#[cfg(feature = "encryption")]
 fn derive_encryption_key() -> [u8; 32] {
     let seed = format!("{}-dweb-secret-v1", std::env::consts::ARCH);
     let hash = sha2::Sha256::digest(seed.as_bytes());
@@ -135,25 +136,25 @@ impl AppConfig {
                 if let Some(val) = cp.aws_access_key.take() {
                     cp.aws_access_key = val
                         .strip_prefix("enc:")
-                        .and_then(|v| decrypt_value(v))
+                        .and_then(decrypt_value)
                         .or(Some(val));
                 }
                 if let Some(val) = cp.aws_secret_key.take() {
                     cp.aws_secret_key = val
                         .strip_prefix("enc:")
-                        .and_then(|v| decrypt_value(v))
+                        .and_then(decrypt_value)
                         .or(Some(val));
                 }
                 if let Some(val) = cp.netlify_token.take() {
                     cp.netlify_token = val
                         .strip_prefix("enc:")
-                        .and_then(|v| decrypt_value(v))
+                        .and_then(decrypt_value)
                         .or(Some(val));
                 }
                 if let Some(val) = cp.vercel_token.take() {
                     cp.vercel_token = val
                         .strip_prefix("enc:")
-                        .and_then(|v| decrypt_value(v))
+                        .and_then(decrypt_value)
                         .or(Some(val));
                 }
 

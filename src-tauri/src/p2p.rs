@@ -88,7 +88,7 @@ pub struct P2PManager {
 
 impl P2PManager {
     /// Create and bootstrap a new P2P node.
-    pub async fn new(data_dir: &PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
+    pub async fn new(data_dir: &Path) -> Result<Self, Box<dyn std::error::Error>> {
         let mut config = DhtConfig::default();
         // Configure bootstrap nodes for the DHT
         let nodes: Vec<std::net::SocketAddr> = BOOTSTRAP_NODES
@@ -136,7 +136,7 @@ impl P2PManager {
             keypair: Keypair::default(),
             started_at: chrono::Utc::now(),
             resolved_count: std::sync::atomic::AtomicU64::new(0),
-            data_dir: data_dir.clone(),
+            data_dir: data_dir.to_path_buf(),
             task_handles,
         })
     }
@@ -223,7 +223,7 @@ impl P2PManager {
                     );
 
                     if let Some(first) = response.peers.first() {
-                        let peer_id = hex::encode(&*first.public_key);
+                        let peer_id = hex::encode(*first.public_key);
                         let address = first
                             .relay_addresses
                             .first()
@@ -290,7 +290,7 @@ impl P2PManager {
             match timed_result {
                 Ok(Some(Ok(Some(response)))) => {
                     if let Some(first) = response.peers.first() {
-                        let peer_id = hex::encode(&*first.public_key);
+                        let peer_id = hex::encode(*first.public_key);
                         let address = first
                             .relay_addresses
                             .first()
@@ -372,7 +372,7 @@ pub async fn publish(name: &str, port: u16) -> Result<String, Box<dyn std::error
     let guard = with_manager().await?;
     let mgr = guard.as_ref().unwrap();
 
-    let _ = mgr.announce_domain(name, port).await?;
+    mgr.announce_domain(name, port).await?;
 
     // Also persist to the local domain database for localhost shortcut resolution.
     let public_key = mgr.public_key_hex();

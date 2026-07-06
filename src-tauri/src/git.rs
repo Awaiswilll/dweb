@@ -298,7 +298,7 @@ fn get_ahead_behind(repo: &git2::Repository, branch_name: &str) -> (usize, usize
     };
 
     match repo.graph_ahead_behind(local_oid, upstream_oid) {
-        Ok((a, b)) => (a as usize, b as usize),
+        Ok((a, b)) => (a, b),
         Err(_) => (0, 0),
     }
 }
