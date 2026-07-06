@@ -123,10 +123,7 @@ mod ffi {
 
     #[link(name = "kernel32")]
     unsafe extern "system" {
-        pub fn CreateJobObjectW(
-            lpJobAttributes: LPSECURITY_ATTRIBUTES,
-            lpName: LPCWSTR,
-        ) -> HANDLE;
+        pub fn CreateJobObjectW(lpJobAttributes: LPSECURITY_ATTRIBUTES, lpName: LPCWSTR) -> HANDLE;
 
         pub fn SetInformationJobObject(
             hJob: HANDLE,
@@ -135,10 +132,7 @@ mod ffi {
             cbJobObjectInfoLength: DWORD,
         ) -> BOOL;
 
-        pub fn AssignProcessToJobObject(
-            hJob: HANDLE,
-            hProcess: HANDLE,
-        ) -> BOOL;
+        pub fn AssignProcessToJobObject(hJob: HANDLE, hProcess: HANDLE) -> BOOL;
 
         pub fn OpenProcess(
             dwDesiredAccess: DWORD,
@@ -156,7 +150,10 @@ static JOB_HANDLE: Mutex<Option<ffi::JobHandle>> = Mutex::new(None);
 /// Initialize the sandbox subsystem. Creates/stores instance identity.
 pub fn init(data_dir: &PathBuf) {
     let identity = InstanceIdentity::load_or_create(data_dir);
-    log::info!("Sandbox initialized — identity: {}…", &identity.public_key[..8]);
+    log::info!(
+        "Sandbox initialized — identity: {}…",
+        &identity.public_key[..8]
+    );
 }
 
 /// Initialize the service container (Job Object on Windows).
@@ -214,9 +211,7 @@ pub fn init_service_container() {
             if let Ok(mut guard) = JOB_HANDLE.lock() {
                 *guard = Some(ffi::JobHandle(job));
             }
-            log::info!(
-                "Service container (Job Object) created — 512 MB limit, kill-on-close"
-            );
+            log::info!("Service container (Job Object) created — 512 MB limit, kill-on-close");
         }
     }
 

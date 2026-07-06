@@ -95,11 +95,7 @@ async fn deploy_aws(domain: &str) -> Result<String, Box<dyn std::error::Error>> 
     );
     let canonical_request = format!(
         "PUT\n{}\n{}\n{}\n{}\n{}",
-        canonical_uri,
-        canonical_querystring,
-        canonical_headers,
-        signed_headers,
-        payload_hash
+        canonical_uri, canonical_querystring, canonical_headers, signed_headers, payload_hash
     );
 
     let algorithm = "AWS4-HMAC-SHA256";
@@ -129,9 +125,7 @@ async fn deploy_aws(domain: &str) -> Result<String, Box<dyn std::error::Error>> 
         .header("Authorization", &authorization);
 
     if !body.is_empty() {
-        req = req
-            .header("Content-Type", "application/xml")
-            .body(body);
+        req = req.header("Content-Type", "application/xml").body(body);
     }
 
     let response = req.send().await?;

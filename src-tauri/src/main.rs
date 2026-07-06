@@ -37,12 +37,15 @@ fn main() {
     });
 
     // Ensure the data directory exists
-    std::fs::create_dir_all(&data_dir)
-        .expect("Failed to create data directory");
+    std::fs::create_dir_all(&data_dir).expect("Failed to create data directory");
 
     dweb_lib::run_with_args(
         data_dir,
         args.port,
-        if args.name.is_empty() { None } else { Some(args.name) },
+        if args.name.is_empty() {
+            None
+        } else {
+            Some(args.name)
+        },
     );
 }

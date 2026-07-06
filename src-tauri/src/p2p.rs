@@ -1,6 +1,6 @@
+use dht_rpc::{Commit, DhtConfig, IdBytes};
 use futures::StreamExt;
-use hyperdht::{Keypair, adht::Dht};
-use dht_rpc::{DhtConfig, IdBytes, Commit};
+use hyperdht::{adht::Dht, Keypair};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -42,8 +42,7 @@ const BOOTSTRAP_NODES: &[&str] = &[
 
 // ─── Singleton ──────────────────────────────────────────────────────────────
 
-static P2P_MANAGER: Lazy<Arc<Mutex<Option<P2PManager>>>> =
-    Lazy::new(|| Arc::new(Mutex::new(None)));
+static P2P_MANAGER: Lazy<Arc<Mutex<Option<P2PManager>>>> = Lazy::new(|| Arc::new(Mutex::new(None)));
 
 /// Initialize the global P2P manager (called once at startup).
 pub async fn init(data_dir: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
@@ -63,7 +62,8 @@ pub async fn init(data_dir: &PathBuf) -> Result<(), Box<dyn std::error::Error>> 
 }
 
 /// Convenience: get a reference to the singleton manager.
-async fn with_manager() -> Result<tokio::sync::MutexGuard<'static, Option<P2PManager>>, Box<dyn std::error::Error>> {
+async fn with_manager(
+) -> Result<tokio::sync::MutexGuard<'static, Option<P2PManager>>, Box<dyn std::error::Error>> {
     let guard = P2P_MANAGER.lock().await;
     if guard.is_some() {
         Ok(guard)
@@ -151,7 +151,10 @@ impl P2PManager {
         for handle in &self.task_handles {
             let _ = handle.await;
         }
-        log::info!("P2P manager: {} background task(s) aborted", self.task_handles.len());
+        log::info!(
+            "P2P manager: {} background task(s) aborted",
+            self.task_handles.len()
+        );
     }
 
     /// Hex-encoded public key of this node.
@@ -160,7 +163,11 @@ impl P2PManager {
     }
 
     /// Announce a domain on the DHT so remote peers can discover it.
-    pub async fn announce_domain(&self, name: &str, port: u16) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn announce_domain(
+        &self,
+        name: &str,
+        port: u16,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let topic = domain_topic(name);
         let dht_lock = self.dht.lock().await;
         if let Some(ref dht) = *dht_lock {
@@ -173,14 +180,18 @@ impl P2PManager {
 
     /// Look up a domain on the DHT. Returns the first peer that announced it.
     /// Before querying the DHT, checks the local domain store (localhost shortcut).
-    pub async fn resolve_domain(&self, name: &str) -> Result<Option<PublishedSite>, Box<dyn std::error::Error>> {
+    pub async fn resolve_domain(
+        &self,
+        name: &str,
+    ) -> Result<Option<PublishedSite>, Box<dyn std::error::Error>> {
         let name = name.trim().to_lowercase();
 
         // Step 1: Check local domain store first (localhost shortcut).
         // If the domain is registered by any local instance, return it directly.
         if let Ok(Some(local_record)) = crate::database::get_domain_record(&name) {
             if let Some(port) = local_record.target_port {
-                self.resolved_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                self.resolved_count
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 log::info!("Resolved {}.dweb locally (port {})", name, port);
                 return Ok(Some(PublishedSite {
                     domain: name.clone(),
@@ -216,17 +227,21 @@ impl P2PManager {
 
                     if let Some(first) = response.peers.first() {
                         let peer_id = hex::encode(&*first.public_key);
-                        let address = first.relay_addresses.first()
+                        let address = first
+                            .relay_addresses
+                            .first()
                             .map(|a| a.ip().to_string())
                             .unwrap_or_else(|| "0.0.0.0".to_string());
-                        let port = first.relay_addresses.first()
-                            .map(|a| a.port())
-                            .unwrap_or(0);
+                        let port = first.relay_addresses.first().map(|a| a.port()).unwrap_or(0);
 
-                        self.resolved_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        self.resolved_count
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         log::info!(
                             "Resolved {}.dweb on DHT → {}:{} (peer: {}…)",
-                            name, address, port, &peer_id[..8]
+                            name,
+                            address,
+                            port,
+                            &peer_id[..8]
                         );
 
                         return Ok(Some(PublishedSite {
@@ -239,7 +254,10 @@ impl P2PManager {
                     }
                 }
                 Ok(Some(Ok(None))) => {
-                    log::debug!("DHT lookup for {}.dweb returned empty batch (no peers)", name);
+                    log::debug!(
+                        "DHT lookup for {}.dweb returned empty batch (no peers)",
+                        name
+                    );
                 }
                 Ok(Some(Err(e))) => {
                     log::warn!("DHT lookup error for {}.dweb: {}", name, e);
@@ -258,7 +276,10 @@ impl P2PManager {
 
     /// DHT-only lookup that skips the local DB check.
     /// Used by domain::resolve() to avoid redundant DB lookups and prevent circular calls.
-    pub async fn resolve_domain_dht_only(&self, name: &str) -> Result<Option<PublishedSite>, Box<dyn std::error::Error>> {
+    pub async fn resolve_domain_dht_only(
+        &self,
+        name: &str,
+    ) -> Result<Option<PublishedSite>, Box<dyn std::error::Error>> {
         let name = name.trim().to_lowercase();
         let topic = domain_topic(&name);
         let dht_lock = self.dht.lock().await;
@@ -273,15 +294,22 @@ impl P2PManager {
                 Ok(Some(Ok(Some(response)))) => {
                     if let Some(first) = response.peers.first() {
                         let peer_id = hex::encode(&*first.public_key);
-                        let address = first.relay_addresses.first()
+                        let address = first
+                            .relay_addresses
+                            .first()
                             .map(|a| a.ip().to_string())
                             .unwrap_or_else(|| "0.0.0.0".to_string());
-                        let port = first.relay_addresses.first()
-                            .map(|a| a.port())
-                            .unwrap_or(0);
+                        let port = first.relay_addresses.first().map(|a| a.port()).unwrap_or(0);
 
-                        self.resolved_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        log::info!("DHT resolved {}.dweb → {}:{} (peer: {}…)", name, address, port, &peer_id[..8]);
+                        self.resolved_count
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        log::info!(
+                            "DHT resolved {}.dweb → {}:{} (peer: {}…)",
+                            name,
+                            address,
+                            port,
+                            &peer_id[..8]
+                        );
 
                         return Ok(Some(PublishedSite {
                             domain: name.clone(),
@@ -313,9 +341,11 @@ impl P2PManager {
     pub fn status(&self) -> P2PStatus {
         let uptime = chrono::Utc::now() - self.started_at;
         P2PStatus {
-            connected_peers: 0,        // TODO: expose from Dht node
-            routing_table_size: 0,     // TODO: expose from Dht node
-            domains_resolved: self.resolved_count.load(std::sync::atomic::Ordering::Relaxed),
+            connected_peers: 0,    // TODO: expose from Dht node
+            routing_table_size: 0, // TODO: expose from Dht node
+            domains_resolved: self
+                .resolved_count
+                .load(std::sync::atomic::Ordering::Relaxed),
             uptime_seconds: uptime.num_seconds().max(0) as u64,
             public_key: self.public_key_hex(),
             nat_status: "unknown".to_string(),

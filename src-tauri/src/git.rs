@@ -242,15 +242,17 @@ pub fn get_repo_status(path: &Path) -> Result<RepoInfo, String> {
         }
     }
 
-    let is_clean = modified_files.is_empty() && staged_files.is_empty() && untracked_files.is_empty();
+    let is_clean =
+        modified_files.is_empty() && staged_files.is_empty() && untracked_files.is_empty();
 
     // Ahead/behind for current branch
     let (ahead, behind) = get_ahead_behind(&repo, &current_branch);
 
     // Last commit
-    let last_commit = repo.head().ok().and_then(|head| {
-        head.peel_to_commit().ok().map(|c| commit_info(&c))
-    });
+    let last_commit = repo
+        .head()
+        .ok()
+        .and_then(|head| head.peel_to_commit().ok().map(|c| commit_info(&c)));
 
     // Remotes
     let remotes = list_remotes_internal(&repo);
@@ -305,7 +307,8 @@ fn get_ahead_behind(repo: &git2::Repository, branch_name: &str) -> (usize, usize
 pub fn stage_all(path: &Path) -> Result<GitOperationResult, String> {
     let repo = open_repo(path)?;
     let mut index = repo.index().map_err(git_err)?;
-    index.add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+    index
+        .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
         .map_err(git_err)?;
     index.write().map_err(git_err)?;
     Ok(GitOperationResult {
@@ -320,9 +323,9 @@ pub fn stage_files(path: &Path, files: Vec<String>) -> Result<GitOperationResult
     let repo = open_repo(path)?;
     let mut index = repo.index().map_err(git_err)?;
     for file in &files {
-        index.add_path(Path::new(file)).map_err(|e| {
-            format!("Failed to stage '{}': {}", file, e.message())
-        })?;
+        index
+            .add_path(Path::new(file))
+            .map_err(|e| format!("Failed to stage '{}': {}", file, e.message()))?;
     }
     index.write().map_err(git_err)?;
     Ok(GitOperationResult {
@@ -352,7 +355,8 @@ pub fn commit(path: &Path, message: &str) -> Result<CommitInfo, String> {
 
     // Stage all changes first
     let mut index = repo.index().map_err(git_err)?;
-    index.add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+    index
+        .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
         .map_err(git_err)?;
     index.write().map_err(git_err)?;
 
@@ -364,22 +368,8 @@ pub fn commit(path: &Path, message: &str) -> Result<CommitInfo, String> {
     let parent_commit = repo.head().ok().and_then(|h| h.peel_to_commit().ok());
 
     let commit_id = match parent_commit {
-        Some(ref parent) => repo.commit(
-            Some("HEAD"),
-            &sig,
-            &sig,
-            message,
-            &tree,
-            &[parent],
-        ),
-        None => repo.commit(
-            Some("HEAD"),
-            &sig,
-            &sig,
-            message,
-            &tree,
-            &[],
-        ),
+        Some(ref parent) => repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &[parent]),
+        None => repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &[]),
     }
     .map_err(git_err)?;
 
@@ -388,7 +378,11 @@ pub fn commit(path: &Path, message: &str) -> Result<CommitInfo, String> {
 }
 
 /// Push to the remote (default: origin, current branch).
-pub fn push(path: &Path, remote_name: Option<&str>, branch: Option<&str>) -> Result<GitOperationResult, String> {
+pub fn push(
+    path: &Path,
+    remote_name: Option<&str>,
+    branch: Option<&str>,
+) -> Result<GitOperationResult, String> {
     let repo = open_repo(path)?;
     let remote_name = remote_name.unwrap_or("origin");
     let branch = branch.unwrap_or("");
@@ -406,16 +400,22 @@ pub fn push(path: &Path, remote_name: Option<&str>, branch: Option<&str>) -> Res
         branch.to_string()
     };
 
-    let mut remote = repo.find_remote(remote_name).map_err(|e| {
-        format!("Remote '{}' not found: {}", remote_name, e.message())
-    })?;
+    let mut remote = repo
+        .find_remote(remote_name)
+        .map_err(|e| format!("Remote '{}' not found: {}", remote_name, e.message()))?;
 
-    let refspec = format!("refs/heads/{}:refs/heads/{}", branch_to_push, branch_to_push);
+    let refspec = format!(
+        "refs/heads/{}:refs/heads/{}",
+        branch_to_push, branch_to_push
+    );
 
     let mut callbacks = git2::RemoteCallbacks::new();
     callbacks.push_update_reference(|refname, status| {
         if let Some(msg) = status {
-            Err(git2::Error::from_str(&format!("Push rejected '{}': {}", refname, msg)))
+            Err(git2::Error::from_str(&format!(
+                "Push rejected '{}': {}",
+                refname, msg
+            )))
         } else {
             Ok(())
         }
@@ -424,9 +424,9 @@ pub fn push(path: &Path, remote_name: Option<&str>, branch: Option<&str>) -> Res
     let mut opts = git2::PushOptions::new();
     opts.remote_callbacks(callbacks);
 
-    remote.push(&[&refspec], Some(&mut opts)).map_err(|e| {
-        format!("Push failed: {}", e.message())
-    })?;
+    remote
+        .push(&[&refspec], Some(&mut opts))
+        .map_err(|e| format!("Push failed: {}", e.message()))?;
 
     Ok(GitOperationResult {
         success: true,
@@ -436,7 +436,11 @@ pub fn push(path: &Path, remote_name: Option<&str>, branch: Option<&str>) -> Res
 }
 
 /// Pull from the remote (default: origin, current branch).
-pub fn pull(path: &Path, remote_name: Option<&str>, branch: Option<&str>) -> Result<GitOperationResult, String> {
+pub fn pull(
+    path: &Path,
+    remote_name: Option<&str>,
+    branch: Option<&str>,
+) -> Result<GitOperationResult, String> {
     let repo = open_repo(path)?;
     let remote_name = remote_name.unwrap_or("origin");
     let branch = branch.unwrap_or("");
@@ -455,30 +459,38 @@ pub fn pull(path: &Path, remote_name: Option<&str>, branch: Option<&str>) -> Res
     };
 
     // Fetch from remote
-    let mut remote = repo.find_remote(remote_name).map_err(|e| {
-        format!("Remote '{}' not found: {}", remote_name, e.message())
-    })?;
+    let mut remote = repo
+        .find_remote(remote_name)
+        .map_err(|e| format!("Remote '{}' not found: {}", remote_name, e.message()))?;
 
     let mut fetch_opts = git2::FetchOptions::new();
     let mut callbacks = git2::RemoteCallbacks::new();
     callbacks.transfer_progress(|progress| {
-        log::debug!("Fetch: {}/{} objects", progress.received_objects(), progress.total_objects());
+        log::debug!(
+            "Fetch: {}/{} objects",
+            progress.received_objects(),
+            progress.total_objects()
+        );
         true
     });
     fetch_opts.remote_callbacks(callbacks);
 
     // Use a temp refspec for fetch
-    let refspec = format!("+refs/heads/{}:refs/remotes/{}/{}", branch_to_merge, remote_name, branch_to_merge);
+    let refspec = format!(
+        "+refs/heads/{}:refs/remotes/{}/{}",
+        branch_to_merge, remote_name, branch_to_merge
+    );
 
-    remote.fetch(&[&refspec], Some(&mut fetch_opts), None).map_err(|e| {
-        format!("Fetch failed: {}", e.message())
-    })?;
+    remote
+        .fetch(&[&refspec], Some(&mut fetch_opts), None)
+        .map_err(|e| format!("Fetch failed: {}", e.message()))?;
 
     // Merge fetched branch
-    let fetch_head = repo.find_reference("FETCH_HEAD").map_err(|e| {
-        format!("Cannot find FETCH_HEAD: {}", e.message())
-    })?;
-    let fetch_commit = repo.reference_to_annotated_commit(&fetch_head)
+    let fetch_head = repo
+        .find_reference("FETCH_HEAD")
+        .map_err(|e| format!("Cannot find FETCH_HEAD: {}", e.message()))?;
+    let fetch_commit = repo
+        .reference_to_annotated_commit(&fetch_head)
         .map_err(git_err)?;
 
     let analysis = repo.merge_analysis(&[&fetch_commit]).map_err(git_err)?;
@@ -495,13 +507,18 @@ pub fn pull(path: &Path, remote_name: Option<&str>, branch: Option<&str>) -> Res
         // Fast-forward merge
         let refname = format!("refs/heads/{}", branch_to_merge);
         let mut reference = repo.find_reference(&refname).map_err(git_err)?;
-        reference.set_target(fetch_commit.id(), "Pull: fast-forward").map_err(git_err)?;
+        reference
+            .set_target(fetch_commit.id(), "Pull: fast-forward")
+            .map_err(git_err)?;
         repo.set_head(&refname).map_err(git_err)?;
         repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
             .map_err(git_err)?;
         Ok(GitOperationResult {
             success: true,
-            message: format!("Fast-forward merged '{}' from '{}'", branch_to_merge, remote_name),
+            message: format!(
+                "Fast-forward merged '{}' from '{}'",
+                branch_to_merge, remote_name
+            ),
             details: None,
         })
     } else {
@@ -511,7 +528,10 @@ pub fn pull(path: &Path, remote_name: Option<&str>, branch: Option<&str>) -> Res
 
         let mut merge_opts = git2::MergeOptions::new();
         if let Err(e) = repo.merge(&[&fetch_commit], Some(&mut merge_opts), Some(&mut checkout)) {
-            return Err(format!("Merge failed: {}. Resolve conflicts and commit.", e.message()));
+            return Err(format!(
+                "Merge failed: {}. Resolve conflicts and commit.",
+                e.message()
+            ));
         }
 
         // Check if there are conflicts
@@ -525,9 +545,16 @@ pub fn pull(path: &Path, remote_name: Option<&str>, branch: Option<&str>) -> Res
 
         // Auto-commit the merge
         let sig = repo.signature().map_err(git_err)?;
-        let tree_id = repo.index().map_err(git_err)?.write_tree().map_err(git_err)?;
+        let tree_id = repo
+            .index()
+            .map_err(git_err)?
+            .write_tree()
+            .map_err(git_err)?;
         let tree = repo.find_tree(tree_id).map_err(git_err)?;
-        let head_commit = repo.head().and_then(|h| h.peel_to_commit()).map_err(git_err)?;
+        let head_commit = repo
+            .head()
+            .and_then(|h| h.peel_to_commit())
+            .map_err(git_err)?;
 
         // Peel the annotated commit to a regular commit for the parent list
         let fetch_commit_obj = fetch_commit.id();
@@ -537,7 +564,10 @@ pub fn pull(path: &Path, remote_name: Option<&str>, branch: Option<&str>) -> Res
             Some("HEAD"),
             &sig,
             &sig,
-            &format!("Merge remote-tracking branch '{}/{}'", remote_name, branch_to_merge),
+            &format!(
+                "Merge remote-tracking branch '{}/{}'",
+                remote_name, branch_to_merge
+            ),
             &tree,
             &[&head_commit, &fetch_commit_parent],
         )
@@ -558,7 +588,10 @@ pub fn list_branches(path: &Path) -> Result<Vec<BranchInfo>, String> {
 }
 
 fn list_branches_internal(repo: &git2::Repository) -> Vec<BranchInfo> {
-    let current = repo.head().ok().and_then(|h| h.shorthand().map(|s| s.to_string()));
+    let current = repo
+        .head()
+        .ok()
+        .and_then(|h| h.shorthand().map(|s| s.to_string()));
     let mut branches = Vec::new();
 
     // Local branches
@@ -609,7 +642,8 @@ pub fn switch_branch(path: &Path, name: &str) -> Result<GitOperationResult, Stri
         }
         Err(_) => {
             // Create new branch from HEAD
-            let head_commit = repo.head()
+            let head_commit = repo
+                .head()
                 .and_then(|h| h.peel_to_commit())
                 .map_err(|_| "No commits yet — cannot create branch".to_string())?;
             repo.branch(name, &head_commit, false).map_err(git_err)?;
@@ -629,7 +663,8 @@ pub fn switch_branch(path: &Path, name: &str) -> Result<GitOperationResult, Stri
 /// Delete a branch.
 pub fn delete_branch(path: &Path, name: &str) -> Result<GitOperationResult, String> {
     let repo = open_repo(path)?;
-    let mut branch = repo.find_branch(name, git2::BranchType::Local)
+    let mut branch = repo
+        .find_branch(name, git2::BranchType::Local)
         .map_err(|_| format!("Branch '{}' not found", name))?;
     branch.delete().map_err(git_err)?;
     Ok(GitOperationResult {
@@ -665,9 +700,8 @@ fn list_remotes_internal(repo: &git2::Repository) -> Vec<RemoteInfo> {
 /// Add a remote.
 pub fn add_remote(path: &Path, name: &str, url: &str) -> Result<GitOperationResult, String> {
     let repo = open_repo(path)?;
-    repo.remote(name, url).map_err(|e| {
-        format!("Failed to add remote '{}': {}", name, e.message())
-    })?;
+    repo.remote(name, url)
+        .map_err(|e| format!("Failed to add remote '{}': {}", name, e.message()))?;
     Ok(GitOperationResult {
         success: true,
         message: format!("Added remote '{}' → {}", name, url),
@@ -678,9 +712,8 @@ pub fn add_remote(path: &Path, name: &str, url: &str) -> Result<GitOperationResu
 /// Remove a remote.
 pub fn remove_remote(path: &Path, name: &str) -> Result<GitOperationResult, String> {
     let repo = open_repo(path)?;
-    repo.remote_delete(name).map_err(|e| {
-        format!("Failed to remove remote '{}': {}", name, e.message())
-    })?;
+    repo.remote_delete(name)
+        .map_err(|e| format!("Failed to remove remote '{}': {}", name, e.message()))?;
     Ok(GitOperationResult {
         success: true,
         message: format!("Removed remote '{}'", name),

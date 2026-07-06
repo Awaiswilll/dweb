@@ -15,9 +15,10 @@ pub struct DomainRecord {
 // ─── Conversion Between Domain and Database Records ─────────────────────────
 
 fn domain_to_db(record: &DomainRecord) -> crate::database::DomainRecord {
-    let target_port = record.address.as_ref().and_then(|addr| {
-        addr.rsplit(':').next().and_then(|s| s.parse::<u16>().ok())
-    });
+    let target_port = record
+        .address
+        .as_ref()
+        .and_then(|addr| addr.rsplit(':').next().and_then(|s| s.parse::<u16>().ok()));
     crate::database::DomainRecord {
         name: record.name.clone(),
         owner_key: record.owner_key.clone(),
@@ -46,7 +47,8 @@ fn is_valid_domain(name: &str) -> bool {
     if name.len() < 3 || name.len() > 63 {
         return false;
     }
-    name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    name.chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
 // ─── Public API ──────────────────────────────────────────────────────────────
@@ -54,7 +56,9 @@ fn is_valid_domain(name: &str) -> bool {
 pub async fn register(name: &str) -> Result<DomainRecord, String> {
     let name = name.trim().to_lowercase();
     if !is_valid_domain(&name) {
-        return Err("Invalid domain name. Use 3-63 chars: lowercase letters, numbers, hyphens.".to_string());
+        return Err(
+            "Invalid domain name. Use 3-63 chars: lowercase letters, numbers, hyphens.".to_string(),
+        );
     }
 
     if let Ok(Some(_)) = crate::database::get_domain_record(&name) {
@@ -101,7 +105,10 @@ pub async fn resolve(name: &str) -> Result<DomainRecord, String> {
             };
             Ok(record)
         }
-        Ok(None) => Err(format!("Domain '{}' not found on the P2P network. Register it first.", name)),
+        Ok(None) => Err(format!(
+            "Domain '{}' not found on the P2P network. Register it first.",
+            name
+        )),
         Err(e) => Err(format!("P2P resolution failed: {}", e)),
     }
 }
@@ -124,7 +131,11 @@ pub async fn renew_domain(name: &str) -> Result<DomainRecord, String> {
     crate::database::save_domain_record(&db_record)?;
 
     let record = db_to_domain(&db_record);
-    log::info!("Domain renewed: {}.dweb (expires {})", name, record.expires_at);
+    log::info!(
+        "Domain renewed: {}.dweb (expires {})",
+        name,
+        record.expires_at
+    );
     Ok(record)
 }
 

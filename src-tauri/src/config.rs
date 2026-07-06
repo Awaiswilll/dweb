@@ -26,7 +26,7 @@ fn derive_encryption_key() -> [u8; 32] {
 fn encrypt_value(plaintext: &str) -> Option<String> {
     use aes_gcm::aead::{Aead, KeyInit};
     use aes_gcm::{Aes256Gcm, Nonce};
-    use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
     use rand::RngCore;
 
     let key = aes_gcm::Key::<Aes256Gcm>::from_slice(&derive_encryption_key());
@@ -49,7 +49,7 @@ fn encrypt_value(plaintext: &str) -> Option<String> {
 fn decrypt_value(ciphertext_b64: &str) -> Option<String> {
     use aes_gcm::aead::{Aead, KeyInit};
     use aes_gcm::{Aes256Gcm, Nonce};
-    use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 
     let combined = BASE64.decode(ciphertext_b64.as_bytes()).ok()?;
     if combined.len() < 12 {

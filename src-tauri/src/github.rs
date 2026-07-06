@@ -85,8 +85,11 @@ fn token_path() -> std::path::PathBuf {
 pub fn save_token(token: &str) -> Result<(), String> {
     let path = token_path();
     let data = serde_json::json!({ "token": token });
-    std::fs::write(&path, serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?)
-        .map_err(|e| format!("Failed to save token: {}", e))?;
+    std::fs::write(
+        &path,
+        serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| format!("Failed to save token: {}", e))?;
     Ok(())
 }
 
@@ -105,8 +108,7 @@ pub fn load_token() -> Option<String> {
 pub fn clear_token() -> Result<(), String> {
     let path = token_path();
     if path.exists() {
-        std::fs::remove_file(&path)
-            .map_err(|e| format!("Failed to remove token: {}", e))?;
+        std::fs::remove_file(&path).map_err(|e| format!("Failed to remove token: {}", e))?;
     }
     Ok(())
 }
@@ -133,10 +135,16 @@ async fn get_json(url: &str, token: Option<&str>) -> Result<serde_json::Value, S
 
     let resp = req.send().await.map_err(|e| format!("HTTP error: {}", e))?;
     let status = resp.status();
-    let body: serde_json::Value = resp.json().await.map_err(|e| format!("JSON error: {}", e))?;
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("JSON error: {}", e))?;
 
     if !status.is_success() {
-        let msg = body.get("message").and_then(|m| m.as_str()).unwrap_or("Unknown error");
+        let msg = body
+            .get("message")
+            .and_then(|m| m.as_str())
+            .unwrap_or("Unknown error");
         return Err(format!("GitHub API error ({}): {}", status.as_u16(), msg));
     }
 
@@ -144,7 +152,11 @@ async fn get_json(url: &str, token: Option<&str>) -> Result<serde_json::Value, S
 }
 
 /// Make an authenticated POST request to the GitHub API.
-async fn post_json(url: &str, token: Option<&str>, body: &serde_json::Value) -> Result<serde_json::Value, String> {
+async fn post_json(
+    url: &str,
+    token: Option<&str>,
+    body: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
     let req = client().post(url).json(body);
     let req = if let Some(t) = token {
         req.header("Authorization", format!("Bearer {}", t))
@@ -155,10 +167,16 @@ async fn post_json(url: &str, token: Option<&str>, body: &serde_json::Value) -> 
 
     let resp = req.send().await.map_err(|e| format!("HTTP error: {}", e))?;
     let status = resp.status();
-    let body: serde_json::Value = resp.json().await.map_err(|e| format!("JSON error: {}", e))?;
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("JSON error: {}", e))?;
 
     if !status.is_success() {
-        let msg = body.get("message").and_then(|m| m.as_str()).unwrap_or("Unknown error");
+        let msg = body
+            .get("message")
+            .and_then(|m| m.as_str())
+            .unwrap_or("Unknown error");
         return Err(format!("GitHub API error ({}): {}", status.as_u16(), msg));
     }
 
@@ -185,30 +203,40 @@ pub async fn request_device_code() -> Result<DeviceCodeResponse, String> {
         .map_err(|e| format!("Device code request failed: {}", e))?;
 
     let status = resp.status();
-    let json: serde_json::Value = resp.json().await.map_err(|e| format!("JSON error: {}", e))?;
+    let json: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("JSON error: {}", e))?;
 
     if !status.is_success() {
-        let msg = json.get("error_description")
+        let msg = json
+            .get("error_description")
             .and_then(|m| m.as_str())
             .unwrap_or("Unknown error");
         return Err(format!("OAuth error: {}", msg));
     }
 
     Ok(DeviceCodeResponse {
-        device_code: json.get("device_code")
+        device_code: json
+            .get("device_code")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string(),
-        user_code: json.get("user_code")
+        user_code: json
+            .get("user_code")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string(),
-        verification_uri: json.get("verification_uri")
+        verification_uri: json
+            .get("verification_uri")
             .and_then(|v| v.as_str())
             .unwrap_or("https://github.com/login/device")
             .to_string(),
         interval: json.get("interval").and_then(|v| v.as_u64()).unwrap_or(5),
-        expires_in: json.get("expires_in").and_then(|v| v.as_u64()).unwrap_or(900),
+        expires_in: json
+            .get("expires_in")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(900),
     })
 }
 
@@ -234,7 +262,10 @@ pub async fn poll_for_token(device_code: &str, interval: u64) -> Result<String, 
             .await
             .map_err(|e| format!("Poll failed: {}", e))?;
 
-        let json: serde_json::Value = resp.json().await.map_err(|e| format!("JSON error: {}", e))?;
+        let json: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("JSON error: {}", e))?;
 
         // Check for access token
         if let Some(token) = json.get("access_token").and_then(|v| v.as_str()) {
@@ -249,7 +280,10 @@ pub async fn poll_for_token(device_code: &str, interval: u64) -> Result<String, 
             match error {
                 "authorization_pending" => {
                     // User hasn't authorized yet — keep polling
-                    log::debug!("GitHub OAuth: authorization pending (attempt {})", attempt + 1);
+                    log::debug!(
+                        "GitHub OAuth: authorization pending (attempt {})",
+                        attempt + 1
+                    );
                     continue;
                 }
                 "slow_down" => {
@@ -317,10 +351,23 @@ pub async fn get_current_user(token: Option<String>) -> Result<GitHubUser, Strin
     let json = get_json(&format!("{}/user", API_BASE), token.as_deref()).await?;
 
     Ok(GitHubUser {
-        login: json.get("login").and_then(|v| v.as_str()).unwrap_or("?").to_string(),
-        name: json.get("name").and_then(|v| v.as_str()).map(|s| s.to_string()),
-        avatar_url: json.get("avatar_url").and_then(|v| v.as_str()).map(|s| s.to_string()),
-        public_repos: json.get("public_repos").and_then(|v| v.as_u64()).unwrap_or(0),
+        login: json
+            .get("login")
+            .and_then(|v| v.as_str())
+            .unwrap_or("?")
+            .to_string(),
+        name: json
+            .get("name")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        avatar_url: json
+            .get("avatar_url")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        public_repos: json
+            .get("public_repos")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0),
     })
 }
 
@@ -328,40 +375,84 @@ pub async fn get_current_user(token: Option<String>) -> Result<GitHubUser, Strin
 
 /// List repositories for the authenticated user.
 pub async fn list_repos(token: Option<String>) -> Result<Vec<GitHubRepo>, String> {
-    let token = token.or_else(load_token)
+    let token = token
+        .or_else(load_token)
         .ok_or_else(|| "Not authenticated. Please login first.".to_string())?;
 
     let json = get_json(
-        &format!("{}/user/repos?per_page=100&sort=updated&direction=desc", API_BASE),
+        &format!(
+            "{}/user/repos?per_page=100&sort=updated&direction=desc",
+            API_BASE
+        ),
         Some(&token),
-    ).await?;
+    )
+    .await?;
 
-    let repos: Vec<serde_json::Value> = serde_json::from_value(json)
-        .map_err(|e| format!("Parse error: {}", e))?;
+    let repos: Vec<serde_json::Value> =
+        serde_json::from_value(json).map_err(|e| format!("Parse error: {}", e))?;
 
     let mut result = Vec::new();
     for r in repos {
         result.push(GitHubRepo {
             id: r.get("id").and_then(|v| v.as_u64()).unwrap_or(0),
-            name: r.get("name").and_then(|v| v.as_str()).unwrap_or("?").to_string(),
-            full_name: r.get("full_name").and_then(|v| v.as_str()).unwrap_or("?").to_string(),
-            description: r.get("description").and_then(|v| v.as_str()).map(|s| s.to_string()),
-            html_url: r.get("html_url").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-            clone_url: r.get("clone_url").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-            ssh_url: r.get("ssh_url").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-            language: r.get("language").and_then(|v| v.as_str()).map(|s| s.to_string()),
-            stars: r.get("stargazers_count").and_then(|v| v.as_u64()).unwrap_or(0),
+            name: r
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?")
+                .to_string(),
+            full_name: r
+                .get("full_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?")
+                .to_string(),
+            description: r
+                .get("description")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            html_url: r
+                .get("html_url")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            clone_url: r
+                .get("clone_url")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            ssh_url: r
+                .get("ssh_url")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            language: r
+                .get("language")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            stars: r
+                .get("stargazers_count")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0),
             forks: r.get("forks_count").and_then(|v| v.as_u64()).unwrap_or(0),
             is_private: r.get("private").and_then(|v| v.as_bool()).unwrap_or(false),
             is_fork: r.get("fork").and_then(|v| v.as_bool()).unwrap_or(false),
-            default_branch: r.get("default_branch").and_then(|v| v.as_str()).unwrap_or("main").to_string(),
-            updated_at: r.get("updated_at").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-            owner: r.get("owner")
+            default_branch: r
+                .get("default_branch")
+                .and_then(|v| v.as_str())
+                .unwrap_or("main")
+                .to_string(),
+            updated_at: r
+                .get("updated_at")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            owner: r
+                .get("owner")
                 .and_then(|o| o.get("login"))
                 .and_then(|v| v.as_str())
                 .unwrap_or("?")
                 .to_string(),
-            owner_avatar: r.get("owner")
+            owner_avatar: r
+                .get("owner")
                 .and_then(|o| o.get("avatar_url"))
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string()),
@@ -378,7 +469,8 @@ pub async fn create_repo(
     description: Option<&str>,
     private: bool,
 ) -> Result<GitHubRepo, String> {
-    let token = token.or_else(load_token)
+    let token = token
+        .or_else(load_token)
         .ok_or_else(|| "Not authenticated.".to_string())?;
 
     let mut body = serde_json::json!({
@@ -394,25 +486,70 @@ pub async fn create_repo(
 
     Ok(GitHubRepo {
         id: json.get("id").and_then(|v| v.as_u64()).unwrap_or(0),
-        name: json.get("name").and_then(|v| v.as_str()).unwrap_or("?").to_string(),
-        full_name: json.get("full_name").and_then(|v| v.as_str()).unwrap_or("?").to_string(),
-        description: json.get("description").and_then(|v| v.as_str()).map(|s| s.to_string()),
-        html_url: json.get("html_url").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-        clone_url: json.get("clone_url").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-        ssh_url: json.get("ssh_url").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-        language: json.get("language").and_then(|v| v.as_str()).map(|s| s.to_string()),
-        stars: json.get("stargazers_count").and_then(|v| v.as_u64()).unwrap_or(0),
-        forks: json.get("forks_count").and_then(|v| v.as_u64()).unwrap_or(0),
-        is_private: json.get("private").and_then(|v| v.as_bool()).unwrap_or(false),
+        name: json
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("?")
+            .to_string(),
+        full_name: json
+            .get("full_name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("?")
+            .to_string(),
+        description: json
+            .get("description")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        html_url: json
+            .get("html_url")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        clone_url: json
+            .get("clone_url")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        ssh_url: json
+            .get("ssh_url")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        language: json
+            .get("language")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        stars: json
+            .get("stargazers_count")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0),
+        forks: json
+            .get("forks_count")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0),
+        is_private: json
+            .get("private")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
         is_fork: json.get("fork").and_then(|v| v.as_bool()).unwrap_or(false),
-        default_branch: json.get("default_branch").and_then(|v| v.as_str()).unwrap_or("main").to_string(),
-        updated_at: json.get("updated_at").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-        owner: json.get("owner")
+        default_branch: json
+            .get("default_branch")
+            .and_then(|v| v.as_str())
+            .unwrap_or("main")
+            .to_string(),
+        updated_at: json
+            .get("updated_at")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        owner: json
+            .get("owner")
             .and_then(|o| o.get("login"))
             .and_then(|v| v.as_str())
             .unwrap_or("?")
             .to_string(),
-        owner_avatar: json.get("owner")
+        owner_avatar: json
+            .get("owner")
             .and_then(|o| o.get("avatar_url"))
             .and_then(|v| v.as_str())
             .map(|s| s.to_string()),
@@ -428,7 +565,8 @@ pub async fn download_archive(
     archive_format: &str, // "zipball" or "tarball"
     branch: Option<&str>,
 ) -> Result<Vec<u8>, String> {
-    let token = token.or_else(load_token)
+    let token = token
+        .or_else(load_token)
         .ok_or_else(|| "Not authenticated.".to_string())?;
 
     let branch = branch.unwrap_or("HEAD");
@@ -449,7 +587,10 @@ pub async fn download_archive(
         return Err(format!("Download failed (HTTP {})", resp.status().as_u16()));
     }
 
-    let bytes = resp.bytes().await.map_err(|e| format!("Read error: {}", e))?;
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| format!("Read error: {}", e))?;
     Ok(bytes.to_vec())
 }
 
@@ -460,14 +601,16 @@ pub async fn import_repo(
     repo_full_name: &str, // e.g. "owner/repo"
     dest_path: &Path,
 ) -> Result<crate::git::RepoInfo, String> {
-    let token = token.or_else(load_token)
+    let token = token
+        .or_else(load_token)
         .ok_or_else(|| "Not authenticated.".to_string())?;
 
     // Get repo details to find the clone URL
     let url = format!("{}/repos/{}", API_BASE, repo_full_name);
     let json = get_json(&url, Some(&token)).await?;
 
-    let clone_url = json.get("clone_url")
+    let clone_url = json
+        .get("clone_url")
         .and_then(|v| v.as_str())
         .ok_or_else(|| "No clone URL found".to_string())?;
 

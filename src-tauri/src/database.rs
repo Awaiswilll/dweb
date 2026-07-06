@@ -106,16 +106,15 @@ pub fn upsert_project(project: &Project) -> Result<(), String> {
 /// Get a project by ID.
 pub fn get_project(id: &str) -> Result<Option<Project>, String> {
     let key = format!("project:{}", id);
-    with_db(|db| {
-        match db.get(key.as_bytes()).map_err(|e| e.to_string())? {
+    with_db(
+        |db| match db.get(key.as_bytes()).map_err(|e| e.to_string())? {
             Some(bytes) => {
-                let project: Project =
-                    serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+                let project: Project = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
                 Ok(Some(project))
             }
             None => Ok(None),
-        }
-    })
+        },
+    )
 }
 
 /// List all projects.
@@ -125,8 +124,7 @@ pub fn list_projects() -> Result<Vec<Project>, String> {
         let mut projects = Vec::new();
         for result in db.scan_prefix(prefix) {
             let (_, value) = result.map_err(|e| e.to_string())?;
-            let project: Project =
-                serde_json::from_slice(&value).map_err(|e| e.to_string())?;
+            let project: Project = serde_json::from_slice(&value).map_err(|e| e.to_string())?;
             projects.push(project);
         }
         projects.sort_by(|a, b| b.created_at.cmp(&a.created_at));
@@ -149,7 +147,8 @@ pub fn insert_build(record: &BuildRecord) -> Result<(), String> {
     let key = format!("build:{}", record.id);
     let value = serde_json::to_vec(record).map_err(|e| e.to_string())?;
     with_db(|db| {
-        db.insert(key.as_bytes(), value).map_err(|e| e.to_string())?;
+        db.insert(key.as_bytes(), value)
+            .map_err(|e| e.to_string())?;
         Ok(())
     })
 }
@@ -160,8 +159,7 @@ pub fn list_builds(limit: usize) -> Result<Vec<BuildRecord>, String> {
         let mut builds = Vec::new();
         for result in db.scan_prefix(prefix) {
             let (_, value) = result.map_err(|e| e.to_string())?;
-            let record: BuildRecord =
-                serde_json::from_slice(&value).map_err(|e| e.to_string())?;
+            let record: BuildRecord = serde_json::from_slice(&value).map_err(|e| e.to_string())?;
             builds.push(record);
         }
         builds.sort_by(|a, b| b.started_at.cmp(&a.started_at));
@@ -176,23 +174,24 @@ pub fn save_domain_record(record: &DomainRecord) -> Result<(), String> {
     let key = format!("domain:{}", record.name);
     let value = serde_json::to_vec(record).map_err(|e| e.to_string())?;
     with_db(|db| {
-        db.insert(key.as_bytes(), value).map_err(|e| e.to_string())?;
+        db.insert(key.as_bytes(), value)
+            .map_err(|e| e.to_string())?;
         Ok(())
     })
 }
 
 pub fn get_domain_record(name: &str) -> Result<Option<DomainRecord>, String> {
     let key = format!("domain:{}", name);
-    with_db(|db| {
-        match db.get(key.as_bytes()).map_err(|e| e.to_string())? {
+    with_db(
+        |db| match db.get(key.as_bytes()).map_err(|e| e.to_string())? {
             Some(bytes) => {
                 let record: DomainRecord =
                     serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
                 Ok(Some(record))
             }
             None => Ok(None),
-        }
-    })
+        },
+    )
 }
 
 pub fn list_domain_records() -> Result<Vec<DomainRecord>, String> {
@@ -201,8 +200,7 @@ pub fn list_domain_records() -> Result<Vec<DomainRecord>, String> {
         let mut records = Vec::new();
         for result in db.scan_prefix(prefix) {
             let (_, value) = result.map_err(|e| e.to_string())?;
-            let record: DomainRecord =
-                serde_json::from_slice(&value).map_err(|e| e.to_string())?;
+            let record: DomainRecord = serde_json::from_slice(&value).map_err(|e| e.to_string())?;
             records.push(record);
         }
         records.sort_by(|a, b| b.registered_at.cmp(&a.registered_at));
