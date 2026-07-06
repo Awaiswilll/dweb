@@ -9,7 +9,6 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use std::path::PathBuf;
 
 #[cfg(target_os = "windows")]
 use std::sync::Mutex;
