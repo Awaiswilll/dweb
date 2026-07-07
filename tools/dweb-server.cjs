@@ -147,6 +147,32 @@ function invalidateDomainCache(name) {
   domainCache.delete(name);
 }
 
+// Ask each currently-known peer (learned via the relay's /discover, refreshed
+// every 15s into `relayPeers`) whether *it* has this domain registered and
+// bound. This is what actually lets Peer B resolve a domain that Peer A
+// registered — the local domainRegistry is never itself replicated, so
+// without this fan-out, cross-peer resolution has no path to succeed.
+async function resolveDomainAcrossPeers(name) {
+  const candidates = relayPeers.filter(p => p.id !== PEER_ID && p.address && p.port);
+  for (const peer of candidates) {
+    try {
+      const result = await httpGet(peer.address, peer.port, `/api/domain/resolve?name=${encodeURIComponent(name)}`);
+      if (result && result.status === "ok" && result.record) {
+        return {
+          record: result.record,
+          address: result.address || peer.address,
+          port: result.port || peer.port,
+          url: result.url || (result.address && result.port ? `http://${result.address}:${result.port}/` : null),
+          peerId: peer.id,
+        };
+      }
+    } catch {
+      // peer unreachable or timed out — try the next one
+    }
+  }
+  return null;
+}
+
 // ── Domain API Route Handler ───────────────────────────────────
 function handleDomainAPI(req, res, url, body) {
   const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS", "Access-Control-Allow-Headers": "Content-Type" };
@@ -217,7 +243,7 @@ function handleDomainAPI(req, res, url, body) {
 
     record.service_name = service_name || null;
     record.port = port;
-    record.address = port ? `${os.hostname()}:${port}` : null;
+    record.address = port ? `${getLocalIPs()[0] || "127.0.0.1"}:${port}` : null;
     record.custom_domain = custom_domain || null;
     record.active = true;
 
@@ -245,15 +271,48 @@ function handleDomainAPI(req, res, url, body) {
   }
 
   // ── GET /api/domain/resolve?name=xxx ──
+  // Response contract: { status: "ok"|"error", record, address, port, url, source }
+  // `source` is "local" if resolved from this instance's own registry, or "peer"
+  // if a connected peer (found via relayPeers, itself learned from the relay's
+  // /discover) answered on our behalf.
   if (url.pathname === "/api/domain/resolve" && req.method === "GET") {
     const name = url.searchParams.get("name");
-    if (!name) return jsonResponse(res, 400, { error: "name query parameter required" });
+    if (!name) return jsonResponse(res, 400, { status: "error", error: "name query parameter required" });
 
-    const record = resolveDomainFromRegistry(name);
-    if (!record) {
-      return jsonResponse(res, 404, { error: "Domain not found or expired" });
+    const localRecord = resolveDomainFromRegistry(name);
+    if (localRecord) {
+      const hostPart = (localRecord.address || "").split(":")[0] || null;
+      const resolvedUrl = hostPart && localRecord.port ? `http://${hostPart}:${localRecord.port}/` : null;
+      return jsonResponse(res, 200, {
+        status: "ok",
+        record: localRecord,
+        address: hostPart,
+        port: localRecord.port || null,
+        url: resolvedUrl,
+        source: "local",
+      });
     }
-    return jsonResponse(res, 200, record);
+
+    // Not registered on this instance — ask connected peers before giving up.
+    resolveDomainAcrossPeers(name)
+      .then((remote) => {
+        if (remote) {
+          return jsonResponse(res, 200, {
+            status: "ok",
+            record: remote.record,
+            address: remote.address,
+            port: remote.port,
+            url: remote.url,
+            source: "peer",
+            peerId: remote.peerId,
+          });
+        }
+        return jsonResponse(res, 404, { status: "error", error: "Domain not found or expired" });
+      })
+      .catch(() => {
+        jsonResponse(res, 404, { status: "error", error: "Domain not found or expired" });
+      });
+    return; // handled asynchronously
   }
 
   // ── GET /api/domain/list ──
@@ -2382,6 +2441,55 @@ if (window.name !== "dweb-browser") setTimeout(() => location.reload(), 30000);
       openai: !!process.env.OPENAI_API_KEY,
       anthropic: !!process.env.ANTHROPIC_API_KEY,
     });
+  }
+
+  // ── GET /api/proxy/fetch?url=... ─────────────────────────────
+  // Fetches a resolved dweb:// target's content (from a bound local port,
+  // or a remote peer's bound port) and streams the body back to the
+  // browser UI so BrowserView can render it inline. This endpoint was
+  // referenced by the frontend but never implemented, so every resolved
+  // domain fell through to the "cannot proxy content" placeholder card
+  // instead of showing the actual hosted page.
+  if (pathname === "/api/proxy/fetch" && req.method === "GET") {
+    const targetUrl = url.searchParams.get("url");
+    if (!targetUrl) return jsonResponse(res, 400, { error: "url query parameter required" });
+
+    let parsedTarget;
+    try { parsedTarget = new URL(targetUrl); } catch {
+      return jsonResponse(res, 400, { error: "Invalid url" });
+    }
+    if (parsedTarget.protocol !== "http:" && parsedTarget.protocol !== "https:") {
+      return jsonResponse(res, 400, { error: "Only http/https targets are supported" });
+    }
+
+    const mod = parsedTarget.protocol === "https:" ? https : http;
+    const options = {
+      hostname: parsedTarget.hostname,
+      port: parsedTarget.port || (parsedTarget.protocol === "https:" ? 443 : 80),
+      path: parsedTarget.pathname + parsedTarget.search,
+      method: "GET",
+      headers: { "User-Agent": "dweb-browser-proxy/0.1.0" },
+      timeout: 8000,
+    };
+
+    const proxyReq = mod.request(options, (proxyRes) => {
+      const status = proxyRes.statusCode || 502;
+      const contentType = proxyRes.headers["content-type"] || "text/html; charset=utf-8";
+      res.writeHead(status, {
+        "Content-Type": contentType,
+        "Access-Control-Allow-Origin": "*",
+      });
+      proxyRes.pipe(res);
+    });
+    proxyReq.on("error", (e) => {
+      jsonResponse(res, 502, { error: `Could not reach host: ${e.message}` });
+    });
+    proxyReq.on("timeout", () => {
+      proxyReq.destroy();
+      jsonResponse(res, 504, { error: "Upstream host timed out" });
+    });
+    proxyReq.end();
+    return;
   }
 
   // ── OPENCODE TERMINAL ─────────────────────────────────────

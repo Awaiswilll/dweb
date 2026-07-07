@@ -189,7 +189,11 @@ function processWSFrames(socket, state) {
     state.buffer = state.buffer.slice(frameLen);
 
     // Extract payload and unmask if needed (client frames must be masked)
-    const payloadStart = headerLen - (masked ? 4 : 0);
+    // NOTE: headerLen already includes the 4 mask-key bytes when masked is true,
+    // so the payload starts at headerLen, not headerLen - 4. The previous
+    // "- 4" here caused the decoder to read starting at the mask-key bytes
+    // instead of after them, corrupting every masked (client-sent) frame.
+    const payloadStart = headerLen;
     const mask = masked ? frameData.slice(headerLen - 4, headerLen) : null;
     const payload = Buffer.from(frameData.slice(payloadStart, payloadStart + payloadLen));
 

@@ -79,7 +79,7 @@ export default function BrowserView({ initialUrl, navId }: BrowserViewProps) {
         info = await invoke<DomainRecord>("resolve_domain", { domain: dwebDomain(raw) });
       } catch {
         try {
-          const res = await fetch(`/api/domain/resolve/${encodeURIComponent(dwebDomain(raw))}`);
+          const res = await fetch(`/api/domain/resolve?name=${encodeURIComponent(dwebDomain(raw))}`);
           if (res.ok) {
             const data = await res.json();
             if (data.status === "ok" && data.record) {
