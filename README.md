@@ -69,6 +69,11 @@ Start/stop services with one click, monitor CPU/memory/ports, view logs:
 - **PHP Sites** — WordPress, Laravel, or plain PHP
 - **File Browser** — Upload, manage, and share files through your browser
 - **Custom Services** — Any port, any stack
+- **One-Click Publish** — Every service capsule has a split **Publish** button:
+  - **Publish** → lightweight domain-name prompt to pick your `.dweb` name and publish instantly
+  - **▼** → full modal with Free/Premium/Business tiers, custom domain support, and unpublish
+  - Published services show a green **✦ domain** badge — click to manage or unpublish
+  - After publishing, the domain opens automatically in the built-in dweb browser
 
 ### 🌐 P2P Networking & Discovery
 Every dweb installation is a **node** on a decentralized network:
@@ -91,13 +96,18 @@ Every dweb installation is a **node** on a decentralized network:
 
 ### 🏷️ .dweb Domain System
 Register and manage domains on the decentralized network:
-- **Free tier** — 1 `.dweb` domain, basic P2P hosting
-- **Premium tier** ($3/mo) — 5 domains, relay cache
-- **Business tier** ($10/mo) — unlimited domains, cloud shift
+- **Free tier** — 1 `.dweb` domain, basic P2P hosting, 90-day expiry
+- **Premium tier** ($5/mo) — 5 domains, relay cache, permanent
+- **Business tier** ($20/mo) — unlimited domains, custom DNS, cloud shift
+- **One-click publish from Dashboard** — Each service capsule has a split **Publish** button:
+  - **Quick Publish** → lightweight modal asks only for a domain name → publishes on Free tier in seconds
+  - **Full Publish** → modal with tier selector (Free/Premium/Business), custom domain input, and unpublish
+  - Published services show a green badge with the `.dweb` domain name — click to manage
+  - Published domain opens automatically in the built-in browser
 - **Cross-peer domain resolution** — Resolve `.dweb` domains registered on any connected peer instance; queries all connected peers in parallel with 60s result caching
 - **Auto domain assignment** — Publishing a project can optionally auto-assign a free `.dweb` domain derived from the project name
 - **Domain persistence** — Domains survive restarts via `/tmp/dweb-domains.json`
-- **P2P content proxy** — Browse content from peer instances' `.dweb` domains via the built-in proxy endpoint, avoiding CORS issues
+- **P2P content proxy** — Browse content from peer instances' `.dweb` domains via the built-in proxy endpoint (`/api/proxy/fetch`), avoiding CORS issues
 
 ### 🤖 AI Build Agent with 15+ Providers
 Generate full-stack applications from natural language:
@@ -106,19 +116,25 @@ Generate full-stack applications from natural language:
 - **Offline-capable** — Ollama runs 100% locally
 - **OpenCode CLI integration** — Full agentic coding workflow
 
-### 📁 P2P File Sharing
-Drag-and-drop file sharing between dweb instances:
-- Upload files via browser
-- Share directly to P2P peers
-- Download shared files from any instance
-- File discovery across the P2P network
+### 📁 File Share Service
+Every dweb instance comes with a built-in **File Browser** service:
+- Drag-and-drop file upload with modern UI
+- **Embedded API endpoints** on the service's own HTTP server (e.g. `http://localhost:30998`):
+  - `GET /api/list` — List files with size and timestamps
+  - `POST /api/upload` — Upload any file type (multipart, 50 MB limit)
+  - `GET /api/download/:name` — Download files
+  - `POST /api/delete` — Delete files
+- Auto-refreshing file list (15-second interval)
+- Publish the service to a `.dweb` domain to share files across the P2P network
 
 ### 🔧 Built-in Browser with dweb Protocol
 Full browser tab with `dweb://` protocol support:
-- Browse the web within dweb
-- Tutorials for building sites, APIs, and PHP apps
-- Bookmark manager
-- Multiple search engines
+- Browse `.dweb` domains via the built-in proxy (`/api/proxy/fetch`)
+- Domain resolution resolves external IP → proxies content to avoid CORS
+- Fallback to system browser for `http://` and `https://` URLs
+- Domain info panel showing owner, address, port, path
+- Published services open automatically in the browser after publishing
+- Bookmark manager and multiple search engines
 
 ---
 
@@ -384,8 +400,10 @@ docker run -d \
 | `/api/opencode/session/:id/cancel` | POST | Cancel a running AI agent session |
 | `/fileshare/api/list` | GET | List shared files |
 | `/fileshare/api/upload` | POST | Upload a file |
-| `/welcome` | GET | Welcome page |
-| `/welcome/source` | GET | Welcome page source |
+| `/api/service/publish` | POST | Publish a service to a `.dweb` domain (one-step register + bind) |
+| `/api/service/unpublish` | POST | Unpublish a service from its `.dweb` domain |
+| `/api/service/domains` | GET | List published domains with service bindings |
+| `/welcome` | GET | Welcome page (decentralised web landing with audience cards) |
 
 #### P2P Relay Endpoints
 
@@ -477,7 +495,7 @@ dweb/
 │   ├── dweb-server.cjs     # Legacy monolith (for reference)
 │   └── dweb-relay.cjs      # P2P relay daemon
 ├── packaging/              # Distribution packages
-├── welcome/                # Welcome page HTML
+├── welcome/                # Welcome page (particle-network landing with audience cards)
 └── screenshots/            # App screenshots
 ```
 
@@ -546,17 +564,6 @@ Deploy static sites, blogs, and portfolios on your own machine with a `.dweb` do
 With Ollama running locally, the AI Build Agent works without internet. Perfect for air-gapped environments or privacy-conscious workflows.
 
 ---
-
-## Business Model
-
-| Tier | Price | Features |
-|------|-------|----------|
-| **Free** | $0 | 1 .dweb domain, basic P2P hosting, community support |
-| **Premium** | $3/mo | 5 domains, relay cache (always online), priority support |
-| **Business** | $10/mo | Unlimited domains, cloud shift, SLA |
-
-See [BUSINESS-PLAN.md](BUSINESS-PLAN.md) for the complete business model.
-
 ---
 
 ## Contributing
