@@ -16,6 +16,7 @@
 
 const http = require("http");
 const os = require("os");
+const MOVIES = require("../server/movies.cjs");
 
 /* ─── Config ────────────────────────────────────────────── */
 const PORT = parseInt(process.argv.find(a => a.startsWith("--port="))?.split("=")[1] || process.argv[process.argv.indexOf("--port") + 1], 10) || 49737;
@@ -94,7 +95,7 @@ function startServer(port) {
       const data = JSON.stringify({
         status: "ok",
         app: "dweb",
-        peer_id: `dweb-${os.hostname().toLowerCase().replace(/[^a-z0-9]/g, "")}`,
+        peer_id: `dweb-${MOVIES[Math.floor(Math.random() * MOVIES.length)]}-${MOVIES[Math.floor(Math.random() * MOVIES.length)]}`,
         hostname: os.hostname(),
         addresses: getLocalIPs().map(i => i.address),
         port: port,

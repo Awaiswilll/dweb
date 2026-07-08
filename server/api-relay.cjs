@@ -7,7 +7,8 @@ const os = require("os");
 const crypto = require("crypto");
 const { json, parseBody, peerToJSON } = require("./helpers.cjs");
 const { SERVER_ID, PEER_TTL_MS, MODE, START_TIME, UPSTREAM_RELAY } = require("./config.cjs");
-const { peers, signals, PeerRecord, storeSignal, popSignals, savePeers } = require("./state.cjs");
+const { peers, signals, contacts, PeerRecord, storeSignal, popSignals, savePeers,
+        promoteContact, listContacts, forgetContact } = require("./state.cjs");
 
 function registerRoutes(router) {
   // PING
@@ -50,6 +51,17 @@ function registerRoutes(router) {
       savePeers();
       return json(res, 200, { status: "ok", action: "updated", peerId: id, peersOnline: peers.size });
     }
+    // Check if this peer was a known contact — promote back to live
+    if (contacts.has(id)) {
+      promoteContact(id);
+      const peer = new PeerRecord(id, body);
+      peer.touch();
+      peers.set(id, peer);
+      savePeers();
+      console.log(`  [p2p] ${id.slice(0, 16)}… reconnected (was in contacts)  (${peers.size} total)`);
+      return json(res, 200, { status: "ok", action: "reconnected", peerId: id, peersOnline: peers.size });
+    }
+    // Also add to contacts so we remember this peer even after it goes stale
     const peer = new PeerRecord(id, body);
     peers.set(id, peer);
     savePeers();
@@ -88,6 +100,27 @@ function registerRoutes(router) {
     peers.delete(match[1]);
     signals.delete(match[1]);
     json(res, 200, { status: "ok", message: "Peer removed" });
+  });
+
+  // CONTACTS (persistent peer archive)
+  router.get("/contacts", (req, res) => {
+    const contactsList = listContacts();
+    json(res, 200, {
+      status: "ok",
+      count: contactsList.length,
+      onlinePeers: peers.size,
+      contacts: contactsList,
+    });
+  });
+
+  router.delete(/^\/contact\/(.+)$/, (req, res, match) => {
+    const id = match[1];
+    const removed = forgetContact(id);
+    if (removed) {
+      json(res, 200, { status: "ok", message: "Contact forgotten" });
+    } else {
+      json(res, 404, { error: "Contact not found" });
+    }
   });
 
   // SIGNAL

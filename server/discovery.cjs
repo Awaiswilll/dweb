@@ -8,7 +8,7 @@ const path = require("path");
 const dgram = require("dgram");
 const config = require("./config.cjs");
 const { PEER_ID, MODE, LOCAL_IPS, MULTICAST_ADDR, MULTICAST_PORT, DISCOVERY_DIR } = config;
-const { peers, localPeers, hostedServices } = require("./state.cjs");
+const { peers, contacts, localPeers, hostedServices, promoteContact } = require("./state.cjs");
 const { httpReq } = require("./helpers.cjs");
 
 let discoverySocket = null;
@@ -37,6 +37,10 @@ function startLocalDiscovery() {
           const existing = localPeers.get(data.peerId);
           localPeers.set(data.peerId, { ...data, lastSeen: Date.now(), address: rinfo.address });
           if (!existing && !peers.has(data.peerId)) {
+            // Check if this is a known contact coming back online
+            if (contacts.has(data.peerId)) {
+              promoteContact(data.peerId);
+            }
             registerWithDiscoveredPeer(data, rinfo.address).catch(() => {});
           }
         }

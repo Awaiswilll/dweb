@@ -5,7 +5,7 @@ import {
   Plus, RefreshCw, CheckCircle2, FolderGit2,
   ExternalLink, Wrench, Wifi, WifiOff,
   Link2, Unlink, Shield, Monitor, Radio, Users,
-  ChevronDown, ChevronRight, List, Save, Activity,
+  ChevronDown, ChevronRight, List, Save, Activity, Copy,
 } from "lucide-react";
 import type { Service, P2PNetworkStatus } from "../types";
 import {
@@ -1323,18 +1323,57 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
           </div>
         </div>
 
-        {/* Collapsed summary (when not expanded) */}
-        {!showNetworkExpanded && advancedStatus && (
-          <span style={{ fontSize: 11, color: "var(--text-muted)", marginLeft: 4 }}>
-            {discoveredPeers.length} peer(s) · {uniqueConnectedRemotes.length} connected
+        {/* ── ALWAYS VISIBLE: Peer ID capsule + Quick action tabs ── */}
+        <div style={{
+          padding: "8px 14px",
+          borderTop: "1px solid var(--border)",
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          flexWrap: "wrap",
+          fontSize: 13,
+        }}>
+          {/* Peer ID Capsule */}
+          <span
+            onClick={() => {
+              const id = relayStatus?.peerId || advancedStatus?.peerId || "";
+              if (id) navigator.clipboard.writeText(id).catch(() => {});
+            }}
+            title={`${relayStatus?.peerId || advancedStatus?.peerId || "Peer ID"} — click to copy`}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "6px 16px",
+              borderRadius: 24,
+              background: "linear-gradient(135deg, rgba(59,130,246,0.2), rgba(139,92,246,0.2))",
+              border: "1px solid rgba(139,92,246,0.35)",
+              fontFamily: "'SF Mono', 'Fira Code', monospace",
+              fontSize: 13,
+              fontWeight: 600,
+              color: "#c4b5fd",
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              maxWidth: 500,
+              transition: "background 0.15s",
+            }}
+            onMouseOver={e => e.currentTarget.style.background = "linear-gradient(135deg, rgba(59,130,246,0.3), rgba(139,92,246,0.3))"}
+            onMouseOut={e => e.currentTarget.style.background = "linear-gradient(135deg, rgba(59,130,246,0.2), rgba(139,92,246,0.2))"}
+          >
+            <span style={{
+              width: 8, height: 8, borderRadius: "50%",
+              background: relayStatus?.connected ? "#22c55e" : "#6b7280",
+              boxShadow: relayStatus?.connected ? "0 0 8px rgba(34,197,94,0.6)" : "none",
+              flexShrink: 0,
+            }} />
+            <Copy size={12} style={{ flexShrink: 0, opacity: 0.7 }} />
+            {relayStatus?.peerId || advancedStatus?.peerId || "connecting..."}
           </span>
-        )}
 
-        {/* ── Expanded content ── */}
-        {showNetworkExpanded && (
-        <div style={{ padding: "10px 14px 14px", borderTop: "1px solid var(--border)", fontSize: 13 }}>
-          {/* Mode buttons + Tor + Connect */}
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
+          {/* Mode Tabs + Tor + Connect */}
+          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
             {/* Online Mode Switcher */}
             <div className="glossy-card" style={{ display: "flex", borderRadius: "var(--radius-sm)", overflow: "hidden", padding: 0, gap: 0 }}>
               {(["local", "p2p-visible", "p2p-anonymous"] as OnlineMode[]).map(m => (
@@ -1342,16 +1381,16 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
                   key={m}
                   onClick={() => setOnlineMode(m)}
                   style={{
-                    padding: "5px 12px",
+                    padding: "4px 10px",
                     border: "none",
                     background: onlineMode === m ? modeColor[m] : "transparent",
                     color: onlineMode === m ? "#fff" : "var(--text-muted)",
                     cursor: "pointer",
-                    fontSize: 12,
+                    fontSize: 11,
                     fontWeight: onlineMode === m ? 600 : 400,
                     display: "flex",
                     alignItems: "center",
-                    gap: 4,
+                    gap: 3,
                     transition: "background 0.15s",
                   }}
                   title={m === "local" ? "Local Only — no P2P connectivity"
@@ -1371,17 +1410,17 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
                 onClick={handleTorToggle}
                 disabled={!torStatus.installed || togglingTor}
                 style={{
-                  padding: "5px 12px",
+                  padding: "4px 10px",
                   border: "none",
                   borderRadius: "var(--radius-sm)",
                   background: torStatus.running ? "#7c3aed" : "transparent",
                   color: torStatus.running ? "#fff" : "var(--text-muted)",
                   cursor: torStatus.installed ? "pointer" : "not-allowed",
-                  fontSize: 12,
+                  fontSize: 11,
                   fontWeight: torStatus.running ? 600 : 400,
                   display: "flex",
                   alignItems: "center",
-                  gap: 4,
+                  gap: 3,
                   opacity: torStatus.installed ? 1 : 0.5,
                   transition: "background 0.15s",
                 }}
@@ -1393,94 +1432,35 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
                       : "Tor installed — click to enable anonymous P2P routing"
                 }
               >
-                <Shield size={12} />
-                {togglingTor ? "..." : torStatus.running ? "Tor" : "Tor"}
+                <Shield size={11} />
+                {togglingTor ? "..." : "Tor"}
                 {torStatus.installed && (
                   <span style={{
-                    width: 6, height: 6, borderRadius: "50%",
+                    width: 5, height: 5, borderRadius: "50%",
                     background: torStatus.running ? "#a78bfa" : "#6b7280",
-                    marginLeft: 2,
+                    marginLeft: 1,
                   }} />
                 )}
               </button>
             )}
-            <button className="btn btn-secondary btn-sm" onClick={() => setShowConnectModal(true)} style={{ fontSize: 12 }}>
-              <Link2 size={12} /> Connect
+            <button className="btn btn-secondary btn-sm" onClick={() => setShowConnectModal(true)}
+              style={{ fontSize: 11, padding: "4px 10px", height: "auto" }}>
+              <Link2 size={11} /> Connect
             </button>
           </div>
+        </div>
 
-          {/* Full status bar (all details) */}
-          <div style={{
-            display: "flex", alignItems: "center", gap: 16,
-            padding: "8px 12px", borderRadius: "var(--radius-sm)",
-            fontSize: 12, border: "1px solid var(--border)",
-          }}>
-            <span style={{ display: "flex", alignItems: "center", gap: 4, color: onlineMode === "local" ? "var(--text-muted)" : "#22c55e" }}
-              title={onlineMode === "local" ? "Local only mode — not visible to peers"
-                : onlineMode === "p2p-visible" ? "Visible to all peers on the network"
-                : torStatus?.running ? "Anonymous via Tor — Tor SOCKS5 proxy active"
-                : "Anonymous mode — visible but identity not shared"}>
-              {onlineMode === "local" ? <WifiOff size={14} /> : <Wifi size={14} />}
-              Mode: <strong>{onlineMode === "local" ? "Local Only" : onlineMode === "p2p-visible" ? "P2P Visible" : "P2P Anonymous"}</strong>
-              {torStatus?.running && onlineMode === "p2p-anonymous" && (
-                <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 8, background: "rgba(126,34,206,0.15)", color: "#7c3aed", marginLeft: 2 }}>
-                  via Tor
-                </span>
-              )}
-            </span>
-            <span style={{ color: "var(--text-muted)" }}>|</span>
-            <span style={{ display: "flex", alignItems: "center", gap: 4 }}
-              title={
-                totalInstances > 0
-                  ? `${totalInstances} total dweb instance(s)\n  · 1 self\n  · ${discoveredPeers.length} discovered (${visiblePeers.length} visible, ${anonymousPeers.length} anon)\n  · ${uniqueConnectedRemotes.length} connected remote(s)`
-                  : "No dweb instances found. Click Connect to discover peers."
-              }>
-              <Monitor size={14} />
-              Instances: <strong style={{ color: totalInstances > 0 ? "#22c55e" : "var(--text-muted)" }}>{totalInstances}</strong>
-              {discoveredPeers.length > 0 && (
-                <span style={{ fontSize: 10, color: "var(--text-muted)", marginLeft: 2 }}>
-                  ({visiblePeers.length}v · {anonymousPeers.length}a)
-                </span>
-              )}
-            </span>
-            {advancedStatus && (
-              <>
-                <span style={{ color: "var(--text-muted)" }}>|</span>
-                <span style={{ display: "flex", alignItems: "center", gap: 4, color: "var(--text)" }}
-                  title={`Server uptime: ${formatUptime(advancedStatus.uptime)}`}>
-                  <Activity size={14} />
-                  <strong>{formatUptime(advancedStatus.uptime)}</strong>
-                </span>
-              </>
-            )}
-            <span style={{ color: "var(--text-muted)" }}>|</span>
-            <span style={{ display: "flex", alignItems: "center", gap: 4, color: relayStatus?.connected ? "#22c55e" : "var(--text-muted)" }}
-              title={relayStatus?.connected
-                ? `Relay connected at ${relayStatus.relayAddress} — ${relayStatus.peersOnline} peer(s) online. P2P data flows directly after signaling.`
-                : "Relay not connected. Only direct P2P connections are available."}>
-              <Radio size={14} />
-              Relay: <strong>{relayStatus?.connected ? "Connected" : "Offline"}</strong>
-            </span>
-            {torStatus?.running && (
-              <>
-                <span style={{ color: "var(--text-muted)" }}>|</span>
-                <span style={{ display: "flex", alignItems: "center", gap: 4, color: "#7c3aed" }}
-                  title={`Tor routing active\nProxy: ${torStatus.torProxy || "socks5://127.0.0.1:9050"}\nP2P mode forced to Anonymous`}>
-                  <Shield size={14} />
-                  Tor: <strong>Routing</strong>
-                </span>
-              </>
-            )}
-            {incomingSignals.length > 0 && (
-              <>
-                <span style={{ color: "var(--text-muted)" }}>|</span>
-                <span style={{ display: "flex", alignItems: "center", gap: 4, color: "#8b5cf6" }}>
-                  <Users size={14} />
-                  Signals: <strong>{incomingSignals.length}</strong>
-                </span>
-              </>
-            )}
-          </div>
+        {/* Collapsed summary (when not expanded) */}
+        {!showNetworkExpanded && advancedStatus && (
+          <span style={{ fontSize: 11, color: "var(--text-muted)", marginLeft: 4 }}>
+            {discoveredPeers.length} peer(s) · {uniqueConnectedRemotes.length} connected
+          </span>
+        )}
+
+        {/* ── Expanded content ── */}
+        {showNetworkExpanded && (
+        <div style={{ padding: "10px 14px 14px", borderTop: "1px solid var(--border)", fontSize: 13 }}>
+          {/* No repeated status bar — all status info visible in the header above */}
         </div>
       )}
       </div>

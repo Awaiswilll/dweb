@@ -5,6 +5,7 @@
 const os = require("os");
 const path = require("path");
 const crypto = require("crypto");
+const MOVIES = require("./movies.cjs");
 
 function getLocalIPs() {
   const ifaces = os.networkInterfaces(), ips = [];
@@ -24,10 +25,20 @@ const DIST_DIR      = path.resolve(__dirname, "..", "dist");
 const MODE          = (process.env.MODE || "auto").toLowerCase();
 const INSTANCE_NAME = process.env.NAME || os.hostname();
 
-const SERVER_ID     = crypto.randomUUID().split("-")[0].slice(0, 8);
 const START_TIME    = Date.now();
 const LOCAL_IPS     = getLocalIPs();
-const PEER_ID       = `dweb-${os.hostname().toLowerCase().replace(/[^a-z0-9-]/g, "-")}-${SERVER_ID}`;
+
+// Generate a unique peer ID from 2 random movie names
+function generateMoviePeerId() {
+  const m1 = MOVIES[Math.floor(Math.random() * MOVIES.length)];
+  let m2 = MOVIES[Math.floor(Math.random() * MOVIES.length)];
+  // Ensure we get 2 different movies
+  while (m2 === m1 && MOVIES.length > 1) {
+    m2 = MOVIES[Math.floor(Math.random() * MOVIES.length)];
+  }
+  return `${m1}-${m2}`;
+}
+const PEER_ID = `dweb-${generateMoviePeerId()}`;
 
 const UPSTREAM_RELAY = process.env.UPSTREAM || null;
 
@@ -40,6 +51,9 @@ const DISCOVERY_DIR = "/tmp/dweb-instances";
 
 // Track assigned ports to prevent collisions
 const _usedPorts = new Set();
+
+// SERVER_ID — short internal identifier (not the human-facing peer ID)
+const SERVER_ID = crypto.randomUUID().split("-")[0];
 
 module.exports = {
   get PORT() { return _PORT; },

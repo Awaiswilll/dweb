@@ -23,8 +23,9 @@ const os = require("os");
 const config = require("./config.cjs");
 const { MODE, PORT, RELAY_PORT, UPSTREAM_RELAY, PEER_ID, INSTANCE_NAME, SERVER_ID, LOCAL_IPS } = config;
 const { findFreePort, httpReq } = require("./helpers.cjs");
-const { peers, hostedServices, sharedSessions, tcpRelays,
-        addHostedService, cleanupStalePeers, setRelayConnected, setRelayError } = require("./state.cjs");
+const { peers, hostedServices, sharedSessions, tcpRelays, contacts,
+        addHostedService, cleanupStalePeers, setRelayConnected, setRelayError,
+        restoreContacts, refreshAllContacts } = require("./state.cjs");
 const { createRouter } = require("./router.cjs");
 const { startTCPRelay } = require("./relay-tcp.cjs");
 const { startLocalDiscovery, startFileDiscovery, printBanner, getDiscoverySocket } = require("./discovery.cjs");
@@ -159,6 +160,12 @@ async function main() {
   // Restore peer registry from disk (survives restarts)
   restorePeers();
 
+  // Restore contacts from disk (persistent peer archive)
+  const restoredContacts = restoreContacts();
+  if (restoredContacts > 0) {
+    console.log(`  [contacts] ${contacts.size} past contact(s) remembered`);
+  }
+
   // Auto-register this instance as a peer so it always appears in P2P discovery
   require("./state.cjs").peers.set(PEER_ID, new (require("./state.cjs").PeerRecord)(PEER_ID, {
     address: LOCAL_IPS[0] || "127.0.0.1",
@@ -178,8 +185,11 @@ async function main() {
     setInterval(heartbeatUpstream, 30000);
   }
 
-  // Periodic peer cleanup
+  // Periodic peer cleanup (archives stale peers to contacts)
   setInterval(cleanupStalePeers, 15000);
+
+  // Periodic contact refresh (ping archived contacts to see if they're back)
+  setInterval(refreshAllContacts, 60000);
 
   // Status line
   setInterval(() => {

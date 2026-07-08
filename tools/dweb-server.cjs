@@ -18,6 +18,7 @@ const path = require("path");
 const os   = require("os");
 const net  = require("net");
 const crypto = require("crypto");
+const MOVIES = require("../server/movies.cjs");
 
 // ── Config ─────────────────────────────────────────────────────
 const PORT            = parseInt(process.env.PORT, 10) || 49737;
@@ -27,7 +28,13 @@ const DIST_DIR        = (() => {
   const parent = path.resolve(__dirname, "..", "dist");
   return (fs.existsSync(local) && fs.statSync(local).isDirectory()) ? local : parent;
 })();
-const PEER_ID         = `dweb-${os.hostname().toLowerCase().replace(/[^a-z0-9-]/g, "-")}`;
+function generateMoviePeerId() {
+  const m1 = MOVIES[Math.floor(Math.random() * MOVIES.length)];
+  let m2 = MOVIES[Math.floor(Math.random() * MOVIES.length)];
+  while (m2 === m1 && MOVIES.length > 1) m2 = MOVIES[Math.floor(Math.random() * MOVIES.length)];
+  return `${m1}-${m2}`;
+}
+const PEER_ID         = `dweb-${generateMoviePeerId()}`;
 const START_TIME      = Date.now();
 const SERVER_NAME     = "dweb-desktop-server";
 const HEARTBEAT_MS    = 30000;
