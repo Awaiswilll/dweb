@@ -5,7 +5,7 @@ import {
   Plus, RefreshCw, CheckCircle2, FolderGit2,
   ExternalLink, Wrench, Wifi, WifiOff,
   Link2, Unlink, Shield, Monitor, Radio, Users,
-  ChevronDown, ChevronRight, List, Save, Activity, Copy,
+  ChevronDown, ChevronRight, List, Save, Activity, Copy, Sparkles,
 } from "lucide-react";
 import type { Service, P2PNetworkStatus } from "../types";
 import {
@@ -376,20 +376,16 @@ const DEFAULT_SERVICES: Service[] = [
 
 /* ─── Service Access URLs ─────────────────────────────────── */
 function getServiceUrl(svc: Service): string {
-  if (svc.url) return svc.url;
   // For running services with a specific port, point directly to the service's own server
   if (svc.running && svc.port) {
-    return `${window.location.origin}/service-proxy/${svc.port}`;
+    return `http://localhost:${svc.port}`;
   }
-  // Default fallback for built-in pages
-  if (svc.name === "My Static Website") return `${window.location.origin}/welcome`;
-  if (svc.name === "File Share") return `${window.location.origin}/fileshare`;
-  return `${window.location.origin}/welcome`;
+  // Default fallback — main server URL
+  return `${window.location.origin}`;
 }
 
 function getServiceSourceUrl(svc: Service): string | null {
-  // For running services, fetch the actual rendered page from the service's own server
-  // so the user edits the real content
+  // For running services, open the service's own server directly
   if (svc.running && svc.port) {
     return getServiceUrl(svc);
   }
@@ -433,6 +429,23 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
   const [customizeSaving, setCustomizeSaving] = useState(false);
   const [domainRegistering, setDomainRegistering] = useState(false);
   const [serviceVersion, setServiceVersion] = useState(0);
+  const [publishedDomains, setPublishedDomains] = useState<Record<string, string>>({});
+  const [publishingSvc, setPublishingSvc] = useState<Service | null>(null);
+  const [quickPublishSvc, setQuickPublishSvc] = useState<Service | null>(null);
+
+  const loadPublishedDomains = async () => {
+    try {
+      const resp = await fetch(`${window.location.origin}/api/service/domains`);
+      const data = await resp.json();
+      if (data?.status === "ok" && Array.isArray(data.domains)) {
+        const map: Record<string, string> = {};
+        for (const d of data.domains) {
+          if (d.service_name) map[d.service_name] = d.domain;
+        }
+        setPublishedDomains(map);
+      }
+    } catch {}
+  };
 
   const loadServices = async () => {
     setLoadingServices(true);
@@ -546,9 +559,11 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
           }
         }
       } catch {}
+      loadPublishedDomains();
     })();
     loadRuntimes();
     loadTorStatus();
+    loadPublishedDomains();
   }, []);
 
   const handleTorToggle = async () => {
@@ -1867,12 +1882,18 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
                       <Code size={12} />
                     </button>
                   )}
-                  <button className="pill-btn pill-open" title="Open in dweb Browser"
+                  <button className="pill-btn pill-open"
+                    title={publishedDomains[svc.name] ? `Open ${publishedDomains[svc.name]} in dweb Browser` : "Open in system browser"}
                     onClick={(e) => {
                       e.stopPropagation();
-                      const url = getServiceUrl(svc);
-                      if (onOpenInBrowser) onOpenInBrowser(url);
-                      else window.open(url, '_blank');
+                      const published = publishedDomains[svc.name];
+                      if (published && onOpenInBrowser) {
+                        // Published → open in built-in dweb browser via dweb:// protocol
+                        onOpenInBrowser(`dweb://${published.replace(/\.dweb$/, "")}`);
+                      } else {
+                        // Not published → open service directly in system browser
+                        window.open(getServiceUrl(svc), '_blank');
+                      }
                     }}>
                     <ExternalLink size={12} />
                   </button>
@@ -1884,7 +1905,50 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
                       <Square size={12} />
                     </button>
                   )}
-                  <span className="pill-badge pill-p2p" title="P2P discoverable">P2P</span>
+                  {publishedDomains[svc.name] ? (
+                    <span className="pill-badge pill-published"
+                      onClick={(e) => { e.stopPropagation(); setPublishingSvc(svc); }}
+                      title={`Published at ${publishedDomains[svc.name]} — click to manage`}
+                      style={{
+                        background: "rgba(34,197,94,0.2)", color: "#22c55e",
+                        border: "1px solid rgba(34,197,94,0.3)", cursor: "pointer",
+                      }}>
+                      <Globe size={10} /> {publishedDomains[svc.name].replace(/\.dweb$/, "")}
+                    </span>
+                  ) : (
+                    <div style={{ display: "inline-flex", alignItems: "center", gap: 0, marginLeft: 4, position: "relative" }}>
+                      <button className="pill-publish-btn" title="Publish on .dweb — choose domain name"
+                        onClick={(e) => { e.stopPropagation(); setQuickPublishSvc(svc); }}
+                        style={{
+                          display: "inline-flex", alignItems: "center", gap: 4,
+                          padding: "3px 10px", border: "1px solid rgba(139,92,246,0.25)",
+                          borderRadius: "12px 0 0 12px", background: "rgba(139,92,246,0.1)",
+                          color: "#8b5cf6", fontSize: 10, fontWeight: 600,
+                          cursor: "pointer", whiteSpace: "nowrap",
+                          transition: "all 0.12s",
+                        }}
+                        onMouseOver={e => e.currentTarget.style.background = "rgba(139,92,246,0.2)"}
+                        onMouseOut={e => e.currentTarget.style.background = "rgba(139,92,246,0.1)"}>
+                        <Globe size={10} /> Publish
+                      </button>
+                      <button className="pill-publish-btn" title="Advanced publish options (tier, custom domain)"
+                        onClick={(e) => { e.stopPropagation(); setPublishingSvc(svc); }}
+                        style={{
+                          display: "inline-flex", alignItems: "center", justifyContent: "center",
+                          width: 18, height: 18, padding: 0,
+                          border: "1px solid rgba(139,92,246,0.25)",
+                          borderRadius: "0 12px 12px 0", borderLeft: "none",
+                          background: "rgba(139,92,246,0.08)",
+                          color: "#8b5cf6", fontSize: 9, fontWeight: 600,
+                          cursor: "pointer", lineHeight: 1,
+                          transition: "all 0.12s",
+                        }}
+                        onMouseOver={e => e.currentTarget.style.background = "rgba(139,92,246,0.18)"}
+                        onMouseOut={e => e.currentTarget.style.background = "rgba(139,92,246,0.08)"}>
+                        ▼
+                      </button>
+                    </div>
+                  )}
                 </>
               ) : (
                 <button className="pill-btn pill-start" title="Start"
@@ -2111,6 +2175,360 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
     </div>
   ) : null;
 
+  /* ─── Publish Provisioning Modal ──────────────────────── */
+  /* ─── Quick Publish Domain Prompt ──────────────────────── */
+  const quickPublishModal = quickPublishSvc ? (
+    <QuickPublishPrompt
+      svc={quickPublishSvc}
+      onClose={() => setQuickPublishSvc(null)}
+      onOpenAdvanced={() => { setPublishingSvc(quickPublishSvc); setQuickPublishSvc(null); }}
+      onPublished={(domain) => {
+        setPublishedDomains(prev => ({ ...prev, [quickPublishSvc.name]: domain }));
+        setConnectionMsg({ type: "success", text: `✨ ${quickPublishSvc.name} published at https://${domain}` });
+        setQuickPublishSvc(null);
+        // Open the published domain in the built-in browser
+        if (onOpenInBrowser) onOpenInBrowser(`dweb://${domain}`);
+      }}
+    />
+  ) : null;
+
+  const publishProvisionModal = publishingSvc ? (
+    <PublishProvisionModalInner
+      svc={publishingSvc}
+      onClose={() => setPublishingSvc(null)}
+      onPublished={(domain) => {
+        setPublishedDomains(prev => ({ ...prev, [publishingSvc.name]: domain }));
+        setConnectionMsg({ type: "success", text: `✨ ${publishingSvc.name} published at https://${domain}` });
+        setPublishingSvc(null);
+        // Open the published domain in the built-in browser
+        if (onOpenInBrowser) onOpenInBrowser(`dweb://${domain}`);
+      }}
+      onUnpublished={() => {
+        setPublishedDomains(prev => {
+          const next = { ...prev };
+          delete next[publishingSvc.name];
+          return next;
+        });
+        setConnectionMsg({ type: "info", text: `Unpublished ${publishingSvc.name}` });
+        setPublishingSvc(null);
+      }}
+    />
+  ) : null;
+
+  /* ─── Publish Provisioning Modal Component ────────────── */
+  function PublishProvisionModalInner({ svc, onClose, onPublished, onUnpublished }: {
+    svc: Service;
+    onClose: () => void;
+    onPublished: (domain: string) => void;
+    onUnpublished: () => void;
+  }) {
+    const alreadyPublished = publishedDomains[svc.name];
+    const defaultName = svc.name.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || "my-service";
+    const [domainName, setDomainName] = useState(defaultName);
+    const [tier, setTier] = useState<string>("free");
+    const [customDomain, setCustomDomain] = useState("");
+    const [publishing, setPublishing] = useState(false);
+    const [unpublishing, setUnpublishing] = useState(false);
+    const [error, setError] = useState("");
+
+    const handlePublish = async () => {
+      if (!domainName.trim()) return;
+      setPublishing(true);
+      setError("");
+      try {
+        const resp = await fetch("/api/service/publish", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: svc.name,
+            domain: domainName.trim(),
+            tier: tier,
+            custom_domain: tier === "business" && customDomain.trim() ? customDomain.trim() : null,
+          }),
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+          onPublished(data.domain || `${domainName.trim()}.dweb`);
+        } else {
+          setError(data.error || "Publish failed");
+        }
+      } catch (err: any) {
+        setError(`Publish failed: ${err.message}`);
+      } finally {
+        setPublishing(false);
+      }
+    };
+
+    const handleUnpublish = async () => {
+      setUnpublishing(true);
+      setError("");
+      try {
+        const resp = await fetch("/api/service/unpublish", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: svc.name }),
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+          onUnpublished();
+        } else {
+          setError(data.error || "Unpublish failed");
+        }
+      } catch (err: any) {
+        setError(`Unpublish failed: ${err.message}`);
+      } finally {
+        setUnpublishing(false);
+      }
+    };
+
+    return (
+      <div
+        style={{
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 1000,
+          display: "flex", alignItems: "center", justifyContent: "center", padding: 16,
+        }}
+        onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      >
+        <div className="glass" style={{
+          width: 440, maxWidth: "100%", padding: 0, borderRadius: "var(--radius-lg)", overflow: "hidden",
+        }}>
+          {/* Header */}
+          <div style={{
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            padding: "14px 18px", borderBottom: "1px solid rgba(255,255,255,0.06)",
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <Globe size={16} style={{ color: "#8b5cf6" }} />
+              <span style={{ fontWeight: 600, fontSize: 14 }}>
+                {alreadyPublished ? `🌐 ${alreadyPublished}` : `Publish ${svc.name}`}
+              </span>
+            </div>
+            <button className="btn btn-icon" onClick={onClose}>✕</button>
+          </div>
+
+          {alreadyPublished ? (
+            /* ── Published state ── */
+            <div style={{ padding: 18, display: "flex", flexDirection: "column", gap: 14 }}>
+              <div style={{
+                padding: "12px 16px", borderRadius: "var(--radius-sm)",
+                background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.25)",
+                display: "flex", alignItems: "center", gap: 10,
+              }}>
+                <CheckCircle2 size={20} style={{ color: "#22c55e", flexShrink: 0 }} />
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 13, color: "#22c55e" }}>Published</div>
+                  <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>
+                    Accessible at <strong>{alreadyPublished}</strong>
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="btn btn-primary btn-sm" style={{ flex: 1, height: 32, fontSize: 12 }}
+                  onClick={() => window.open(`http://${alreadyPublished}`, '_blank')}>
+                  <ExternalLink size={12} /> Visit
+                </button>
+                <button className="btn btn-secondary btn-sm" style={{ flex: 1, height: 32, fontSize: 12 }}
+                  onClick={() => {
+                    navigator.clipboard.writeText(alreadyPublished);
+                    setConnectionMsg({ type: "success", text: "Copied dweb URL" });
+                  }}>
+                  <Copy size={12} /> Copy URL
+                </button>
+              </div>
+
+              {error && <div style={{ fontSize: 11, color: "#ef4444" }}>{error}</div>}
+
+              <button className="btn btn-sm" style={{
+                height: 32, fontSize: 12, color: "#ef4444", border: "1px solid rgba(239,68,68,0.3)",
+                background: "rgba(239,68,68,0.08)",
+              }}
+                disabled={unpublishing}
+                onClick={handleUnpublish}>
+                {unpublishing ? "Unpublishing..." : <><Unlink size={12} /> Unpublish</>}
+              </button>
+            </div>
+          ) : (
+            /* ── Provision form ── */
+            <div style={{ padding: 18, display: "flex", flexDirection: "column", gap: 12 }}>
+              <p style={{ fontSize: 12, color: "var(--text-muted)", margin: 0 }}>
+                Register a <strong>.dweb</strong> domain and bind it to this service for P2P access.
+              </p>
+
+              <div className="provider-field">
+                <label>Domain Name</label>
+                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <input className="text-input wide" value={domainName}
+                    onChange={e => setDomainName(e.target.value.replace(/[^a-z0-9-]/g, ""))}
+                    placeholder={defaultName}
+                    style={{ flex: 1, fontSize: 13 }}
+                  />
+                  <span style={{ fontSize: 13, color: "var(--text-muted)", fontWeight: 600, whiteSpace: "nowrap" }}>.dweb</span>
+                </div>
+              </div>
+
+              {/* Tier selector */}
+              <div className="provider-field">
+                <label>Plan</label>
+                <div style={{ display: "flex", gap: 6 }}>
+                  {[
+                    { key: "free", label: "Free", desc: "90-day", color: "#60a5fa" },
+                    { key: "premium", label: "Premium", desc: "$5 permanent", color: "#f59e0b" },
+                    { key: "business", label: "Business", desc: "$20 + custom domain", color: "#a855f7" },
+                  ].map(t => (
+                    <button key={t.key}
+                      onClick={() => setTier(t.key)}
+                      style={{
+                        flex: 1, padding: "8px 10px", border: "none", borderRadius: "var(--radius-sm)",
+                        cursor: "pointer", fontSize: 11, textAlign: "center",
+                        background: tier === t.key ? t.color : "rgba(255,255,255,0.04)",
+                        color: tier === t.key ? "#fff" : "var(--text-muted)",
+                        fontWeight: tier === t.key ? 600 : 400,
+                        transition: "all 0.12s",
+                      }}>
+                      <div style={{ fontWeight: 600, fontSize: 12 }}>{t.label}</div>
+                      <div style={{ fontSize: 10, opacity: 0.8, marginTop: 2 }}>{t.desc}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Custom domain field for business tier */}
+              {tier === "business" && (
+                <div className="provider-field">
+                  <label>Custom Domain (optional)</label>
+                  <input className="text-input wide" value={customDomain}
+                    onChange={e => setCustomDomain(e.target.value)}
+                    placeholder="example.com"
+                    style={{ fontSize: 13 }}
+                  />
+                  <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 4 }}>
+                    Point your domain's DNS A record to this server's IP address
+                  </div>
+                </div>
+              )}
+
+              {error && <div style={{ fontSize: 11, color: "#ef4444", padding: "4px 8px", background: "rgba(239,68,68,0.08)", borderRadius: "var(--radius-sm)" }}>{error}</div>}
+
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}>
+                <button className="btn btn-secondary" onClick={onClose}
+                  style={{ height: 32, fontSize: 12 }}>Cancel</button>
+                <button className="btn btn-primary" onClick={handlePublish}
+                  disabled={publishing || !domainName.trim()}
+                  style={{ height: 32, fontSize: 12 }}>
+                  {publishing ? "Publishing..." : <><Sparkles size={12} /> Publish on .dweb</>}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  /* ─── Quick Publish Prompt (lightweight domain name only) ── */
+  function QuickPublishPrompt({ svc, onClose, onOpenAdvanced, onPublished }: {
+    svc: Service;
+    onClose: () => void;
+    onOpenAdvanced: () => void;
+    onPublished: (domain: string) => void;
+  }) {
+    const suggestedName = svc.name.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || "svc";
+    const [domainName, setDomainName] = useState(suggestedName);
+    const [publishing, setPublishing] = useState(false);
+    const [error, setError] = useState("");
+
+    const handlePublish = async () => {
+      if (!domainName.trim()) return;
+      setPublishing(true);
+      setError("");
+      try {
+        const resp = await fetch("/api/service/publish", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: svc.name, domain: domainName.trim(), tier: "free" }),
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+          onPublished(data.domain);
+        } else {
+          setError(data.error || "Publish failed");
+        }
+      } catch (err: any) {
+        setError(`Publish failed: ${err.message}`);
+      } finally {
+        setPublishing(false);
+      }
+    };
+
+    return (
+      <div
+        style={{
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 999,
+          display: "flex", alignItems: "center", justifyContent: "center", padding: 16,
+        }}
+        onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      >
+        <div className="glass" style={{
+          width: 360, maxWidth: "100%", padding: 0, borderRadius: "var(--radius-lg)", overflow: "hidden",
+        }}>
+          <div style={{
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            padding: "12px 16px", borderBottom: "1px solid rgba(255,255,255,0.06)",
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <Globe size={15} style={{ color: "#8b5cf6" }} />
+              <span style={{ fontWeight: 600, fontSize: 14 }}>Publish {svc.name}</span>
+            </div>
+            <button className="btn btn-icon" onClick={onClose} style={{ fontSize: 16, lineHeight: 1, opacity: 0.6 }}>✕</button>
+          </div>
+
+          <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
+            <p style={{ fontSize: 12, color: "var(--text-muted)", margin: 0 }}>
+              Choose a <strong>.dweb</strong> domain name for your service:
+            </p>
+
+            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <input
+                className="text-input wide"
+                value={domainName}
+                onChange={e => setDomainName(e.target.value.replace(/[^a-z0-9-]/g, ""))}
+                placeholder={suggestedName}
+                autoFocus
+                onKeyDown={e => { if (e.key === "Enter") handlePublish(); }}
+                style={{ flex: 1, fontSize: 14, padding: "8px 10px" }}
+              />
+              <span style={{ fontSize: 14, color: "var(--text-muted)", fontWeight: 700, whiteSpace: "nowrap" }}>.dweb</span>
+            </div>
+
+            {error && (
+              <div style={{
+                fontSize: 11, color: "#ef4444", padding: "6px 8px",
+                background: "rgba(239,68,68,0.08)", borderRadius: "var(--radius-sm)",
+              }}>{error}</div>
+            )}
+
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}>
+              <button className="btn btn-sm" onClick={onClose}
+                style={{ height: 32, fontSize: 12, opacity: 0.7 }}>Cancel</button>
+              <button className="btn btn-sm" onClick={onOpenAdvanced}
+                style={{
+                  height: 32, fontSize: 11, background: "transparent",
+                  border: "1px solid rgba(255,255,255,0.1)", color: "var(--text-muted)",
+                }}>More options ▼</button>
+              <button className="btn btn-primary btn-sm"
+                disabled={publishing || !domainName.trim()}
+                onClick={handlePublish}
+                style={{ height: 32, fontSize: 12 }}>
+                {publishing ? "Publishing..." : <><Sparkles size={12} /> Publish</>}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   /* ─── Render ────────────────────────────────────────────── */
   return (
     <div className="view-container dashboard">
@@ -2197,6 +2615,8 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
       )}
 
       {servicePreviewModal}
+      {quickPublishModal}
+      {publishProvisionModal}
     </div>
   );
 }

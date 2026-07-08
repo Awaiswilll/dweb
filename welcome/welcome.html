@@ -3,294 +3,617 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>dweb — P2P Self-Hosting OS</title>
+<title>dweb — Welcome to the Decentralised Web</title>
 <style>
-  /* ── Matrix Digital Rain ── */
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+  /* ═══ Reset & Base ═══ */
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
   body {
-    background: #0a0e17;
-    color: #00ff41;
-    font-family: 'Courier New', 'Fira Code', monospace;
-    overflow: hidden;
-    height: 100vh;
-    position: relative;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: #07080c;
+    color: #e8edf5;
+    min-height: 100vh;
+    overflow-x: hidden;
+    line-height: 1.6;
   }
-  canvas#matrix {
-    position: fixed;
-    top: 0; left: 0;
-    width: 100vw;
-    height: 100vh;
+
+  /* ═══ Animated Background Grid ═══ */
+  .bg-grid {
+    position: fixed; inset: 0;
     z-index: 0;
-    opacity: 0.35;
+    background-image:
+      linear-gradient(rgba(99, 102, 241, 0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(99, 102, 241, 0.04) 1px, transparent 1px);
+    background-size: 60px 60px;
+    pointer-events: none;
   }
-  /* ── Overlay Content ── */
-  .overlay {
+
+  .bg-glow {
+    position: fixed;
+    top: -30vh; left: 50%;
+    transform: translateX(-50%);
+    width: 120vw; height: 80vh;
+    background: radial-gradient(ellipse at center, rgba(99, 102, 241, 0.08) 0%, transparent 70%);
+    pointer-events: none;
+    z-index: 0;
+    animation: glowPulse 8s ease-in-out infinite alternate;
+  }
+  @keyframes glowPulse {
+    0% { opacity: 0.5; transform: translateX(-50%) scale(1); }
+    100% { opacity: 1; transform: translateX(-50%) scale(1.1); }
+  }
+
+  .bg-orbs {
+    position: fixed; inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    overflow: hidden;
+  }
+  .orb {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(80px);
+    opacity: 0.15;
+    animation: orbFloat 20s ease-in-out infinite;
+  }
+  .orb-1 { width: 500px; height: 500px; background: #6366f1; top: 10%; left: -10%; animation-delay: 0s; }
+  .orb-2 { width: 400px; height: 400px; background: #8b5cf6; bottom: 10%; right: -5%; animation-delay: -7s; }
+  .orb-3 { width: 350px; height: 350px; background: #06b6d4; top: 50%; left: 40%; animation-delay: -14s; }
+  @keyframes orbFloat {
+    0%, 100% { transform: translate(0, 0) scale(1); }
+    33% { transform: translate(30px, -40px) scale(1.05); }
+    66% { transform: translate(-20px, 20px) scale(0.95); }
+  }
+
+  /* ═══ Particle network ═══ */
+  #particleCanvas {
+    position: fixed; inset: 0;
+    z-index: 0;
+    opacity: 0.3;
+    pointer-events: none;
+  }
+
+  /* ═══ Content ═══ */
+  .content {
     position: relative;
     z-index: 1;
-    height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 20px;
-    text-align: center;
-    background: radial-gradient(ellipse at center, rgba(0,255,65,0.03) 0%, transparent 70%);
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 40px 24px 80px;
   }
-  .terminal-box {
-    background: rgba(0, 10, 0, 0.85);
-    border: 1px solid rgba(0, 255, 65, 0.3);
-    border-radius: 8px;
-    padding: 32px 40px;
-    max-width: 680px;
-    width: 100%;
-    box-shadow: 0 0 60px rgba(0, 255, 65, 0.1), inset 0 0 60px rgba(0, 0, 0, 0.5);
-    backdrop-filter: blur(4px);
-  }
-  .terminal-box h1 {
-    font-size: 28px;
-    font-weight: 700;
-    color: #00ff41;
-    text-shadow: 0 0 20px rgba(0, 255, 65, 0.6);
-    letter-spacing: 2px;
-    margin-bottom: 4px;
-  }
-  .terminal-box .subtitle {
-    color: rgba(0, 255, 65, 0.6);
-    font-size: 13px;
-    margin-bottom: 24px;
-    letter-spacing: 3px;
-    text-transform: uppercase;
-  }
-  .terminal-box .info-line {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 6px 0;
-    border-bottom: 1px solid rgba(0, 255, 65, 0.08);
-    font-size: 13px;
-  }
-  .terminal-box .info-line:last-child { border-bottom: none; }
-  .terminal-box .info-label { color: rgba(0, 255, 65, 0.5); }
-  .terminal-box .info-value { color: #00ff41; font-weight: 600; }
-  .terminal-box .info-value a {
-    color: #00ff41;
-    text-decoration: none;
-    border-bottom: 1px dashed rgba(0, 255, 65, 0.3);
-  }
-  .terminal-box .info-value a:hover {
-    text-shadow: 0 0 10px rgba(0, 255, 65, 0.5);
-    border-bottom-color: #00ff41;
-  }
-  .cursor-blink {
-    display: inline-block;
-    width: 10px;
-    height: 18px;
-    background: #00ff41;
-    margin-left: 6px;
-    vertical-align: middle;
-    animation: blink 1s step-end infinite;
-  }
-  @keyframes blink { 50% { opacity: 0; } }
 
-  .badge-row {
-    display: flex;
-    gap: 8px;
-    justify-content: center;
-    margin-top: 20px;
-    flex-wrap: wrap;
+  /* ═══ Header / Hero ═══ */
+  .hero {
+    text-align: center;
+    padding: 60px 0 48px;
   }
-  .badge {
+  .hero-badge {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
-    padding: 5px 12px;
-    border-radius: 4px;
+    gap: 6px;
+    padding: 6px 14px;
+    border-radius: 20px;
     font-size: 11px;
     font-weight: 600;
-    text-transform: uppercase;
     letter-spacing: 0.5px;
-    border: 1px solid rgba(0, 255, 65, 0.2);
-    background: rgba(0, 255, 65, 0.05);
-    color: #00ff41;
+    text-transform: uppercase;
+    background: linear-gradient(135deg, rgba(99,102,241,0.15), rgba(139,92,246,0.1));
+    border: 1px solid rgba(99,102,241,0.2);
+    color: #a5b4fc;
+    margin-bottom: 20px;
+  }
+  .hero-badge .pulse {
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: #22c55e;
+    animation: pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(34,197,94,0.4); }
+    50% { box-shadow: 0 0 0 6px rgba(34,197,94,0); }
+  }
+
+  .hero h1 {
+    font-size: clamp(32px, 6vw, 56px);
+    font-weight: 800;
+    line-height: 1.15;
+    margin-bottom: 16px;
+    background: linear-gradient(135deg, #e8edf5 0%, #a5b4fc 40%, #818cf8 70%, #a78bfa 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .hero p {
+    font-size: clamp(15px, 2vw, 18px);
+    color: #94a3b8;
+    max-width: 640px;
+    margin: 0 auto 24px;
+    line-height: 1.7;
+  }
+
+  .hero-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 22px;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 600;
     text-decoration: none;
     transition: all 0.2s;
+    cursor: pointer;
+    border: none;
   }
-  .badge:hover {
-    background: rgba(0, 255, 65, 0.12);
-    border-color: rgba(0, 255, 65, 0.4);
-    box-shadow: 0 0 15px rgba(0, 255, 65, 0.15);
+  .btn-primary {
+    background: linear-gradient(135deg, #6366f1, #8b5cf6);
+    color: #fff;
+    box-shadow: 0 4px 20px rgba(99,102,241,0.25);
   }
-  .badge-green { background: rgba(0, 255, 65, 0.1); border-color: rgba(0, 255, 65, 0.3); }
-  .badge-blue { background: rgba(59, 130, 246, 0.1); border-color: rgba(59, 130, 246, 0.3); color: #60a5fa; }
-  .badge-purple { background: rgba(139, 92, 246, 0.1); border-color: rgba(139, 92, 246, 0.3); color: #a78bfa; }
-  .badge-amber { background: rgba(245, 158, 11, 0.1); border-color: rgba(245, 158, 11, 0.3); color: #fbbf24; }
+  .btn-primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 28px rgba(99,102,241,0.35);
+  }
+  .btn-secondary {
+    background: rgba(255,255,255,0.05);
+    color: #c4cbd8;
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+  .btn-secondary:hover {
+    background: rgba(255,255,255,0.1);
+    border-color: rgba(255,255,255,0.15);
+  }
 
-  .terminal-prompt {
-    margin-top: 18px;
-    text-align: left;
+  /* ═══ Mission Section ═══ */
+  .section-title {
+    text-align: center;
+    font-size: 24px;
+    font-weight: 700;
+    margin-bottom: 12px;
+    color: #e8edf5;
+  }
+  .section-sub {
+    text-align: center;
+    font-size: 14px;
+    color: #64748b;
+    margin-bottom: 36px;
+    max-width: 560px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .mission-card {
+    background: linear-gradient(135deg, rgba(99,102,241,0.06), rgba(139,92,246,0.03));
+    border: 1px solid rgba(99,102,241,0.1);
+    border-radius: 16px;
+    padding: 36px 32px;
+    margin-bottom: 48px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+  .mission-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, #6366f1, #8b5cf6, transparent);
+  }
+  .mission-card .icon { font-size: 36px; margin-bottom: 12px; }
+  .mission-card h2 { font-size: 20px; font-weight: 700; margin-bottom: 12px; }
+  .mission-card p { color: #94a3b8; font-size: 14px; max-width: 600px; margin: 0 auto; line-height: 1.7; }
+
+  /* ═══ Audience Grid ═══ */
+  .audience-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 16px;
+    margin-bottom: 48px;
+  }
+  .audience-card {
+    background: rgba(255,255,255,0.02);
+    border: 1px solid rgba(255,255,255,0.05);
+    border-radius: 14px;
+    padding: 28px 22px;
+    text-align: center;
+    transition: all 0.25s;
+    position: relative;
+    overflow: hidden;
+  }
+  .audience-card:hover {
+    background: rgba(255,255,255,0.04);
+    border-color: rgba(99,102,241,0.2);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 30px rgba(0,0,0,0.2);
+  }
+  .audience-card .emoji {
+    font-size: 36px;
+    margin-bottom: 12px;
+    display: block;
+  }
+  .audience-card h3 {
+    font-size: 16px;
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+  .audience-card p {
+    font-size: 13px;
+    color: #64748b;
+    line-height: 1.6;
+  }
+  .audience-card .accent-line {
+    position: absolute;
+    top: 0; left: 20%; right: 20%;
+    height: 2px;
+    border-radius: 0 0 4px 4px;
+    opacity: 0;
+    transition: opacity 0.25s;
+  }
+  .audience-card:hover .accent-line { opacity: 1; }
+
+  /* ═══ Features / Capabilities ═══ */
+  .features-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+    margin-bottom: 48px;
+  }
+  .feature-chip {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 18px;
+    background: rgba(255,255,255,0.02);
+    border: 1px solid rgba(255,255,255,0.04);
+    border-radius: 10px;
+    font-size: 13px;
+    color: #94a3b8;
+    transition: all 0.2s;
+  }
+  .feature-chip:hover {
+    background: rgba(255,255,255,0.04);
+    border-color: rgba(99,102,241,0.12);
+    color: #e8edf5;
+  }
+  .feature-chip .fi { font-size: 18px; }
+
+  /* ═══ System Info Panel ═══ */
+  .info-panel {
+    background: rgba(255,255,255,0.02);
+    border: 1px solid rgba(255,255,255,0.05);
+    border-radius: 14px;
+    padding: 24px;
+    margin-bottom: 48px;
+  }
+  .info-panel h3 {
+    font-size: 14px;
+    font-weight: 600;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 16px;
+  }
+  .info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+  }
+  .info-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: rgba(255,255,255,0.02);
+    border-radius: 8px;
+    font-size: 13px;
+  }
+  .info-item .label {
+    color: #64748b;
+    min-width: 70px;
+  }
+  .info-item .value {
+    color: #e8edf5;
+    font-weight: 600;
+    font-family: 'SF Mono', 'Fira Code', monospace;
     font-size: 12px;
-    color: rgba(0, 255, 65, 0.4);
-    border-top: 1px solid rgba(0, 255, 65, 0.1);
-    padding-top: 16px;
   }
-  .terminal-prompt .prompt { color: #00ff41; }
-
-  @media (max-width: 600px) {
-    .terminal-box { padding: 20px; margin: 10px; }
-    .terminal-box h1 { font-size: 20px; }
-    .terminal-box .info-line { font-size: 11px; flex-direction: column; align-items: flex-start; gap: 2px; }
+  .info-item .value a {
+    color: #818cf8;
+    text-decoration: none;
+    border-bottom: 1px dashed rgba(129,140,248,0.3);
+  }
+  .info-item .value a:hover {
+    border-bottom-color: #818cf8;
   }
 
-  /* scanline effect */
-  .scanline {
-    position: fixed;
-    top: 0; left: 0;
-    width: 100vw;
-    height: 100vh;
-    z-index: 2;
-    pointer-events: none;
-    background: repeating-linear-gradient(
-      0deg,
-      transparent,
-      transparent 2px,
-      rgba(0, 0, 0, 0.03) 2px,
-      rgba(0, 0, 0, 0.03) 4px
-    );
+  /* ═══ Footer ═══ */
+  .footer {
+    text-align: center;
+    padding: 20px 0;
+    border-top: 1px solid rgba(255,255,255,0.04);
+    margin-top: 16px;
+  }
+  .footer p {
+    font-size: 12px;
+    color: #475569;
+  }
+  .footer .dots {
+    display: flex;
+    gap: 6px;
+    justify-content: center;
+    margin-top: 10px;
+  }
+  .footer .dots span {
+    width: 4px; height: 4px;
+    border-radius: 50%;
+    background: #6366f1;
+    opacity: 0.3;
+    animation: dotPulse 2s ease-in-out infinite;
+  }
+  .footer .dots span:nth-child(2) { animation-delay: 0.3s; }
+  .footer .dots span:nth-child(3) { animation-delay: 0.6s; }
+  .footer .dots span:nth-child(4) { animation-delay: 0.9s; }
+  .footer .dots span:nth-child(5) { animation-delay: 1.2s; }
+  @keyframes dotPulse {
+    0%, 100% { opacity: 0.3; }
+    50% { opacity: 0.8; }
+  }
+
+  /* ═══ Responsive ═══ */
+  @media (max-width: 640px) {
+    .content { padding: 24px 16px 60px; }
+    .hero { padding: 32px 0 32px; }
+    .mission-card { padding: 24px 18px; }
+    .audience-grid { grid-template-columns: 1fr; }
+    .features-grid { grid-template-columns: 1fr 1fr; }
+    .info-grid { grid-template-columns: 1fr; }
   }
 </style>
 </head>
 <body>
 
-<canvas id="matrix"></canvas>
-<div class="scanline"></div>
+<div class="bg-grid"></div>
+<div class="bg-glow"></div>
+<div class="bg-orbs">
+  <div class="orb orb-1"></div>
+  <div class="orb orb-2"></div>
+  <div class="orb orb-3"></div>
+</div>
 
-<div class="overlay">
-  <div class="terminal-box">
-    <h1>◈ DWEB v0.1.0 ◈</h1>
-    <div class="subtitle">⚡ Decentralized P2P Self-Hosting OS ⚡</div>
+<canvas id="particleCanvas"></canvas>
 
-    <div class="badge-row">
-      <span class="badge badge-green">● ONLINE</span>
-      <a class="badge badge-blue" href="#" onclick="fetch('/dweb-status').then(r=>r.json()).then(d=>alert(JSON.stringify(d,null,2)));return false">⚡ API</a>
-      <a class="badge badge-purple" href="/">⟳ Dashboard</a>
-      <a class="badge badge-amber" href="/welcome/source">✎ Edit HTML</a>
+<div class="content">
+  <!-- ═══ Hero ═══ -->
+  <div class="hero">
+    <div class="hero-badge">
+      <span class="pulse"></span>
+      <span id="statusText">dweb Node Online</span>
+    </div>
+    <h1>Welcome to the<br>Decentralised Web</h1>
+    <p>
+      You are now connected to a sovereign slice of the peer-to-peer internet.
+      This is a space built for creators, thinkers, builders — not gatekeepers.
+    </p>
+    <div class="hero-actions">
+      <a class="btn btn-primary" href="/">
+        <span>✦</span> Open Dashboard
+      </a>
+      <a class="btn btn-secondary" id="publishLink" href="/">
+        <span>🌐</span> Publish Your Site
+      </a>
+    </div>
+  </div>
+
+  <!-- ═══ Mission ═══ -->
+  <div class="mission-card">
+    <div class="icon">🌍</div>
+    <h2>Your Internet. Your Rules.</h2>
+    <p>
+      dweb is a decentralised self-hosting OS that puts you back in control.
+      No central servers, no walled gardens — pure peer-to-peer freedom.
+      Every node is a citizen, every device a home for your ideas.
+    </p>
+  </div>
+
+  <!-- ═══ Audience ═══ -->
+  <h2 class="section-title">Built for You</h2>
+  <p class="section-sub">
+    Whether you're learning, researching, building, or launching — dweb gives you the tools to own your digital presence.
+  </p>
+
+  <div class="audience-grid">
+    <div class="audience-card">
+      <div class="accent-line" style="background: linear-gradient(90deg, #6366f1, #818cf8);"></div>
+      <span class="emoji">📚</span>
+      <h3 style="color: #818cf8;">Students</h3>
+      <p>Learn by building. Host your projects, portfolios, and experiments on a real P2P network — no cloud bills, no permissions needed.</p>
     </div>
 
-    <div style="margin: 18px 0;">
-      <div class="info-line">
-        <span class="info-label">$ Instance</span>
-        <span class="info-value" id="hostname">dweb.local</span>
-      </div>
-      <div class="info-line">
-        <span class="info-label">$ Peer ID</span>
-        <span class="info-value" id="peerid">—</span>
-      </div>
-      <div class="info-line">
-        <span class="info-label">$ Uptime</span>
-        <span class="info-value" id="uptime">—</span>
-      </div>
-      <div class="info-line">
-        <span class="info-label">$ Mode</span>
-        <span class="info-value" id="mode">—</span>
-      </div>
-      <div class="info-line">
-        <span class="info-label">$ Web IDE</span>
-        <span class="info-value"><a href="/">→ Open Dashboard ←</a></span>
-      </div>
-      <div class="info-line">
-        <span class="info-label">$ P2P Network</span>
-        <span class="info-value" id="peers">0 peers online</span>
-      </div>
-      <div class="info-line">
-        <span class="info-label">$ File Share</span>
-        <span class="info-value"><a href="/fileshare">→ Browse Files ←</a></span>
-      </div>
+    <div class="audience-card">
+      <div class="accent-line" style="background: linear-gradient(90deg, #22c55e, #4ade80);"></div>
+      <span class="emoji">🔬</span>
+      <h3 style="color: #4ade80;">Researchers</h3>
+      <p>Share datasets, preprints, and interactive visualisations directly from your own node. Keep your work open, accessible, and uncensorable.</p>
     </div>
 
-    <div class="badge-row">
-      <span class="badge">📁 File Share</span>
-      <span class="badge">🌐 Static Site</span>
-      <span class="badge">🤖 AI Agent</span>
-      <span class="badge">🔗 P2P Relay</span>
+    <div class="audience-card">
+      <div class="accent-line" style="background: linear-gradient(90deg, #f59e0b, #fbbf24);"></div>
+      <span class="emoji">🎓</span>
+      <h3 style="color: #fbbf24;">Academics</h3>
+      <p>Publish course materials, host research groups, and collaborate across institutions without central platforms. Decentralise knowledge.</p>
     </div>
 
-    <div class="terminal-prompt">
-      <span class="prompt">visitor@dweb:~$</span> cat /etc/dweb/welcome<br>
-      <span style="color: rgba(0,255,65,0.6);">You are running dweb — a decentralized mini OS for P2P self-hosting.</span><br>
-      <span class="prompt">visitor@dweb:~$</span> <span class="cursor-blink"></span>
+    <div class="audience-card">
+      <div class="accent-line" style="background: linear-gradient(90deg, #3b82f6, #60a5fa);"></div>
+      <span class="emoji">💼</span>
+      <h3 style="color: #60a5fa;">Freelancers</h3>
+      <p>Showcase your work with a professional portfolio, share client deliverables securely, and run your own mini-infrastructure — all from one node.</p>
+    </div>
+
+    <div class="audience-card">
+      <div class="accent-line" style="background: linear-gradient(90deg, #a855f7, #c084fc);"></div>
+      <span class="emoji">🚀</span>
+      <h3 style="color: #c084fc;">Entrepreneurs</h3>
+      <p>Launch MVPs, spin up micro-sites, and validate ideas without worrying about hosting costs or scalability. Your first deploy is free.</p>
+    </div>
+  </div>
+
+  <!-- ═══ Features ═══ -->
+  <h2 class="section-title">What You Can Do</h2>
+  <p class="section-sub">Every dweb node comes with a growing set of capabilities — explore what's possible.</p>
+
+  <div class="features-grid">
+    <div class="feature-chip"><span class="fi">🌐</span> Host static sites & SPAs</div>
+    <div class="feature-chip"><span class="fi">📁</span> Share files via P2P</div>
+    <div class="feature-chip"><span class="fi">🔗</span> Register .dweb domains</div>
+    <div class="feature-chip"><span class="fi">🤖</span> AI agent integration</div>
+    <div class="feature-chip"><span class="fi">📡</span> P2P relay networking</div>
+    <div class="feature-chip"><span class="fi">🔐</span> Self-sovereign identity</div>
+    <div class="feature-chip"><span class="fi">📦</span> One-click app deploy</div>
+    <div class="feature-chip"><span class="fi">🔍</span> On-chain resolution</div>
+    <div class="feature-chip"><span class="fi">🔄</span> Auto peer discovery</div>
+    <div class="feature-chip"><span class="fi">🎨</span> Custom HTML/CSS/JS</div>
+    <div class="feature-chip"><span class="fi">📊</span> Real-time analytics</div>
+    <div class="feature-chip"><span class="fi">🔌</span> API endpoints</div>
+  </div>
+
+  <!-- ═══ System Info ═══ -->
+  <div class="info-panel" id="systemInfo">
+    <h3>⚡ System Status</h3>
+    <div class="info-grid">
+      <div class="info-item">
+        <span class="label">Instance</span>
+        <span class="value" id="svcHostname">—</span>
+      </div>
+      <div class="info-item">
+        <span class="label">Peer ID</span>
+        <span class="value" id="svcPeerId" style="font-size: 10px;">—</span>
+      </div>
+      <div class="info-item">
+        <span class="label">Mode</span>
+        <span class="value" id="svcMode">—</span>
+      </div>
+      <div class="info-item">
+        <span class="label">Peers</span>
+        <span class="value" id="svcPeers">—</span>
+      </div>
+      <div class="info-item">
+        <span class="label">Uptime</span>
+        <span class="value" id="svcUptime">—</span>
+      </div>
+      <div class="info-item">
+        <span class="label">Services</span>
+        <span class="value" id="svcCount">—</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ Footer ═══ -->
+  <div class="footer">
+    <p>Powered by dweb — Decentralised P2P Self-Hosting OS</p>
+    <div class="dots">
+      <span></span><span></span><span></span><span></span><span></span>
     </div>
   </div>
 </div>
 
 <script>
-// ═══ Matrix Digital Rain ═══
-const canvas = document.getElementById('matrix');
+// ═══ Particle Network Animation ═══
+const canvas = document.getElementById('particleCanvas');
 const ctx = canvas.getContext('2d');
+let particles = [];
+let mouse = { x: 0, y: 0 };
+let animId = null;
 
-function resize() {
+function resizeParticles() {
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
 }
-resize();
-window.addEventListener('resize', resize);
+resizeParticles();
+window.addEventListener('resize', resizeParticles);
 
-const chars = 'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン0123456789ABCDEF<>/{}[]|&^%$#@!';
-const fontSize = 14;
-const columns = Math.floor(canvas.width / fontSize);
-const drops = Array(columns).fill(1);
+const PARTICLE_COUNT = 80;
+const CONNECT_DIST = 150;
 
-function drawMatrix() {
-  ctx.fillStyle = 'rgba(10, 14, 23, 0.05)';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  
-  ctx.fillStyle = '#00ff41';
-  ctx.font = fontSize + 'px monospace';
-  
-  for (let i = 0; i < drops.length; i++) {
-    const char = chars[Math.floor(Math.random() * chars.length)];
-    const x = i * fontSize;
-    const y = drops[i] * fontSize;
-    
-    ctx.fillStyle = Math.random() > 0.98 ? '#ffffff' : '#00ff41';
-    ctx.fillText(char, x, y);
-    
-    if (y > canvas.height && Math.random() > 0.975) {
-      drops[i] = 0;
-    }
-    drops[i]++;
+function initParticles() {
+  particles = [];
+  for (let i = 0; i < PARTICLE_COUNT; i++) {
+    particles.push({
+      x: Math.random() * canvas.width,
+      y: Math.random() * canvas.height,
+      vx: (Math.random() - 0.5) * 0.5,
+      vy: (Math.random() - 0.5) * 0.5,
+      r: Math.random() * 2 + 1,
+    });
   }
 }
+initParticles();
 
-setInterval(drawMatrix, 50);
+function drawParticles() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-// ═══ Fetch dweb system info ═══
-async function loadSystemInfo() {
+  for (const p of particles) {
+    p.x += p.vx;
+    p.y += p.vy;
+    if (p.x < 0 || p.x > canvas.width) p.vx *= -1;
+    if (p.y < 0 || p.y > canvas.height) p.vy *= -1;
+
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(129, 140, 248, 0.5)';
+    ctx.fill();
+  }
+
+  for (let i = 0; i < particles.length; i++) {
+    for (let j = i + 1; j < particles.length; j++) {
+      const dx = particles[i].x - particles[j].x;
+      const dy = particles[i].y - particles[j].y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < CONNECT_DIST) {
+        ctx.beginPath();
+        ctx.moveTo(particles[i].x, particles[i].y);
+        ctx.lineTo(particles[j].x, particles[j].y);
+        ctx.strokeStyle = `rgba(99, 102, 241, ${0.08 * (1 - dist / CONNECT_DIST)})`;
+        ctx.stroke();
+      }
+    }
+  }
+
+  animId = requestAnimationFrame(drawParticles);
+}
+drawParticles();
+
+// ═══ Fetch dweb status ═══
+async function loadInfo() {
   try {
     const resp = await fetch('/dweb-status');
     const data = await resp.json();
-    
     if (data.status === 'ok') {
-      document.getElementById('hostname').textContent = data.hostname || 'dweb.local';
-      document.getElementById('peerid').textContent = data.peerId || '—';
-      document.getElementById('mode').textContent = data.mode || 'auto';
-      
+      document.getElementById('svcHostname').textContent = data.hostname || 'dweb.local';
+      document.getElementById('svcPeerId').textContent = data.peerId || '—';
+      document.getElementById('svcMode').textContent = data.mode || 'auto';
+      document.getElementById('svcPeers').textContent = (data.peersOnline || 0) + ' online';
+      document.getElementById('svcCount').textContent = (data.hostedServices || 0) + ' running';
+
       const uptime = data.uptime || 0;
-      const days = Math.floor(uptime / 86400);
-      const hours = Math.floor((uptime % 86400) / 3600);
-      const mins = Math.floor((uptime % 3600) / 60);
-      document.getElementById('uptime').textContent = 
-        days + 'd ' + hours + 'h ' + mins + 'm';
-      
-      document.getElementById('peers').textContent = 
-        (data.peersOnline || 0) + ' peer(s) online' + 
-        (data.relayConnected ? ' · relay connected' : '');
+      const d = Math.floor(uptime / 86400);
+      const h = Math.floor((uptime % 86400) / 3600);
+      const m = Math.floor((uptime % 3600) / 60);
+      document.getElementById('svcUptime').textContent = d + 'd ' + h + 'h ' + m + 'm';
     }
   } catch {
-    document.getElementById('hostname').textContent = 'dweb.local (offline)';
+    document.getElementById('svcHostname').textContent = 'dweb.local (offline)';
+    document.getElementById('statusText').textContent = '⚠️ Status unavailable';
   }
 }
-loadSystemInfo();
-setInterval(loadSystemInfo, 15000);
+loadInfo();
+setInterval(loadInfo, 15000);
 </script>
 </body>
 </html>
