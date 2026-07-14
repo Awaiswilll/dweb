@@ -10,6 +10,9 @@ import Settings from "./views/Settings";
 import Integrations from "./views/Integrations";
 import Docs from "./views/Docs";
 import type { View } from "./types";
+import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import ShortcutsHelpModal from "./components/ShortcutsHelpModal";
+import P2PStatusIndicator from "./components/P2PStatusIndicator";
 
 import P2PTransfer from "./views/P2PTransfer";
 import {
@@ -96,6 +99,7 @@ function AppContent() {
             </button>
           ))}
           <div className="quick-action-separator" />
+          <P2PStatusIndicator />
           <div className="quick-action-status">
             <span className={`status-dot ${serverStatus}`} />
             {serverStatus === "online" ? "Server Online" : serverStatus === "offline" ? "Offline" : "Checking..."}
