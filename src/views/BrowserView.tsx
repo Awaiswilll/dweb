@@ -84,10 +84,12 @@ export default function BrowserView({ initialUrl, navId }: BrowserViewProps) {
             const data = await res.json();
             if (data.status === "ok" && data.record) {
               info = data.record;
-              info.address = data.address || info.address;
+              info.address = data.address || (info.address ? String(info.address).split(":")[0] : info.address);
               info.port = data.port || info.port;
               info.path = data.path || "/";
               info.resolvedUrl = data.url || null;
+              info.peerId = data.peerId || null;
+              info.via = data.via || null;
             }
           }
         } catch {}
@@ -98,14 +100,26 @@ export default function BrowserView({ initialUrl, navId }: BrowserViewProps) {
         const address = info.address || "";
         const port = info.port || "";
         const path = info.path || "/";
+        // A direct P2P resolution has no LAN address (deliberately — see
+        // resolveDomainAcrossPeers on the backend) but still has a port
+        // and peerId, which is enough to fetch over the data channel.
+        // Fall back to a synthetic placeholder URL only for display and
+        // for path-extraction on the backend; it is never actually
+        // dialed by the frontend itself.
         const resolvedUrl = info.resolvedUrl || (address && port ? `http://${address}:${port}${path}` : null);
+        const displayUrl = resolvedUrl || (info.peerId ? `dweb://${dwebDomain(raw)}${path}` : null);
+        const canAttemptFetch = !!(resolvedUrl || (info.peerId && port));
 
-        if (resolvedUrl) {
+        if (canAttemptFetch) {
           try {
-            const proxyRes = await fetch(`/api/proxy/fetch?url=${encodeURIComponent(resolvedUrl)}`);
+            const fetchTargetUrl = resolvedUrl || `http://peer${path}`;
+            const params = new URLSearchParams({ url: fetchTargetUrl });
+            if (info.peerId) params.set("peerId", info.peerId);
+            if (port) params.set("port", String(port));
+            const proxyRes = await fetch(`/api/proxy/fetch?${params.toString()}`);
             if (proxyRes.ok) {
               const html = await proxyRes.text();
-              setContentHtml(`<base href="${escapeHtml(resolvedUrl)}/">${html}`);
+              setContentHtml(`<base href="${escapeHtml(displayUrl || "")}/">${html}`);
               setTitle(`${dwebDomain(raw)}.dweb`);
             } else {
               // Proxy failed — show resolved info
@@ -117,11 +131,11 @@ export default function BrowserView({ initialUrl, navId }: BrowserViewProps) {
                 <div class="dweb-meta glass">
                   <div class="meta-row"><span>Domain:</span><code>${escapeHtml(dwebDomain(raw))}.dweb</code></div>
                   ${info.owner_key ? `<div class="meta-row"><span>Owner:</span><code>${escapeHtml(info.owner_key)}</code></div>` : ""}
-                  <div class="meta-row"><span>Address:</span><code>${escapeHtml(address)}:${escapeHtml(String(port))}</code></div>
+                  ${address ? `<div class="meta-row"><span>Address:</span><code>${escapeHtml(address)}:${escapeHtml(String(port))}</code></div>` : `<div class="meta-row"><span>Peer:</span><code>${escapeHtml(info.peerId || "")}</code></div>`}
                   <div class="meta-row"><span>Path:</span><code>${escapeHtml(path)}</code></div>
-                  <div class="meta-row"><span>URL:</span><a href="${escapeHtml(resolvedUrl)}" target="_blank" rel="noopener">${escapeHtml(resolvedUrl)}</a></div>
+                  ${displayUrl ? `<div class="meta-row"><span>URL:</span><code>${escapeHtml(displayUrl)}</code></div>` : ""}
                 </div>
-                <p>Content proxying returned HTTP ${proxyRes.status}. Open the URL directly.</p>
+                <p>Content proxying returned HTTP ${proxyRes.status}. The peer may be offline or unreachable right now.</p>
               </div>`);
               setTitle(`${dwebDomain(raw)}.dweb`);
             }
@@ -133,17 +147,15 @@ export default function BrowserView({ initialUrl, navId }: BrowserViewProps) {
               </div>
               <div class="dweb-meta glass">
                 <div class="meta-row"><span>Domain:</span><code>${escapeHtml(dwebDomain(raw))}.dweb</code></div>
-                <div class="meta-row"><span>Address:</span><code>${escapeHtml(address)}:${escapeHtml(String(port))}</code></div>
+                ${address ? `<div class="meta-row"><span>Address:</span><code>${escapeHtml(address)}:${escapeHtml(String(port))}</code></div>` : `<div class="meta-row"><span>Peer:</span><code>${escapeHtml(info.peerId || "")}</code></div>`}
                 <div class="meta-row"><span>Path:</span><code>${escapeHtml(path)}</code></div>
-                <div class="meta-row"><span>URL:</span><a href="${escapeHtml(resolvedUrl)}" target="_blank" rel="noopener">${escapeHtml(resolvedUrl)}</a></div>
               </div>
-              <p>Cannot proxy content — open the URL directly.</p>
+              <p>Cannot reach this peer right now.</p>
             </div>`);
             setTitle(`${dwebDomain(raw)}.dweb`);
           }
         } else {
-          setContentHtml(`<div class="dweb-page">
-            <div class="dweb-page-header"><h2>${escapeHtml(dwebDomain(raw))}.dweb</h2></div>
+          setContentHtml(`<div class="dweb-page">            <div class="dweb-page-header"><h2>${escapeHtml(dwebDomain(raw))}.dweb</h2></div>
             <p>Domain resolved but no active host found.</p>
             <p class="text-muted">The owner may be offline. Try again later.</p>
           </div>`);

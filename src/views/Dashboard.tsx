@@ -401,6 +401,271 @@ interface DashboardProps {
   onOpenInBrowser?: (url: string) => void;
 }
 
+/* ─── Connect to Remote Modal ────────────────────────────────────────────
+   Hoisted to module scope (was previously defined INSIDE the Dashboard
+   component). Defining a component inside another component's render body
+   creates a brand-new function identity on every parent re-render; React
+   then treats it as a different component type and remounts it, wiping all
+   of its internal state (the "IP textbox keeps clearing" bug). Declaring it
+   here gives it a stable identity across Dashboard's periodic re-renders
+   (polling every 5-15s), so it only unmounts when the user actually closes
+   it. ── */
+interface ConnectModalProps {
+  onClose: () => void;
+  relayStatus: RelayStatus | null;
+  handleConnectRemote: (relayPeer: RelayPeer) => Promise<unknown>;
+  handleConnectDirect: (address: string, name: string) => void;
+  setConnectionMsg: (msg: { type: "success" | "error" | "info"; text: string } | null) => void;
+}
+
+function ConnectModal({
+  onClose,
+  relayStatus,
+  handleConnectRemote,
+  handleConnectDirect,
+  setConnectionMsg,
+}: ConnectModalProps) {
+    const [addr, setAddr] = useState("");
+    const [label, setLabel] = useState("");
+    const [mode, setLocalMode] = useState<"direct" | "relay">("direct");
+    const [connecting, setConnecting] = useState(false);
+    const [localPeers, setLocalPeers] = useState<RelayPeer[]>([]);
+    const [searchTerm, setSearchTerm] = useState("");
+    const [hoveredMode, setHoveredMode] = useState<"direct" | "relay" | null>(null);
+
+    useEffect(() => {
+      fetch("/discover").then(r => r.ok ? r.json() : { peers: [] }).then(d => setLocalPeers(d.peers || [])).catch(() => {});
+    }, []);
+
+    /* ─── Mode info tooltip content ────────────────────────── */
+    const modeInfo = {
+      direct: {
+        title: "Direct P2P Connection",
+        lines: [
+          "Connect via IP:Port directly — no relay server needed.",
+          "Works when both peers are on the same LAN, or when the remote peer is reachable via its public IP.",
+          "Lower latency, no central dependency, but may fail behind strict NATs or firewalls.",
+          "Best for: same-network peers, LAN parties, low-latency transfers.",
+        ],
+      },
+      relay: {
+        title: "Relay-Mediated Connection",
+        lines: [
+          "Connect via a relay server that brokers WebRTC signaling between peers.",
+          "The relay handles peer discovery and NAT traversal (ICE/STUN), but data flows peer-to-peer once connected.",
+          "Higher initial setup delay, but works across NATs, firewalls, and the open internet.",
+          "Best for: internet peers, strict NAT environments, discovery-based connections.",
+        ],
+      },
+    };
+
+    const handleConnect = async () => {
+      if (!addr.trim()) return;
+      setConnecting(true);
+      try {
+        if (mode === "relay") {
+          // Find peer by ID or address
+          const peer = localPeers.find(p =>
+            p.id === addr.trim() || `${p.address}:${p.port}` === addr.trim()
+          );
+          if (peer) {
+            await handleConnectRemote(peer);
+          } else {
+            // Send signal to arbitrary peer ID
+            await sendRelaySignal(addr.trim(), "offer");
+            handleConnectDirect(addr.trim(), label.trim());
+          }
+        } else {
+          handleConnectDirect(addr.trim(), label.trim());
+        }
+      } catch (err) {
+        setConnectionMsg({ type: "error", text: `Connection failed: ${err}` });
+      } finally {
+        setConnecting(false);
+        onClose();
+      }
+    };
+
+    const handleClickPeer = async (peer: RelayPeer) => {
+      setConnecting(true);
+      try {
+        await handleConnectRemote(peer);
+      } catch (err) {
+        setConnectionMsg({ type: "error", text: `Connection failed: ${err}` });
+      } finally {
+        setConnecting(false);
+        onClose();
+      }
+    };
+
+    const filteredPeers = localPeers.filter(p =>
+      !searchTerm || p.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      p.hostname.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      p.address.includes(searchTerm)
+    );
+
+    return (
+      <div className="modal-overlay" onClick={onClose}>
+        <div className="modal glass" onClick={e => e.stopPropagation()} style={{ maxWidth: 520 }}>
+          <div className="modal-header">
+            <h3><Link2 size={16} /> Connect to Remote Instance</h3>
+            <button className="btn btn-icon" onClick={onClose}>✕</button>
+          </div>
+          <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <p className="text-muted-sm" style={{ fontSize: 12 }}>
+              Connect to another dweb instance on your network or the internet.
+            </p>
+
+            <div style={{ display: "flex", gap: 8, position: "relative" }}>
+              <button
+                className={`btn btn-sm ${mode === "direct" ? "btn-primary" : "btn-secondary"}`}
+                onClick={() => setLocalMode("direct")}
+                onMouseEnter={() => setHoveredMode("direct")}
+                onMouseLeave={() => setHoveredMode(null)}
+                style={{ position: "relative" }}
+              >
+                <Wifi size={14} /> Direct P2P
+              </button>
+              <button
+                className={`btn btn-sm ${mode === "relay" ? "btn-primary" : "btn-secondary"}`}
+                onClick={() => setLocalMode("relay")}
+                onMouseEnter={() => setHoveredMode("relay")}
+                onMouseLeave={() => setHoveredMode(null)}
+                style={{ position: "relative" }}
+              >
+                <Globe size={14} /> Via Relay
+              </button>
+              {/* Hover tooltip info panel */}
+              {hoveredMode && (
+                <div style={{
+                  position: "absolute",
+                  top: "calc(100% + 8px)",
+                  left: 0,
+                  right: 0,
+                  zIndex: 100,
+                  background: "var(--bg-elevated)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "var(--radius-sm)",
+                  padding: "10px 12px",
+                  fontSize: 11,
+                  lineHeight: 1.6,
+                  boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
+                  animation: "fadeIn 0.12s ease",
+                }}>
+                  <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 6, color: hoveredMode === "direct" ? "#22c55e" : "#8b5cf6" }}>
+                    {modeInfo[hoveredMode].title}
+                  </div>
+                  {modeInfo[hoveredMode].lines.map((line, i) => (
+                    <div key={i} style={{ color: "var(--text-secondary)", marginBottom: i < modeInfo[hoveredMode].lines.length - 1 ? 4 : 0, paddingLeft: 8 }}>
+                      {line}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {mode === "relay" && relayStatus?.connected && (
+              <div className="glass-sm" style={{
+                padding: "8px 12px", borderRadius: "var(--radius-sm)",
+                fontSize: 12, color: "var(--text-muted)",
+                display: "flex", alignItems: "center", gap: 6,
+              }}>
+                <Radio size={12} color="#22c55e" />
+                Connected to relay at <strong>{relayStatus.relayAddress}</strong>
+                {" · "}{relayStatus.peersOnline} peer(s) online
+              </div>
+            )}
+
+            {mode === "relay" && !relayStatus?.connected && (
+              <div className="glass-sm" style={{
+                padding: "8px 12px", borderRadius: "var(--radius-sm)",
+                fontSize: 12, color: "#eab308", border: "1px solid rgba(234,179,8,0.3)",
+              }}>
+                ⚠ Relay not connected. Peers will be discovered via direct IP only.
+              </div>
+            )}
+
+            {/* Relay peer browser */}
+            {mode === "relay" && localPeers.length > 0 && (
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 600, marginBottom: 6, display: "block" }}>
+                  Discovered Peers
+                </label>
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={e => setSearchTerm(e.target.value)}
+                  placeholder="Filter peers..."
+                  className="text-input"
+                  style={{ width: "100%", marginBottom: 6, fontSize: 12, padding: "6px 10px" }}
+                />
+                <div style={{ maxHeight: 160, overflowY: "auto", display: "flex", flexDirection: "column", gap: 4 }}>
+                  {filteredPeers.map(p => (
+                    <div
+                      key={p.id}
+                      onClick={() => handleClickPeer(p)}
+                      className="glass-sm"
+                      style={{
+                        display: "flex", alignItems: "center", gap: 8,
+                        padding: "8px 10px", borderRadius: "var(--radius-sm)",
+                        cursor: "pointer", fontSize: 12,
+                        transition: "background 0.1s",
+                      }}
+                      onMouseOver={e => (e.currentTarget.style.background = "rgba(59,130,246,0.1)")}
+                      onMouseOut={e => (e.currentTarget.style.background = "")}
+                    >
+                      <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#22c55e", flexShrink: 0 }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, fontSize: 12 }}>{p.hostname || p.id.slice(0, 16)}</div>
+                        <div style={{ fontSize: 10, color: "var(--text-muted)" }}>
+                          {p.address}:{p.port} · {p.mode} · {p.platform}
+                        </div>
+                      </div>
+                      <span style={{ fontSize: 10, color: p.services?.length ? "var(--text-muted)" : "#6b7280" }}>
+                        {p.services?.length || 0} services
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Manual address input */}
+            <div className="selector-group">
+              <label>{mode === "relay" ? "Or enter Peer ID / Address" : "Address"}</label>
+              <input
+                type="text"
+                value={addr}
+                onChange={e => setAddr(e.target.value)}
+                placeholder={mode === "direct" ? "IP:Port (e.g. 192.168.1.20:49737)" : "Peer ID (e.g. dweb-rex)"}
+                className="select-input"
+                style={{ width: "100%" }}
+              />
+            </div>
+            <div className="selector-group">
+              <label>Label (optional)</label>
+              <input
+                type="text"
+                value={label}
+                onChange={e => setLabel(e.target.value)}
+                placeholder='e.g. "Office Server"'
+                className="select-input"
+                style={{ width: "100%" }}
+              />
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 4 }}>
+              <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+              <button className="btn btn-primary" onClick={handleConnect} disabled={connecting || (!addr.trim() && mode === "direct")}>
+                {connecting ? "Connecting..." : <><Link2 size={14} /> Connect</>}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+}
+
 export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
   // Restore services from localStorage cache so pills appear immediately on tab switch
   const [services, setServices] = useState<Service[]>(() => {
@@ -946,248 +1211,6 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
     "p2p-anonymous": <Shield size={14} />,
   };
 
-  /* ─── Connect to Remote Modal ────────────────────────────── */
-  function ConnectModal({ onClose }: { onClose: () => void }) {
-    const [addr, setAddr] = useState("");
-    const [label, setLabel] = useState("");
-    const [mode, setLocalMode] = useState<"direct" | "relay">("direct");
-    const [connecting, setConnecting] = useState(false);
-    const [localPeers, setLocalPeers] = useState<RelayPeer[]>([]);
-    const [searchTerm, setSearchTerm] = useState("");
-    const [hoveredMode, setHoveredMode] = useState<"direct" | "relay" | null>(null);
-
-    useEffect(() => {
-      fetch("/discover").then(r => r.ok ? r.json() : { peers: [] }).then(d => setLocalPeers(d.peers || [])).catch(() => {});
-    }, []);
-
-    /* ─── Mode info tooltip content ────────────────────────── */
-    const modeInfo = {
-      direct: {
-        title: "Direct P2P Connection",
-        lines: [
-          "Connect via IP:Port directly — no relay server needed.",
-          "Works when both peers are on the same LAN, or when the remote peer is reachable via its public IP.",
-          "Lower latency, no central dependency, but may fail behind strict NATs or firewalls.",
-          "Best for: same-network peers, LAN parties, low-latency transfers.",
-        ],
-      },
-      relay: {
-        title: "Relay-Mediated Connection",
-        lines: [
-          "Connect via a relay server that brokers WebRTC signaling between peers.",
-          "The relay handles peer discovery and NAT traversal (ICE/STUN), but data flows peer-to-peer once connected.",
-          "Higher initial setup delay, but works across NATs, firewalls, and the open internet.",
-          "Best for: internet peers, strict NAT environments, discovery-based connections.",
-        ],
-      },
-    };
-
-    const handleConnect = async () => {
-      if (!addr.trim()) return;
-      setConnecting(true);
-      try {
-        if (mode === "relay") {
-          // Find peer by ID or address
-          const peer = localPeers.find(p =>
-            p.id === addr.trim() || `${p.address}:${p.port}` === addr.trim()
-          );
-          if (peer) {
-            await handleConnectRemote(peer);
-          } else {
-            // Send signal to arbitrary peer ID
-            await sendRelaySignal(addr.trim(), "offer");
-            handleConnectDirect(addr.trim(), label.trim());
-          }
-        } else {
-          handleConnectDirect(addr.trim(), label.trim());
-        }
-      } catch (err) {
-        setConnectionMsg({ type: "error", text: `Connection failed: ${err}` });
-      } finally {
-        setConnecting(false);
-        onClose();
-      }
-    };
-
-    const handleClickPeer = async (peer: RelayPeer) => {
-      setConnecting(true);
-      try {
-        await handleConnectRemote(peer);
-      } catch (err) {
-        setConnectionMsg({ type: "error", text: `Connection failed: ${err}` });
-      } finally {
-        setConnecting(false);
-        onClose();
-      }
-    };
-
-    const filteredPeers = localPeers.filter(p =>
-      !searchTerm || p.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.hostname.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.address.includes(searchTerm)
-    );
-
-    return (
-      <div className="modal-overlay" onClick={onClose}>
-        <div className="modal glass" onClick={e => e.stopPropagation()} style={{ maxWidth: 520 }}>
-          <div className="modal-header">
-            <h3><Link2 size={16} /> Connect to Remote Instance</h3>
-            <button className="btn btn-icon" onClick={onClose}>✕</button>
-          </div>
-          <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <p className="text-muted-sm" style={{ fontSize: 12 }}>
-              Connect to another dweb instance on your network or the internet.
-            </p>
-
-            <div style={{ display: "flex", gap: 8, position: "relative" }}>
-              <button
-                className={`btn btn-sm ${mode === "direct" ? "btn-primary" : "btn-secondary"}`}
-                onClick={() => setLocalMode("direct")}
-                onMouseEnter={() => setHoveredMode("direct")}
-                onMouseLeave={() => setHoveredMode(null)}
-                style={{ position: "relative" }}
-              >
-                <Wifi size={14} /> Direct P2P
-              </button>
-              <button
-                className={`btn btn-sm ${mode === "relay" ? "btn-primary" : "btn-secondary"}`}
-                onClick={() => setLocalMode("relay")}
-                onMouseEnter={() => setHoveredMode("relay")}
-                onMouseLeave={() => setHoveredMode(null)}
-                style={{ position: "relative" }}
-              >
-                <Globe size={14} /> Via Relay
-              </button>
-              {/* Hover tooltip info panel */}
-              {hoveredMode && (
-                <div style={{
-                  position: "absolute",
-                  top: "calc(100% + 8px)",
-                  left: 0,
-                  right: 0,
-                  zIndex: 100,
-                  background: "var(--bg-elevated)",
-                  border: "1px solid var(--border)",
-                  borderRadius: "var(--radius-sm)",
-                  padding: "10px 12px",
-                  fontSize: 11,
-                  lineHeight: 1.6,
-                  boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
-                  animation: "fadeIn 0.12s ease",
-                }}>
-                  <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 6, color: hoveredMode === "direct" ? "#22c55e" : "#8b5cf6" }}>
-                    {modeInfo[hoveredMode].title}
-                  </div>
-                  {modeInfo[hoveredMode].lines.map((line, i) => (
-                    <div key={i} style={{ color: "var(--text-secondary)", marginBottom: i < modeInfo[hoveredMode].lines.length - 1 ? 4 : 0, paddingLeft: 8 }}>
-                      {line}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {mode === "relay" && relayStatus?.connected && (
-              <div className="glass-sm" style={{
-                padding: "8px 12px", borderRadius: "var(--radius-sm)",
-                fontSize: 12, color: "var(--text-muted)",
-                display: "flex", alignItems: "center", gap: 6,
-              }}>
-                <Radio size={12} color="#22c55e" />
-                Connected to relay at <strong>{relayStatus.relayAddress}</strong>
-                {" · "}{relayStatus.peersOnline} peer(s) online
-              </div>
-            )}
-
-            {mode === "relay" && !relayStatus?.connected && (
-              <div className="glass-sm" style={{
-                padding: "8px 12px", borderRadius: "var(--radius-sm)",
-                fontSize: 12, color: "#eab308", border: "1px solid rgba(234,179,8,0.3)",
-              }}>
-                ⚠ Relay not connected. Peers will be discovered via direct IP only.
-              </div>
-            )}
-
-            {/* Relay peer browser */}
-            {mode === "relay" && localPeers.length > 0 && (
-              <div>
-                <label style={{ fontSize: 12, fontWeight: 600, marginBottom: 6, display: "block" }}>
-                  Discovered Peers
-                </label>
-                <input
-                  type="text"
-                  value={searchTerm}
-                  onChange={e => setSearchTerm(e.target.value)}
-                  placeholder="Filter peers..."
-                  className="text-input"
-                  style={{ width: "100%", marginBottom: 6, fontSize: 12, padding: "6px 10px" }}
-                />
-                <div style={{ maxHeight: 160, overflowY: "auto", display: "flex", flexDirection: "column", gap: 4 }}>
-                  {filteredPeers.map(p => (
-                    <div
-                      key={p.id}
-                      onClick={() => handleClickPeer(p)}
-                      className="glass-sm"
-                      style={{
-                        display: "flex", alignItems: "center", gap: 8,
-                        padding: "8px 10px", borderRadius: "var(--radius-sm)",
-                        cursor: "pointer", fontSize: 12,
-                        transition: "background 0.1s",
-                      }}
-                      onMouseOver={e => (e.currentTarget.style.background = "rgba(59,130,246,0.1)")}
-                      onMouseOut={e => (e.currentTarget.style.background = "")}
-                    >
-                      <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#22c55e", flexShrink: 0 }} />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 600, fontSize: 12 }}>{p.hostname || p.id.slice(0, 16)}</div>
-                        <div style={{ fontSize: 10, color: "var(--text-muted)" }}>
-                          {p.address}:{p.port} · {p.mode} · {p.platform}
-                        </div>
-                      </div>
-                      <span style={{ fontSize: 10, color: p.services?.length ? "var(--text-muted)" : "#6b7280" }}>
-                        {p.services?.length || 0} services
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Manual address input */}
-            <div className="selector-group">
-              <label>{mode === "relay" ? "Or enter Peer ID / Address" : "Address"}</label>
-              <input
-                type="text"
-                value={addr}
-                onChange={e => setAddr(e.target.value)}
-                placeholder={mode === "direct" ? "IP:Port (e.g. 192.168.1.20:49737)" : "Peer ID (e.g. dweb-rex)"}
-                className="select-input"
-                style={{ width: "100%" }}
-              />
-            </div>
-            <div className="selector-group">
-              <label>Label (optional)</label>
-              <input
-                type="text"
-                value={label}
-                onChange={e => setLabel(e.target.value)}
-                placeholder='e.g. "Office Server"'
-                className="select-input"
-                style={{ width: "100%" }}
-              />
-            </div>
-
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 4 }}>
-              <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
-              <button className="btn btn-primary" onClick={handleConnect} disabled={connecting || (!addr.trim() && mode === "direct")}>
-                {connecting ? "Connecting..." : <><Link2 size={14} /> Connect</>}
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   /* ─── Compute total dweb instances ───────────────── */
   const connectedRemotes = remotes.filter(r => r.status === "connected");
@@ -2213,7 +2236,13 @@ export default function Dashboard({ onOpenInBrowser }: DashboardProps) {
       {runtimeSection}
 
       {showConnectModal && (
-        <ConnectModal onClose={() => setShowConnectModal(false)} />
+        <ConnectModal
+          onClose={() => setShowConnectModal(false)}
+          relayStatus={relayStatus}
+          handleConnectRemote={handleConnectRemote}
+          handleConnectDirect={handleConnectDirect}
+          setConnectionMsg={setConnectionMsg}
+        />
       )}
 
       {servicePreviewModal}

@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import Sidebar from "./components/Sidebar";
 import { NotificationProvider, useNotifications } from "./components/Notifications";
+import { ChatProvider } from "./components/ChatProvider";
 import Dashboard from "./views/Dashboard";
 import BrowserView from "./views/BrowserView";
 import AIAgent from "./views/AIAgent";
@@ -9,6 +10,7 @@ import Repositories from "./views/Repositories";
 import Settings from "./views/Settings";
 import Integrations from "./views/Integrations";
 import Docs from "./views/Docs";
+import ChatView from "./views/ChatView";
 import type { View } from "./types";
 
 import P2PTransfer from "./views/P2PTransfer";
@@ -81,6 +83,7 @@ function AppContent() {
       case "docs": return <Docs />;
       case "settings": return <Settings />;
       case "p2p-transfer": return <P2PTransfer />;
+      case "chat": return <ChatView onOpenInBrowser={handleOpenInBrowser} />;
     }
   };
 
@@ -112,7 +115,9 @@ function AppContent() {
 export default function App() {
   return (
     <NotificationProvider>
-      <AppContent />
+      <ChatProvider>
+        <AppContent />
+      </ChatProvider>
     </NotificationProvider>
   );
 }

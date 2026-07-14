@@ -337,7 +337,7 @@ export const githubApi = {
 
 /* ─── App View Type ────────────────────────────────────────── */
 
-export type View = "dashboard" | "browser" | "ai-agent" | "domains" | "repositories" | "settings" | "integrations" | "docs" | "p2p-transfer";
+export type View = "dashboard" | "browser" | "ai-agent" | "domains" | "repositories" | "settings" | "integrations" | "docs" | "p2p-transfer" | "chat";
 
 /* ─── P2P Network Types ──────────────────────────────────── */
 
@@ -356,6 +356,17 @@ export interface P2PPeer {
   connected: boolean;
   latency?: number;
   lastSeen?: number;
+}
+
+export interface ChatMessage {
+  channel: "dm" | "room";
+  fromPeerId: string;
+  body: string;
+  dwebLink: string | null;
+  timestamp: string;
+  via?: "direct" | "relay";
+  /** Set client-side for messages we sent ourselves, so the UI can align/style them differently. */
+  self?: boolean;
 }
 
 export interface P2PNetworkStatus {

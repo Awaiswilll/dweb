@@ -1,6 +1,7 @@
-import { Globe, Gauge, Bot, Settings, Menu, Network, Zap, BookOpen } from "lucide-react";
+import { Globe, Gauge, Bot, Settings, Menu, Network, Zap, BookOpen, MessageCircle } from "lucide-react";
 import { useState } from "react";
 import type { View } from "../types";
+import { useChat } from "./ChatProvider";
 
 interface SidebarProps {
   currentView: View;
@@ -10,6 +11,7 @@ interface SidebarProps {
 const navItems: { id: View; label: string; icon: React.ReactNode; badge?: string }[] = [
   { id: "dashboard", label: "Dashboard", icon: <Gauge size={20} /> },
   { id: "browser", label: "Browser", icon: <Globe size={20} /> },
+  { id: "chat", label: "Chat", icon: <MessageCircle size={20} /> },
   { id: "ai-agent", label: "AI Agent", icon: <Bot size={20} /> },
   { id: "domains", label: "Domains", icon: <Network size={20} /> },
   { id: "docs", label: "Docs", icon: <BookOpen size={20} /> },
@@ -18,6 +20,7 @@ const navItems: { id: View; label: string; icon: React.ReactNode; badge?: string
 
 export default function Sidebar({ currentView, onNavigate }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
+  const { totalUnread } = useChat();
 
   return (
     <aside className={`sidebar ${collapsed ? "collapsed" : ""}`}>
@@ -41,6 +44,9 @@ export default function Sidebar({ currentView, onNavigate }: SidebarProps) {
           >
             {item.icon}
             {!collapsed && <span className="nav-label">{item.label}</span>}
+            {!collapsed && item.id === "chat" && totalUnread > 0 && (
+              <span className="nav-badge">{totalUnread > 99 ? "99+" : totalUnread}</span>
+            )}
             {!collapsed && item.badge && <span className="nav-badge">{item.badge}</span>}
           </button>
         ))}

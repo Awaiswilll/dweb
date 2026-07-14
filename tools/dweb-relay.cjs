@@ -39,6 +39,16 @@ const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 const peers = new Map();      // peerId → PeerRecord
 const signals = new Map();    // peerId → pending signal (for http polling)
 
+// ─── Chat state ────────────────────────────────────────────────
+const chatDMs = new Map();         // peerId → pending DM list (for http polling / offline delivery)
+const chatRoomHistory = [];        // bounded ring buffer of recent lobby messages
+const chatRateLimits = new Map();  // peerId → { count, windowStart }
+const CHAT_MAX_BODY_LEN = 2000;
+const CHAT_MAX_QUEUED_DMS = 50;
+const CHAT_MAX_ROOM_HISTORY = 100;
+const CHAT_RATE_LIMIT_WINDOW_MS = 10000; // 10s
+const CHAT_RATE_LIMIT_MAX = 20;          // max 20 messages per window per peer
+
 // WebSocket peer tracking
 const wsPeers = new Map();         // peerId → WebSocket socket
 const wsSocketStates = new Map();  // socket → { peerId, buffer }
@@ -130,6 +140,57 @@ function popSignals(targetPeerId) {
   const list = signals.get(targetPeerId) || [];
   signals.delete(targetPeerId);
   return list;
+}
+
+// ─── Chat Store ────────────────────────────────────────────────
+// DMs use the exact same "push if online via WS, else queue for HTTP
+// poll" pattern as the signal store above. Room messages are simpler:
+// broadcast now to whoever's connected, plus keep a bounded history
+// so a peer that just joined can catch up on recent lobby chatter.
+
+function checkChatRateLimit(peerId) {
+  const now = Date.now();
+  const entry = chatRateLimits.get(peerId);
+  if (!entry || now - entry.windowStart > CHAT_RATE_LIMIT_WINDOW_MS) {
+    chatRateLimits.set(peerId, { count: 1, windowStart: now });
+    return true;
+  }
+  if (entry.count >= CHAT_RATE_LIMIT_MAX) return false;
+  entry.count++;
+  return true;
+}
+
+function sanitizeChatBody(body) {
+  if (typeof body !== "string") return "";
+  return body.slice(0, CHAT_MAX_BODY_LEN);
+}
+
+function storeChatDM(targetPeerId, message) {
+  if (!chatDMs.has(targetPeerId)) chatDMs.set(targetPeerId, []);
+  const list = chatDMs.get(targetPeerId);
+  list.push(message);
+  if (list.length > CHAT_MAX_QUEUED_DMS) list.splice(0, list.length - CHAT_MAX_QUEUED_DMS);
+}
+
+function popChatDMs(targetPeerId) {
+  const list = chatDMs.get(targetPeerId) || [];
+  chatDMs.delete(targetPeerId);
+  return list;
+}
+
+function pushChatRoomMessage(message) {
+  chatRoomHistory.push(message);
+  if (chatRoomHistory.length > CHAT_MAX_ROOM_HISTORY) {
+    chatRoomHistory.splice(0, chatRoomHistory.length - CHAT_MAX_ROOM_HISTORY);
+  }
+}
+
+function broadcastChatRoomMessage(message, excludeSocket) {
+  const frame = createWSFrame(JSON.stringify({ type: "chat:room", ...message }));
+  for (const [peerId, socket] of wsPeers) {
+    if (socket === excludeSocket) continue;
+    try { socket.write(frame); } catch (e) { /* ignore dead socket */ }
+  }
 }
 
 // ─── WebSocket Frame Helpers (RFC 6455) ────────────────────────
@@ -300,6 +361,54 @@ function handleWSMessage(socket, state, message) {
     if (peer) peer.touch();
     return;
   }
+
+  // ─── WS Chat: Direct Message ────────────────────────────────
+  if (msg.type === "chat:dm" && msg.targetPeerId) {
+    const fromPeerId = state.peerId || msg.fromPeerId || "anonymous";
+    if (!checkChatRateLimit(fromPeerId)) {
+      const frame = createWSFrame(JSON.stringify({ type: "chat:error", error: "Rate limit exceeded, slow down." }));
+      try { socket.write(frame); } catch (e) { /* ignore */ }
+      return;
+    }
+    const message = {
+      fromPeerId,
+      targetPeerId: msg.targetPeerId,
+      body: sanitizeChatBody(msg.body),
+      dwebLink: typeof msg.dwebLink === "string" ? msg.dwebLink.slice(0, 200) : null,
+      timestamp: new Date().toISOString(),
+    };
+
+    const targetSocket = wsPeers.get(msg.targetPeerId);
+    if (targetSocket) {
+      const frame = createWSFrame(JSON.stringify({ type: "chat:dm", ...message }));
+      try { targetSocket.write(frame); } catch (e) { /* ignore */ }
+      console.log(`  [chat:dm] ${fromPeerId.slice(0, 12)}… → ${msg.targetPeerId.slice(0, 12)}… via WS`);
+    } else {
+      storeChatDM(msg.targetPeerId, message);
+      console.log(`  [chat:dm] ${fromPeerId.slice(0, 12)}… → ${msg.targetPeerId.slice(0, 12)}… queued (offline)`);
+    }
+    return;
+  }
+
+  // ─── WS Chat: Room (lobby) Broadcast ────────────────────────
+  if (msg.type === "chat:room") {
+    const fromPeerId = state.peerId || msg.fromPeerId || "anonymous";
+    if (!checkChatRateLimit(fromPeerId)) {
+      const frame = createWSFrame(JSON.stringify({ type: "chat:error", error: "Rate limit exceeded, slow down." }));
+      try { socket.write(frame); } catch (e) { /* ignore */ }
+      return;
+    }
+    const message = {
+      fromPeerId,
+      body: sanitizeChatBody(msg.body),
+      dwebLink: typeof msg.dwebLink === "string" ? msg.dwebLink.slice(0, 200) : null,
+      timestamp: new Date().toISOString(),
+    };
+    pushChatRoomMessage(message);
+    broadcastChatRoomMessage(message, socket);
+    console.log(`  [chat:room] ${fromPeerId.slice(0, 12)}… broadcast to ${wsPeers.size - 1} peer(s)`);
+    return;
+  }
 }
 
 // ─── Cleanup stale peers ──────────────────────────────────────
@@ -310,6 +419,10 @@ function cleanup() {
       peers.delete(id);
       signals.delete(id);
       wsPeers.delete(id);
+      // NOTE: chatDMs is deliberately NOT cleared here. A peer going stale
+      // just means their heartbeat lapsed — the whole point of queuing a
+      // DM is to deliver it whenever they next reconnect, so their inbox
+      // must survive across staleness/reconnect cycles.
       removed++;
     }
   }
@@ -488,7 +601,7 @@ async function handleRequest(req, res) {
 
         storeSignal(targetPeerId, {
           fromPeerId: fromPeerId || "anonymous",
-          type: type || "unknown",
+          signalType: type || "unknown",
           sdp: sdp || null,
           candidate: candidate || null,
           timestamp: new Date().toISOString(),
@@ -510,6 +623,91 @@ async function handleRequest(req, res) {
         count: signals_list.length,
         signals: signals_list,
       });
+    }
+  }
+
+  // ─── CHAT: Direct Message (HTTP fallback) ─────────────────
+  if (pathname === "/chat/dm") {
+    if (method === "POST") {
+      try {
+        const body = await parseBody(req);
+        const { targetPeerId, fromPeerId, body: text, dwebLink } = body;
+        if (!targetPeerId) return json(res, 400, { status: "error", message: "Missing targetPeerId" });
+
+        const sender = fromPeerId || "anonymous";
+        if (!checkChatRateLimit(sender)) {
+          return json(res, 429, { status: "error", message: "Rate limit exceeded, slow down." });
+        }
+
+        const message = {
+          fromPeerId: sender,
+          targetPeerId,
+          body: sanitizeChatBody(text),
+          dwebLink: typeof dwebLink === "string" ? dwebLink.slice(0, 200) : null,
+          timestamp: new Date().toISOString(),
+        };
+
+        const targetSocket = wsPeers.get(targetPeerId);
+        if (targetSocket) {
+          const frame = createWSFrame(JSON.stringify({ type: "chat:dm", ...message }));
+          try { targetSocket.write(frame); } catch (e) { /* ignore */ }
+          console.log(`  [chat:dm] ${sender.slice(0, 12)}… → ${targetPeerId.slice(0, 12)}… via WS (http-sent)`);
+          return json(res, 200, { status: "ok", queued: true, via: "websocket" });
+        }
+
+        storeChatDM(targetPeerId, message);
+        console.log(`  [chat:dm] ${sender.slice(0, 12)}… → ${targetPeerId.slice(0, 12)}… queued (offline, http-sent)`);
+        return json(res, 200, { status: "ok", queued: true, via: "http-poll" });
+      } catch (e) {
+        return json(res, 400, { status: "error", message: e.message });
+      }
+    }
+
+    if (method === "GET") {
+      const peerId = url.searchParams.get("peerId");
+      if (!peerId) return json(res, 400, { status: "error", message: "Missing peerId" });
+      const messages = popChatDMs(peerId);
+      return json(res, 200, { status: "ok", count: messages.length, messages });
+    }
+  }
+
+  // ─── CHAT: Room / Lobby (HTTP fallback) ───────────────────
+  if (pathname === "/chat/room") {
+    if (method === "POST") {
+      try {
+        const body = await parseBody(req);
+        const { fromPeerId, body: text, dwebLink } = body;
+        const sender = fromPeerId || "anonymous";
+        if (!checkChatRateLimit(sender)) {
+          return json(res, 429, { status: "error", message: "Rate limit exceeded, slow down." });
+        }
+        const message = {
+          fromPeerId: sender,
+          body: sanitizeChatBody(text),
+          dwebLink: typeof dwebLink === "string" ? dwebLink.slice(0, 200) : null,
+          timestamp: new Date().toISOString(),
+        };
+        pushChatRoomMessage(message);
+        broadcastChatRoomMessage(message, null);
+        console.log(`  [chat:room] ${sender.slice(0, 12)}… broadcast (http-sent) to ${wsPeers.size} peer(s)`);
+        return json(res, 200, { status: "ok" });
+      } catch (e) {
+        return json(res, 400, { status: "error", message: e.message });
+      }
+    }
+
+    if (method === "GET") {
+      // Return recent room history — used both for initial catch-up and
+      // as a plain-HTTP polling fallback for peers without a live WS.
+      const since = url.searchParams.get("since");
+      let history = chatRoomHistory;
+      if (since) {
+        const sinceTime = new Date(since).getTime();
+        if (!isNaN(sinceTime)) {
+          history = chatRoomHistory.filter(m => new Date(m.timestamp).getTime() > sinceTime);
+        }
+      }
+      return json(res, 200, { status: "ok", count: history.length, messages: history });
     }
   }
 
@@ -556,6 +754,10 @@ async function handleRequest(req, res) {
         { path: "/peer/:id", method: "DELETE", desc: "Unregister peer" },
         { path: "/signal", method: "GET", desc: "Poll for signals (HTTP fallback)" },
         { path: "/signal", method: "POST", desc: "Send signal to peer" },
+        { path: "/chat/dm", method: "POST", desc: "Send a direct chat message to a peer" },
+        { path: "/chat/dm", method: "GET", desc: "Poll for queued direct messages (HTTP fallback)" },
+        { path: "/chat/room", method: "POST", desc: "Broadcast a chat message to the lobby" },
+        { path: "/chat/room", method: "GET", desc: "Get recent lobby chat history" },
         { path: "/ws-info", method: "GET", desc: "WebSocket connection info" },
       ],
       bootstrapNodes: getLocalIPs().map(ip => `${ip}:${PORT}`),
@@ -699,6 +901,10 @@ function printBanner() {
   console.log(`  ║    DELETE /peer/:id — Unregister peer               ║`);
   console.log(`  ║    GET  /signal     — Poll for signals (HTTP)       ║`);
   console.log(`  ║    POST /signal     — Send signal to peer           ║`);
+  console.log(`  ║    POST /chat/dm    — Send direct chat message      ║`);
+  console.log(`  ║    GET  /chat/dm    — Poll queued chat messages     ║`);
+  console.log(`  ║    POST /chat/room  — Broadcast to lobby            ║`);
+  console.log(`  ║    GET  /chat/room  — Get lobby chat history        ║`);
   console.log(`  ╚══════════════════════════════════════════════════╝`);
   console.log(`  Active peers: 0`);
   console.log(`  Press Ctrl+C to stop.\n`);

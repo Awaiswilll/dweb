@@ -18,7 +18,6 @@ const path = require("path");
 const os   = require("os");
 const net  = require("net");
 const crypto = require("crypto");
-const { createWebRTCManager } = require("./webrtc-transport.cjs");
 
 // ── Config ─────────────────────────────────────────────────────
 const PORT            = parseInt(process.env.PORT, 10) || 49737;
@@ -28,7 +27,7 @@ const DIST_DIR        = (() => {
   const parent = path.resolve(__dirname, "..", "dist");
   return (fs.existsSync(local) && fs.statSync(local).isDirectory()) ? local : parent;
 })();
-const PEER_ID         = process.env.PEER_ID_OVERRIDE || `dweb-${os.hostname().toLowerCase().replace(/[^a-z0-9-]/g, "-")}`;
+const PEER_ID         = `dweb-${os.hostname().toLowerCase().replace(/[^a-z0-9-]/g, "-")}`;
 const START_TIME      = Date.now();
 const SERVER_NAME     = "dweb-desktop-server";
 const HEARTBEAT_MS    = 30000;
@@ -42,78 +41,6 @@ let relayRegistered    = false;
 let relayError         = null;
 let relayPeers         = [];
 let pendingSignals     = [];
-let chatInbox          = []; // drained by the frontend via GET /api/chat/inbox
-
-// webrtc manager is created after sendSignal() is defined further down —
-// see initWebRTCManager(), called once at startup.
-let webrtc = null;
-function initWebRTCManager() {
-  webrtc = createWebRTCManager({ peerId: PEER_ID, sendSignal });
-  webrtc.events.on("message", ({ peerId: fromPeerId, kind, payload }) => {
-    if (kind === "chat") {
-      chatInbox.push({
-        channel: payload.channel || "dm",
-        fromPeerId,
-        body: payload.body,
-        dwebLink: payload.dwebLink || null,
-        timestamp: payload.timestamp || new Date().toISOString(),
-        via: "direct",
-      });
-    }
-  });
-  webrtc.events.on("channelOpen", ({ peerId }) => {
-    console.log(`  [webrtc] Direct P2P channel OPEN with ${peerId.slice(0, 20)}…`);
-  });
-  webrtc.events.on("channelClosed", ({ peerId }) => {
-    console.log(`  [webrtc] Direct P2P channel closed with ${peerId.slice(0, 20)}…`);
-  });
-
-  // ── Answer domain_resolve requests from other peers directly ──────
-  // This is the "answering" half of cross-peer domain resolution: when
-  // another peer asks (over a direct data channel — no relay involved)
-  // whether we have a given .dweb domain registered, we check our own
-  // local registry and reply. See resolveDomainAcrossPeers() for the
-  // asking half.
-  webrtc.onRequest("domain_resolve", async (payload) => {
-    const record = resolveDomainFromRegistry(payload.name);
-    if (!record) return { found: false };
-    // Defensive: strip any port that may have been baked into address by
-    // an older build (before this field was fixed to be host-only), so
-    // domains bound before the fix don't need to be re-bound to work.
-    const safeRecord = { ...record, address: (record.address || "").split(":")[0] || null };
-    return { found: true, record: safeRecord, port: record.port || null };
-  });
-
-  // ── Answer proxy_fetch requests from other peers directly ─────────
-  // Fetches our own locally bound service (the thing this domain points
-  // at) and returns its response body over the SAME data channel — the
-  // requesting peer never needs to know our real IP address at all.
-  webrtc.onRequest("proxy_fetch", (payload) => {
-    return new Promise((resolve) => {
-      const port = parseInt(payload.port, 10);
-      if (!port) return resolve({ error: "no port specified" });
-      const reqPath = typeof payload.path === "string" && payload.path ? payload.path : "/";
-      const proxyReq = http.request(
-        { hostname: "127.0.0.1", port, path: reqPath, method: "GET", timeout: 8000 },
-        (proxyRes) => {
-          const chunks = [];
-          proxyRes.on("data", (c) => chunks.push(c));
-          proxyRes.on("end", () => {
-            resolve({
-              status: proxyRes.statusCode || 502,
-              contentType: proxyRes.headers["content-type"] || "text/html; charset=utf-8",
-              body: Buffer.concat(chunks).toString("utf8"),
-            });
-          });
-        }
-      );
-      proxyReq.on("error", (e) => resolve({ error: `Could not reach local service: ${e.message}` }));
-      proxyReq.on("timeout", () => { proxyReq.destroy(); resolve({ error: "Local service timed out" }); });
-      proxyReq.end();
-    });
-  });
-}
-
 let relayConnectionState = "disconnected";
 
 let wsRelayConnected   = false;
@@ -226,53 +153,21 @@ function invalidateDomainCache(name) {
 // registered — the local domainRegistry is never itself replicated, so
 // without this fan-out, cross-peer resolution has no path to succeed.
 async function resolveDomainAcrossPeers(name) {
-  const candidates = relayPeers.filter(p => p.id !== PEER_ID);
-
+  const candidates = relayPeers.filter(p => p.id !== PEER_ID && p.address && p.port);
   for (const peer of candidates) {
-    // ── Attempt 1: direct P2P request over a real WebRTC data channel ──
-    // Works regardless of whether peer.address is a reachable LAN IP —
-    // this is what actually makes cross-network resolution possible.
-    if (webrtc && webrtc.available) {
-      const existing = webrtc.getActiveChannel(peer.id);
-      const channel = existing || await webrtc.connect(peer.id);
-      if (channel) {
-        const res = await channel.request("domain_resolve", { name });
-        if (res.ok && res.payload && res.payload.found) {
-          console.log(`  [domain] '${name}' resolved via peer ${peer.id.slice(0, 12)}… DIRECT (no relay involved)`);
-          return {
-            record: res.payload.record,
-            address: null, // deliberately no IP needed — proxy_fetch also goes over this channel
-            port: res.payload.port,
-            url: null,
-            peerId: peer.id,
-            via: "direct",
-          };
-        }
+    try {
+      const result = await httpGet(peer.address, peer.port, `/api/domain/resolve?name=${encodeURIComponent(name)}`);
+      if (result && result.status === "ok" && result.record) {
+        return {
+          record: result.record,
+          address: result.address || peer.address,
+          port: result.port || peer.port,
+          url: result.url || (result.address && result.port ? `http://${result.address}:${result.port}/` : null),
+          peerId: peer.id,
+        };
       }
-    }
-
-    // ── Attempt 2: LAN-only HTTP fallback ──────────────────────────
-    // Only reached if direct connection wasn't available/failed. Note
-    // this still only works if peer.address happens to be reachable
-    // (same LAN, or port-forwarded) — it is not a general cross-network
-    // solution on its own, which is exactly why attempt 1 exists.
-    if (peer.address && peer.port) {
-      try {
-        const result = await httpGet(peer.address, peer.port, `/api/domain/resolve?name=${encodeURIComponent(name)}`);
-        if (result && result.status === "ok" && result.record) {
-          console.log(`  [domain] '${name}' resolved via peer ${peer.id.slice(0, 12)}… over LAN HTTP fallback`);
-          return {
-            record: result.record,
-            address: result.address || peer.address,
-            port: result.port || peer.port,
-            url: result.url || (result.address && result.port ? `http://${result.address}:${result.port}/` : null),
-            peerId: peer.id,
-            via: "relay-lan-http",
-          };
-        }
-      } catch {
-        // peer unreachable over LAN either — try the next candidate
-      }
+    } catch {
+      // peer unreachable or timed out — try the next one
     }
   }
   return null;
@@ -348,12 +243,7 @@ function handleDomainAPI(req, res, url, body) {
 
     record.service_name = service_name || null;
     record.port = port;
-    // NOTE: address is host-only — record.port already stores the port
-    // separately. Storing "host:port" combined here caused a real bug:
-    // the direct-P2P domain_resolve path sends this raw record to the
-    // asking peer, whose frontend then appends ":port" again on top of
-    // it, producing "192.168.1.19:8080:8080". Keep this host-only.
-    record.address = port ? (getLocalIPs()[0] || "127.0.0.1") : null;
+    record.address = port ? `${getLocalIPs()[0] || "127.0.0.1"}:${port}` : null;
     record.custom_domain = custom_domain || null;
     record.active = true;
 
@@ -415,7 +305,6 @@ function handleDomainAPI(req, res, url, body) {
             url: remote.url,
             source: "peer",
             peerId: remote.peerId,
-            via: remote.via,
           });
         }
         return jsonResponse(res, 404, { status: "error", error: "Domain not found or expired" });
@@ -953,18 +842,10 @@ function wsRelaySendText(socket, text) {
 }
 
 function onWsRelayMessage(msg) {
-  if (msg.type === "signal") {
-    // Live single-signal push from the relay (offer/answer/candidate).
-    // This was previously unhandled here — only the batched "signals"
-    // type below was wired up, so a signal arriving while we're already
-    // WS-connected (the common case) was silently dropped.
-    pendingSignals.push(msg);
-    if (webrtc) webrtc.handleSignal(msg);
-  } else if (msg.type === "signals" && Array.isArray(msg.signals)) {
+  if (msg.type === "signals" && Array.isArray(msg.signals)) {
     if (msg.signals.length > 0) {
       pendingSignals.push(...msg.signals);
       console.log(`  [relay-ws] Received ${msg.signals.length} signal(s)`);
-      if (webrtc) for (const s of msg.signals) webrtc.handleSignal(s);
     }
   } else if (msg.type === "peers" && Array.isArray(msg.peers)) {
     relayPeers = msg.peers;
@@ -973,27 +854,6 @@ function onWsRelayMessage(msg) {
   } else if (msg.type === "register_ack") {
     relayRegistered = true;
     relayError = null;
-    fetchQueuedChatDMs();
-  } else if (msg.type === "chat:dm") {
-    chatInbox.push({
-      channel: "dm",
-      fromPeerId: msg.fromPeerId,
-      body: msg.body,
-      dwebLink: msg.dwebLink || null,
-      timestamp: msg.timestamp,
-    });
-    console.log(`  [chat] DM from ${(msg.fromPeerId || "?").slice(0, 12)}…`);
-  } else if (msg.type === "chat:room") {
-    chatInbox.push({
-      channel: "room",
-      fromPeerId: msg.fromPeerId,
-      body: msg.body,
-      dwebLink: msg.dwebLink || null,
-      timestamp: msg.timestamp,
-    });
-    console.log(`  [chat] Room message from ${(msg.fromPeerId || "?").slice(0, 12)}…`);
-  } else if (msg.type === "chat:error") {
-    console.log(`  [chat] Relay rejected a message: ${msg.error}`);
   }
 }
 
@@ -1198,7 +1058,6 @@ async function registerWithRelay() {
       relayRegistered = true;
       relayError = null;
       console.log(`  [relay] Registered as ${PEER_ID}  (${result.peersOnline} peers online)`);
-      fetchQueuedChatDMs();
     } else {
       relayError = "registration failed";
     }
@@ -1236,7 +1095,6 @@ async function pollSignals() {
     if (result && result.status === "ok" && result.signals && result.signals.length > 0) {
       pendingSignals.push(...result.signals);
       console.log(`  [relay] Received ${result.signals.length} signal(s)`);
-      if (webrtc) for (const s of result.signals) webrtc.handleSignal(s);
     }
   } catch {}
 }
@@ -1254,75 +1112,6 @@ async function sendSignal(targetPeerId, type, sdp, candidate) {
     return result;
   } catch (e) {
     return { status: "error", message: e.message };
-  }
-}
-
-async function sendChatDM(targetPeerId, body, dwebLink) {
-  const timestamp = new Date().toISOString();
-
-  // ── Attempt 1: direct P2P over a real WebRTC data channel ──────
-  // No relay involvement at all once/if this succeeds — this is what
-  // makes a DM actually peer-to-peer rather than relay-forwarded.
-  if (webrtc && webrtc.available) {
-    const existing = webrtc.getActiveChannel(targetPeerId);
-    const channel = existing || await webrtc.connect(targetPeerId);
-    if (channel) {
-      const sent = channel.send("chat", { channel: "dm", body, dwebLink: dwebLink || null, timestamp });
-      if (sent) {
-        console.log(`  [chat] DM to ${targetPeerId.slice(0, 12)}… sent DIRECT (no relay involved)`);
-        return { status: "ok", via: "direct" };
-      }
-    }
-  }
-
-  // ── Attempt 2: relay-mediated fallback ──────────────────────────
-  // Only reached if direct connection could not be established within
-  // the timeout (e.g. symmetric NAT on one or both sides) — this is
-  // the expected, normal path for that fraction of connections, not
-  // an error.
-  const [relayHost, relayPort] = RELAY_ADDR.split(":");
-  try {
-    const result = await httpPost(relayHost, parseInt(relayPort, 10) || 49736, "/chat/dm", {
-      targetPeerId,
-      fromPeerId: PEER_ID,
-      body,
-      dwebLink: dwebLink || null,
-    });
-    console.log(`  [chat] DM to ${targetPeerId.slice(0, 12)}… sent via RELAY (direct connection unavailable)`);
-    return { ...result, via: "relay" };
-  } catch (e) {
-    return { status: "error", message: e.message };
-  }
-}
-
-async function sendChatRoomMessage(body, dwebLink) {
-  const [relayHost, relayPort] = RELAY_ADDR.split(":");
-  try {
-    return await httpPost(relayHost, parseInt(relayPort, 10) || 49736, "/chat/room", {
-      fromPeerId: PEER_ID,
-      body,
-      dwebLink: dwebLink || null,
-    });
-  } catch (e) {
-    return { status: "error", message: e.message };
-  }
-}
-
-// Called after (re)registering with the relay — picks up any DMs that
-// queued while we were offline, so reconnecting doesn't lose messages
-// (mirrors why chatDMs is never cleared on the relay's stale-peer cleanup).
-async function fetchQueuedChatDMs() {
-  const [relayHost, relayPort] = RELAY_ADDR.split(":");
-  try {
-    const result = await httpGet(relayHost, parseInt(relayPort, 10) || 49736, `/chat/dm?peerId=${encodeURIComponent(PEER_ID)}`);
-    if (result && result.status === "ok" && Array.isArray(result.messages) && result.messages.length > 0) {
-      for (const m of result.messages) {
-        chatInbox.push({ channel: "dm", fromPeerId: m.fromPeerId, body: m.body, dwebLink: m.dwebLink || null, timestamp: m.timestamp });
-      }
-      console.log(`  [chat] Fetched ${result.messages.length} queued DM(s) after reconnect`);
-    }
-  } catch (e) {
-    // relay unreachable — nothing to do, will retry on next successful register
   }
 }
 
@@ -1508,64 +1297,6 @@ function handleRequest(req, res) {
       count: signals.length,
       signals,
     });
-  }
-
-  // ── CHAT: SEND (dm or room) ─────────────────────────────────
-  if (pathname === "/api/chat/send" && req.method === "POST") {
-    let body = "";
-    req.on("data", c => body += c);
-    req.on("end", async () => {
-      try {
-        const data = JSON.parse(body);
-        const text = typeof data.body === "string" ? data.body : "";
-        if (!text.trim()) {
-          return jsonResponse(res, 400, { status: "error", message: "Message body is required" });
-        }
-        let result;
-        if (data.mode === "dm") {
-          if (!data.targetPeerId) {
-            return jsonResponse(res, 400, { status: "error", message: "targetPeerId is required for a direct message" });
-          }
-          result = await sendChatDM(data.targetPeerId, text, data.dwebLink);
-        } else {
-          result = await sendChatRoomMessage(text, data.dwebLink);
-        }
-        return jsonResponse(res, result.status === "ok" ? 200 : 502, result);
-      } catch (e) {
-        return jsonResponse(res, 400, { status: "error", message: "Invalid JSON" });
-      }
-    });
-    return;
-  }
-
-  // ── CHAT: INBOX POLL ─────────────────────────────────────────
-  // Drains messages that arrived over the relay WS (both DMs and room
-  // broadcasts) since the last time the frontend checked in.
-  if (pathname === "/api/chat/inbox" && req.method === "GET") {
-    const messages = chatInbox.splice(0, chatInbox.length);
-    return jsonResponse(res, 200, {
-      status: "ok",
-      count: messages.length,
-      messages,
-    });
-  }
-
-  // ── CHAT: ROOM HISTORY ────────────────────────────────────────
-  // Proxies the relay's lobby history so the frontend never needs to
-  // know the relay's address directly.
-  if (pathname === "/api/chat/room/history" && req.method === "GET") {
-    const [relayHost, relayPort] = RELAY_ADDR.split(":");
-    const since = url.searchParams.get("since");
-    const qs = since ? `?since=${encodeURIComponent(since)}` : "";
-    (async () => {
-      try {
-        const result = await httpGet(relayHost, parseInt(relayPort, 10) || 49736, `/chat/room${qs}`);
-        jsonResponse(res, 200, result);
-      } catch (e) {
-        jsonResponse(res, 502, { status: "error", message: `Could not reach relay: ${e.message}` });
-      }
-    })();
-    return;
   }
 
   // ── RELAY CONNECT ──────────────────────────────────────────
@@ -2712,20 +2443,15 @@ if (window.name !== "dweb-browser") setTimeout(() => location.reload(), 30000);
     });
   }
 
-  // ── GET /api/proxy/fetch?url=...&peerId=...&port=... ─────────
-  // Fetches a resolved dweb:// target's content and streams the body
-  // back to the browser UI so BrowserView can render it inline.
-  //
-  // If peerId is supplied (the domain was resolved from a remote peer),
-  // this tries a direct WebRTC data-channel request first — the peer's
-  // real IP is never needed for that path, which is what makes this
-  // work across different networks. `url` is still required and used
-  // as the fallback (LAN-only) path if direct isn't available, and as
-  // the sole path for same-instance content (peerId omitted).
+  // ── GET /api/proxy/fetch?url=... ─────────────────────────────
+  // Fetches a resolved dweb:// target's content (from a bound local port,
+  // or a remote peer's bound port) and streams the body back to the
+  // browser UI so BrowserView can render it inline. This endpoint was
+  // referenced by the frontend but never implemented, so every resolved
+  // domain fell through to the "cannot proxy content" placeholder card
+  // instead of showing the actual hosted page.
   if (pathname === "/api/proxy/fetch" && req.method === "GET") {
     const targetUrl = url.searchParams.get("url");
-    const remotePeerId = url.searchParams.get("peerId");
-    const remotePort = url.searchParams.get("port");
     if (!targetUrl) return jsonResponse(res, 400, { error: "url query parameter required" });
 
     let parsedTarget;
@@ -2735,56 +2461,34 @@ if (window.name !== "dweb-browser") setTimeout(() => location.reload(), 30000);
     if (parsedTarget.protocol !== "http:" && parsedTarget.protocol !== "https:") {
       return jsonResponse(res, 400, { error: "Only http/https targets are supported" });
     }
-    const reqPath = parsedTarget.pathname + parsedTarget.search;
 
-    (async () => {
-      // ── Attempt 1: direct P2P fetch over an existing/new data channel ──
-      if (remotePeerId && remotePeerId !== PEER_ID && remotePort && webrtc && webrtc.available) {
-        const existing = webrtc.getActiveChannel(remotePeerId);
-        const channel = existing || await webrtc.connect(remotePeerId);
-        if (channel) {
-          const result = await channel.request("proxy_fetch", { port: parseInt(remotePort, 10), path: reqPath });
-          if (result.ok && result.payload && !result.payload.error) {
-            console.log(`  [proxy] Fetched '${reqPath}' from ${remotePeerId.slice(0, 12)}… DIRECT (no relay/LAN hop involved)`);
-            res.writeHead(result.payload.status || 200, {
-              "Content-Type": result.payload.contentType || "text/html; charset=utf-8",
-              "Access-Control-Allow-Origin": "*",
-            });
-            res.end(result.payload.body || "");
-            return;
-          }
-        }
-      }
+    const mod = parsedTarget.protocol === "https:" ? https : http;
+    const options = {
+      hostname: parsedTarget.hostname,
+      port: parsedTarget.port || (parsedTarget.protocol === "https:" ? 443 : 80),
+      path: parsedTarget.pathname + parsedTarget.search,
+      method: "GET",
+      headers: { "User-Agent": "dweb-browser-proxy/0.1.0" },
+      timeout: 8000,
+    };
 
-      // ── Attempt 2: raw HTTP fetch (LAN-only, or same-instance content) ──
-      const mod = parsedTarget.protocol === "https:" ? https : http;
-      const options = {
-        hostname: parsedTarget.hostname,
-        port: parsedTarget.port || (parsedTarget.protocol === "https:" ? 443 : 80),
-        path: reqPath,
-        method: "GET",
-        headers: { "User-Agent": "dweb-browser-proxy/0.1.0" },
-        timeout: 8000,
-      };
-
-      const proxyReq = mod.request(options, (proxyRes) => {
-        const status = proxyRes.statusCode || 502;
-        const contentType = proxyRes.headers["content-type"] || "text/html; charset=utf-8";
-        res.writeHead(status, {
-          "Content-Type": contentType,
-          "Access-Control-Allow-Origin": "*",
-        });
-        proxyRes.pipe(res);
+    const proxyReq = mod.request(options, (proxyRes) => {
+      const status = proxyRes.statusCode || 502;
+      const contentType = proxyRes.headers["content-type"] || "text/html; charset=utf-8";
+      res.writeHead(status, {
+        "Content-Type": contentType,
+        "Access-Control-Allow-Origin": "*",
       });
-      proxyReq.on("error", (e) => {
-        jsonResponse(res, 502, { error: `Could not reach host: ${e.message}` });
-      });
-      proxyReq.on("timeout", () => {
-        proxyReq.destroy();
-        jsonResponse(res, 504, { error: "Upstream host timed out" });
-      });
-      proxyReq.end();
-    })();
+      proxyRes.pipe(res);
+    });
+    proxyReq.on("error", (e) => {
+      jsonResponse(res, 502, { error: `Could not reach host: ${e.message}` });
+    });
+    proxyReq.on("timeout", () => {
+      proxyReq.destroy();
+      jsonResponse(res, 504, { error: "Upstream host timed out" });
+    });
+    proxyReq.end();
     return;
   }
 
@@ -3127,9 +2831,6 @@ server.listen(PORT, "0.0.0.0", () => {
   lines.push(`  \u2551    /relay/peers   - List peers from relay         \u2551`);
   lines.push(`  \u2551    /relay/signal  - Send signal to peer           \u2551`);
   lines.push(`  \u2551    /relay/signals - Poll incoming signals         \u2551`);
-  lines.push(`  \u2551    /api/chat/send - Send a chat message (dm/room) \u2551`);
-  lines.push(`  \u2551    /api/chat/inbox - Poll incoming chat messages   \u2551`);
-  lines.push(`  \u2551    /api/chat/room/history - Get lobby history     \u2551`);
   lines.push(`  \u2551    /api/service/start - Start a managed service    \u2551`);
   lines.push(`  \u2551    /api/service/stop  - Stop a managed service     \u2551`);
   lines.push(`  \u2551    /api/services      - List managed services      \u2551`);
@@ -3146,10 +2847,6 @@ server.listen(PORT, "0.0.0.0", () => {
 
   // Restore persisted services from disk
   restoreServices();
-
-  // Set up the direct P2P transport (WebRTC via node-datachannel), using
-  // the relay purely for signaling — see webrtc-transport.cjs
-  initWebRTCManager();
 
   // Register with relay (HTTP)
   registerWithRelay();

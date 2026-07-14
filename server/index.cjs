@@ -178,6 +178,22 @@ async function main() {
     setInterval(heartbeatUpstream, 30000);
   }
 
+  // Keep this instance's own peer entry alive.
+  //
+  // ROOT CAUSE (relay peer-count flapping, "Active peers: 1 | WS connected: 0"
+  // followed by "Active peers: 0"): the self-peer record above is inserted
+  // ONCE at startup with lastSeen = Date.now() and is never touched again.
+  // cleanupStalePeers() (below) removes any peer whose lastSeen is older
+  // than PEER_TTL_MS (60s default). With nothing re-touching the self entry,
+  // this node's own peer record silently expires out of its own `peers` map
+  // ~60 seconds after every start/restart — independent of whether any real
+  // remote peer ever connects. This interval (well under the 60s TTL)
+  // refreshes lastSeen so the self entry never goes stale.
+  setInterval(() => {
+    const self = peers.get(PEER_ID);
+    if (self) self.touch();
+  }, 20000);
+
   // Periodic peer cleanup
   setInterval(cleanupStalePeers, 15000);
 

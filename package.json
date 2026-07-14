@@ -21,6 +21,7 @@
     "@tauri-apps/plugin-process": "^2.0.0",
     "@tauri-apps/plugin-shell": "^2.0.0",
     "lucide-react": "^0.400.0",
+    "node-datachannel": "^0.32.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.0.0"
@@ -34,7 +35,7 @@
     "@vitejs/plugin-react": "^4.0.0",
     "happy-dom": "^20.10.6",
     "jsdom": "^29.1.1",
-    "typescript": "^5.5.0",
+    "typescript": "^5.9.3",
     "vite": "^6.0.0",
     "vitest": "^4.1.9"
   }
