@@ -1,4 +1,4 @@
-# dweb — P2P Self-Hosting OS
+# dweb — P2P Self Domain Hosting OS
 
 > **One install. Every stack. Your own internet.**
 
