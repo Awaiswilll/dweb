@@ -15,6 +15,8 @@ import P2PTransfer from "./views/P2PTransfer";
 import {
   Plus, Radio, RefreshCw, Wifi,
 } from "lucide-react";
+import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import ShortcutsHelpModal from "./components/ShortcutsHelpModal";
 
 function AppContent() {
   const { addNotification } = useNotifications();
@@ -38,6 +40,12 @@ function AppContent() {
     }
     setCurrentView(view);
   }, []);
+
+  /** Keyboard shortcuts */
+  const { helpVisible, closeHelp, shortcuts } = useKeyboardShortcuts({
+    onNavigate: handleNavigate,
+    onRefresh: () => window.location.reload(),
+  });
 
   /** Quick Actions */
   const quickActions = [
@@ -105,6 +113,7 @@ function AppContent() {
           {renderView()}
         </main>
       </div>
+      {helpVisible && <ShortcutsHelpModal shortcuts={shortcuts} onClose={closeHelp} />}
     </div>
   );
 }
