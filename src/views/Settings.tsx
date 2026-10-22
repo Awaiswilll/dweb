@@ -26,8 +26,30 @@ export default function Settings() {
   /* ─── General ──────────────────────────────────────────── */
   const GeneralTab = () => {
     const [autoStart, setAutoStart] = useState(false);
-    const [theme, setTheme] = useState<"dark" | "light" | "system">("dark");
     const [minToTray, setMinToTray] = useState(true);
+    const [theme, setTheme] = useState<"dark" | "light" | "system">(() => {
+      return (localStorage.getItem("dweb-theme") as "dark" | "light" | "system") || "dark";
+    });
+
+    useEffect(() => {
+      localStorage.setItem("dweb-theme", theme);
+      if (theme === "system") {
+        const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+        document.documentElement.setAttribute("data-theme", prefersDark ? "dark" : "light");
+      } else {
+        document.documentElement.setAttribute("data-theme", theme);
+      }
+    }, [theme]);
+
+    useEffect(() => {
+      if (theme !== "system") return;
+      const mq = window.matchMedia("(prefers-color-scheme: dark)");
+      const handler = (e: MediaQueryListEvent) => {
+        document.documentElement.setAttribute("data-theme", e.matches ? "dark" : "light");
+      };
+      mq.addEventListener("change", handler);
+      return () => mq.removeEventListener("change", handler);
+    }, [theme]);
     return (
       <div className="settings-section">
         <h4>Application</h4>
