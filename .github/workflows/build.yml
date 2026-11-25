@@ -347,7 +347,7 @@ jobs:
             /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0.26100.0
           if ($LASTEXITCODE -ne 0) { throw "MSBuild failed with exit code $LASTEXITCODE" }
 
-          $launcherExe = 'build\launcher\x64\Release\launcher.exe'
+          $launcherExe = 'build\launcher\DistroLauncher\x64\Release\launcher.exe'
           if (-not (Test-Path $launcherExe)) { throw 'Launcher executable was not built' }
 
           $stage = 'build\msix-stage'
