@@ -1,0 +1,44 @@
+name: Build WSL MSIX
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-wsl-msix:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Stage WSL MSIX payload
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $src = 'packaging/win32/dweb-wsl-distro'
+          $stage = 'build/msix-stage'
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item "$src/Package.appxmanifest" "$stage/Package.appxmanifest"
+          Copy-Item -Recurse "$src/Assets" "$stage/Assets" -Force
+          Copy-Item 'packaging/wsl/dweb-wsl-rootfs.tar.gz' "$stage/dweb-wsl-rootfs.tar.gz"
+          Copy-Item "$stage/dweb-wsl-rootfs.tar.gz" "$stage/dweb.wsl"
+          Get-ChildItem -Recurse $stage | Select-Object FullName, Length
+
+      - name: Pack unsigned MSIX
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $candidates = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\MakeAppx.exe' -ErrorAction SilentlyContinue
+          if (-not $candidates) { throw 'MakeAppx.exe not found in Windows SDK' }
+          $makeappx = ($candidates | Sort-Object FullName -Descending | Select-Object -First 1).FullName
+          New-Item -ItemType Directory -Force -Path 'build/msix-out' | Out-Null
+          & $makeappx pack /d 'build/msix-stage' /p 'build/msix-out/dweb-wsl_0.1.0_x64.msix' /l
+          if ($LASTEXITCODE -ne 0) { throw "MakeAppx failed with exit code $LASTEXITCODE" }
+          Get-Item 'build/msix-out/dweb-wsl_0.1.0_x64.msix' | Select-Object FullName, Length
+
+      - name: Upload MSIX
+        uses: actions/upload-artifact@v4
+        with:
+          name: dweb-wsl-msix-x64
+          path: build/msix-out/*.msix
+          if-no-files-found: error
