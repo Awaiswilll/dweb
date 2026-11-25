@@ -256,7 +256,8 @@ jobs:
           $src = 'packaging/win32/dweb-wsl-distro'
           $stage = 'build/msix-stage'
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
-          Copy-Item "$src/Package.appxmanifest" "$stage/Package.appxmanifest"
+          Copy-Item "$src/Package.appxmanifest" "$stage/AppxManifest.xml"
+          Copy-Item "$src/distro-config.xml" "$stage/distro-config.xml"
           Copy-Item -Recurse "$src/Assets" "$stage/Assets" -Force
           Copy-Item 'packaging/wsl/dweb-wsl-rootfs.tar.gz' "$stage/dweb-wsl-rootfs.tar.gz"
           Copy-Item "$stage/dweb-wsl-rootfs.tar.gz" "$stage/dweb.wsl"
