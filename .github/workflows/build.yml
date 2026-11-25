@@ -353,7 +353,8 @@ jobs:
           $stage = 'build\msix-stage'
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
           Copy-Item 'build\launcher\DistroLauncher-Appx\MyDistro.appxmanifest' "$stage\AppxManifest.xml" -Force
-          Copy-Item -Recurse 'build\launcher\DistroLauncher-Appx\Assets' "$stage\Assets" -Force
+          Copy-Item -Recurse 'packaging\win32\dweb-wsl-distro\Assets' "$stage\Assets" -Force
+          Copy-Item "$stage\Assets\WideTile.png" "$stage\Assets\Wide310x150Logo.png" -Force
           Copy-Item $launcherExe "$stage\dweb.exe" -Force
           Copy-Item 'build\launcher\x64\install.tar.gz' "$stage\install.tar.gz" -Force
 
