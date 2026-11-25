@@ -54,6 +54,8 @@ jobs:
     needs: lint
     runs-on: windows-latest
     if: github.event_name != 'pull_request'
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
