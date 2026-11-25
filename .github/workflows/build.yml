@@ -259,6 +259,7 @@ jobs:
           Copy-Item "$src/Package.appxmanifest" "$stage/AppxManifest.xml"
           Copy-Item "$src/distro-config.xml" "$stage/distro-config.xml"
           Copy-Item -Recurse "$src/Assets" "$stage/Assets" -Force
+          Copy-Item "$env:SystemRoot\System32\wsl.exe" "$stage\wsl.exe"
           Copy-Item 'packaging/wsl/dweb-wsl-rootfs.tar.gz' "$stage/dweb-wsl-rootfs.tar.gz"
           Copy-Item "$stage/dweb-wsl-rootfs.tar.gz" "$stage/dweb.wsl"
           Get-ChildItem -Recurse $stage | Select-Object FullName, Length
