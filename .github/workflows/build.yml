@@ -341,19 +341,28 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          msbuild 'build\launcher\DistroLauncher.sln' `
+          msbuild 'build\launcher\DistroLauncher\DistroLauncher.vcxproj' `
             /t:Build /m /nr:false `
             /p:Configuration=Release /p:Platform=x64 `
-            /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0.26100.0 `
-            /p:AppxBundle=Never /p:AppxAutoIncrementPackageRevision=False `
-            /p:PackageCertificateKeyFile= /p:PackageCertificateThumbprint=
+            /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0.26100.0
           if ($LASTEXITCODE -ne 0) { throw "MSBuild failed with exit code $LASTEXITCODE" }
 
-          $appx = Get-ChildItem -Path 'build\launcher\x64\Release' -Filter '*.appx' -Recurse |
-            Sort-Object FullName -Descending | Select-Object -First 1
-          if (-not $appx) { throw 'No AppX package was produced by MSBuild' }
+          $launcherExe = 'build\launcher\x64\Release\launcher.exe'
+          if (-not (Test-Path $launcherExe)) { throw 'Launcher executable was not built' }
+
+          $stage = 'build\msix-stage'
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item 'build\launcher\DistroLauncher-Appx\MyDistro.appxmanifest' "$stage\AppxManifest.xml" -Force
+          Copy-Item -Recurse 'build\launcher\DistroLauncher-Appx\Assets' "$stage\Assets" -Force
+          Copy-Item $launcherExe "$stage\dweb.exe" -Force
+          Copy-Item 'build\launcher\x64\install.tar.gz' "$stage\install.tar.gz" -Force
+
+          $candidates = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\MakeAppx.exe' -ErrorAction SilentlyContinue
+          if (-not $candidates) { throw 'MakeAppx.exe not found in Windows SDK' }
+          $makeappx = ($candidates | Sort-Object FullName -Descending | Select-Object -First 1).FullName
           New-Item -ItemType Directory -Force -Path 'build\msix-out' | Out-Null
-          Copy-Item $appx.FullName 'build\msix-out\dweb-wsl_0.1.0_x64.msix' -Force
+          & $makeappx pack /d $stage /p 'build\msix-out\dweb-wsl_0.1.0_x64.msix' /l
+          if ($LASTEXITCODE -ne 0) { throw "MakeAppx failed with exit code $LASTEXITCODE" }
           Get-Item 'build\msix-out\dweb-wsl_0.1.0_x64.msix' | Select-Object FullName, Length
 
       - name: Validate MSIX
